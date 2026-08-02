@@ -32,6 +32,7 @@ public record EnvConfig(
 
 
 	public static final String TOOLING_ACCOUNT = "237076104209";
+	public static final String TOOLING_REGION = "us-east-1";
 
 	public Environment awsEnvironment() {
 		return Environment.builder().account(account).region(region).build();
