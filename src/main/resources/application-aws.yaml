@@ -1,0 +1,12 @@
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    root: INFO
+
+spring:
+  cloud:
+    aws:
+      region:
+        static: us-east-1

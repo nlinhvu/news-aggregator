@@ -1,26 +1,27 @@
 services:
-  cassandra:
-    image: 'cassandra:latest'
+  floci:
+    image: 'floci/floci:latest'
+    ports:
+      - '4566:4566'
     environment:
-      - 'CASSANDRA_DC=dc1'
-      - 'CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch'
+      - 'FLOCI_DEFAULT_REGION=us-east-1'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_floci/init']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles: ['lambda']
+    build: .
     ports:
-      - '9042'
-  grafana-lgtm:
-    image: 'grafana/otel-lgtm:latest'
-    ports:
-      - '3000:3000'
-      - '4317'
-      - '4318'
-  ollama:
-    image: 'ollama/ollama:latest'
-    ports:
-      - '11434'
-  postgres:
-    image: 'postgres:latest'
+      - '8080:8080'
     environment:
-      - 'POSTGRES_DB=mydatabase'
-      - 'POSTGRES_PASSWORD=secret'
-      - 'POSTGRES_USER=myuser'
-    ports:
-      - '5432'
+      - 'SPRING_PROFILES_ACTIVE=local'
+      - 'NEWS_COMMIT_SHA=local-compose'
+      # application-local.yaml trỏ localhost:4566 để ./gradlew bootRun chạy được trên host.
+      # Trong compose, localhost là chính container app — phải trỏ sang service floci.
+      - 'SPRING_CLOUD_AWS_ENDPOINT=http://floci:4566'
+    depends_on:
+      floci:
+        condition: service_healthy

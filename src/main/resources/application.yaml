@@ -1,3 +1,6 @@
 spring:
   application:
     name: news-aggregator
+
+news:
+  commit-sha: ${NEWS_COMMIT_SHA:local}

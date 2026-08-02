@@ -2,7 +2,6 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.1.0'
 	id 'io.spring.dependency-management' version '1.1.7'
-	id 'org.graalvm.buildtools.native' version '1.1.1'
 }
 
 group = 'dev.linhvu'
@@ -21,7 +20,24 @@ repositories {
 ext {
 	set('springAiVersion', "2.0.0")
 	set('springCloudVersion', "2025.1.2")
+	set('springCloudAwsVersion', "4.1.0")
 	set('springModulithVersion', "2.1.0")
+	set('togglzVersion', "4.6.2")
+	set('flociTestcontainersVersion', "2.13.0")
+}
+
+sourceSets {
+	seed {
+		java.srcDir 'src/seed/java'
+		resources.srcDir 'src/seed/resources'
+		compileClasspath += sourceSets.main.output
+		runtimeClasspath += sourceSets.main.output
+	}
+}
+
+configurations {
+	seedImplementation.extendsFrom implementation
+	seedRuntimeOnly.extendsFrom runtimeOnly
 }
 
 dependencies {
@@ -42,12 +58,15 @@ dependencies {
 //	implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
 //	implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
 //	implementation 'org.springframework.modulith:spring-modulith-observability-api'
-//	implementation 'org.springframework.modulith:spring-modulith-starter-core'
+	implementation 'org.springframework.modulith:spring-modulith-starter-core'
 //	implementation 'org.springframework.modulith:spring-modulith-starter-jdbc'
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
+
 //	runtimeOnly 'org.postgresql:postgresql'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-actuator'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-observability-core'
-//	runtimeOnly 'org.springframework.modulith:spring-modulith-runtime'
+	runtimeOnly 'org.springframework.modulith:spring-modulith-runtime'
+
 //	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-batch-jdbc-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-batch-test'
@@ -59,15 +78,16 @@ dependencies {
 //	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-websocket-test'
-//	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 //	testImplementation 'org.springframework.ai:spring-ai-spring-boot-testcontainers'
 //	testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-stub-runner'
-//	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
+	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 //	testImplementation 'org.testcontainers:testcontainers-cassandra'
 //	testImplementation 'org.testcontainers:testcontainers-grafana'
-//	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 //	testImplementation 'org.testcontainers:testcontainers-ollama'
 //	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation "io.floci:spring-boot-testcontainers-floci:${flociTestcontainersVersion}"
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -76,9 +96,30 @@ dependencyManagement {
 		mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
 		mavenBom "org.springframework.modulith:spring-modulith-bom:${springModulithVersion}"
 		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+		mavenBom "io.awspring.cloud:spring-cloud-aws-dependencies:${springCloudAwsVersion}"
 	}
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+tasks.register('seedRun', JavaExec) {
+	group = 'application'
+	description = 'Seed data into DynamoDB of destination environment'
+	classpath = sourceSets.seed.runtimeClasspath
+	mainClass = 'dev.linhvu.seed.SeedApplication'
+}
+
+tasks.named('bootBuildImage') {
+	imageName = 'news-aggregator:local'
+	builder = 'paketobuildpacks/builder-noble-java-tiny:latest'
+	environment = [
+			'BP_JVM_VERSION'         : '25',
+			// Disabled due to paketo-buildpacks/spring-boot#581 (Java 25 + Boot 4):
+			// "unable to contribute spring-performance layer". Master §8.2 accepts
+			// the cold start, so this is a valid baseline. Re-enable when the issue
+			// is fixed — see ADR-0008 §8.
+			'BP_JVM_AOTCACHE_ENABLED': 'false'
+	]
 }

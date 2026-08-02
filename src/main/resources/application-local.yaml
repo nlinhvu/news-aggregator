@@ -1,0 +1,9 @@
+spring:
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+      endpoint: http://localhost:4566
+      credentials:
+        access-key: test
+        secret-key: test
