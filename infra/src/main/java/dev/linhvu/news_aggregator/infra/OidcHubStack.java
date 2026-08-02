@@ -6,6 +6,8 @@ import java.util.Map;
 import software.amazon.awscdk.CfnOutput;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
+import software.amazon.awscdk.services.ecr.IRepository;
+import software.amazon.awscdk.services.ecr.Repository;
 import software.amazon.awscdk.services.iam.CfnOIDCProvider;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Role;
@@ -32,10 +34,10 @@ public class OidcHubStack extends Stack {
 
 		Role buildRole = githubRole(provider, "GhaBuildRole",
 				"repo:" + REPO + ":ref:refs/heads/main");
-		buildRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("ecr:GetAuthorizationToken"))
-				.resources(List.of("*"))
-				.build());
+
+		IRepository repo = Repository.fromRepositoryName(
+				this, "AppRepository", EnvConfig.ECR_REPOSITORY_NAME);
+		repo.grantPush(buildRole);
 
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			String env = cfg.tagPrefix();
@@ -66,17 +68,14 @@ public class OidcHubStack extends Stack {
 		String repo = repoPart.split("/")[1];
 		String immutableSub = "repo:" + owner + "@*/" + repo + "@*:" + suffix;
 
+		Map<String, Object> conditions = Map.of(
+				"StringEquals", Map.of(OIDC_HOST + ":aud", "sts.amazonaws.com"),
+				"StringLike", Map.of(OIDC_HOST + ":sub", List.of(subPrefix, immutableSub)));
+
 		return Role.Builder.create(this, id)
 				.roleName(id)
 				.maxSessionDuration(software.amazon.awscdk.Duration.hours(1))
-				.assumedBy(new WebIdentityPrincipal(
-						provider.getAttrArn(),
-						Map.of(
-								"StringEquals", Map.of(
-										OIDC_HOST + ":aud", "sts.amazonaws.com",
-										OIDC_HOST + ":sub", subPrefix),
-								"StringLike", Map.of(
-										OIDC_HOST + ":sub", immutableSub))))
+				.assumedBy(new WebIdentityPrincipal(provider.getAttrArn(), conditions))
 				.build();
 	}
 }

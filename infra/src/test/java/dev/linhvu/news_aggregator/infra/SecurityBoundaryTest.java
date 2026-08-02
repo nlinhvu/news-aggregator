@@ -15,6 +15,11 @@ class SecurityBoundaryTest {
 		return Template.fromStack(new OidcHubStack(app, "OidcHubStack"));
 	}
 
+	private Template registry() {
+		App app = new App();
+		return Template.fromStack(new RegistryStack(app, "RegistryStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -31,6 +36,12 @@ class SecurityBoundaryTest {
 	 * Trust policy phải ghim theo `environment:<env>`, và phải viết theo
 	 * IMMUTABLE SUBJECT CLAIM — repo tạo sau 15/07/2026 nên GitHub tự động
 	 * phát `sub` dạng repo:owner@<id>/repo@<id>:… (master §8.1).
+	 *
+	 * `objectEquals` chứ không phải `objectLike` là CỐ Ý. Hai dạng `sub` phải nằm
+	 * chung một key `StringLike` để OR với nhau; tách dạng cũ sang `StringEquals`
+	 * thì hai condition block AND lại và trust policy thành BẤT KHẢ THI — không
+	 * token nào assume được, mà `objectLike` vẫn xanh vì nó chỉ kiểm tra sự tồn
+	 * tại. Assert chặt ở đây là thứ duy nhất bắt được lỗi đó.
 	 */
 	@Test
 	void trust_policy_cua_prod_ghim_theo_environment_prod() {
@@ -38,15 +49,111 @@ class SecurityBoundaryTest {
 				"AssumeRolePolicyDocument", Match.objectLike(Map.of(
 						"Statement", Match.arrayWith(List.of(
 								Match.objectLike(Map.of(
-										"Condition", Match.objectLike(Map.of(
-												"StringEquals", Match.objectLike(Map.of(
+										"Action", "sts:AssumeRoleWithWebIdentity",
+										"Condition", Match.objectEquals(Map.of(
+												"StringEquals", Map.of(
+														"token.actions.githubusercontent.com:aud",
+														"sts.amazonaws.com"),
+												"StringLike", Map.of(
 														"token.actions.githubusercontent.com:sub",
-														Match.stringLikeRegexp(".*:environment:prod$")
-												))
+														List.of(
+																"repo:nlinhvu/news-aggregator:environment:prod",
+																"repo:nlinhvu@*/news-aggregator@*:environment:prod"))
 										))
 								))
 						))
 				))
 		)));
+	}
+
+	/**
+	 * `app-deploy.yml` assume `GhaBuildRole` rồi `docker push` THẲNG, không chain
+	 * qua role nào nữa. Nếu quyền push không nằm ở chính role này thì `docker
+	 * login` vẫn qua (nhờ `ecr:GetAuthorizationToken`) và `docker push` mới chết ở
+	 * `InitiateLayerUpload` — lỗi hiện ra cách xa nguyên nhân.
+	 */
+	@Test
+	void build_role_tu_no_push_duoc_vao_ecr() {
+		oidcHub().hasResourceProperties("AWS::IAM::Policy", Match.objectLike(Map.of(
+				"PolicyDocument", Match.objectLike(Map.of(
+						"Statement", Match.arrayWith(List.of(
+								Match.objectLike(Map.of(
+										"Action", Match.arrayWith(List.of(
+												"ecr:InitiateLayerUpload", "ecr:PutImage")),
+										"Resource", Match.objectLike(Map.of(
+												"Fn::Join", Match.arrayWith(List.of(
+														Match.arrayWith(List.of(
+																":repository/news-aggregator"))))
+										))
+								))
+						))
+				))
+		)));
+	}
+
+	/**
+	 * Hệ quả của test trên: registry không cần role trung gian nào. Thêm một role
+	 * chỉ để cấp quyền push trong CÙNG account không tạo thêm ranh giới, chỉ thêm
+	 * một hop nữa để quên.
+	 */
+	@Test
+	void registry_khong_tao_role_nao() {
+		registry().resourceCountIs("AWS::IAM::Role", 0);
+	}
+
+	/**
+	 * Repo policy cần ĐÚNG HAI statement, không phải một.
+	 *
+	 * `CrossAccountPermission` cho principal là ba account môi trường là cái
+	 * ai cũng nhớ. Cái hay quên là `LambdaECRImageCrossAccountRetrievalPolicy`
+	 * cho principal `lambda.amazonaws.com` — Lambda tự fetch lại image để
+	 * re-optimize khi function nằm không quá lâu và chuyển sang Inactive.
+	 *
+	 * Thiếu statement thứ hai thì MỌI THỨ CHẠY BÌNH THƯỜNG LÚC DEPLOY, và
+	 * hỏng sau nhiều tuần khi function không reactivate được. Failure mode
+	 * chậm và rất khó truy — nên nó phải bị bắt ở đây.
+	 */
+	@Test
+	void ecr_repo_policy_co_du_hai_statement() {
+		registry().hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
+				"RepositoryPolicyText", Match.objectLike(Map.of(
+						"Statement", Match.arrayWith(List.of(
+								Match.objectLike(Map.of("Sid", "CrossAccountPermission")),
+								Match.objectLike(Map.of(
+										"Sid", "LambdaECRImageCrossAccountRetrievalPolicy"))
+						))
+				))
+		)));
+	}
+
+	/** Tag IMMUTABLE toàn bộ — master §8.1. Deploy tham chiếu bằng digest. */
+	@Test
+	void ecr_tag_immutable() {
+		registry().hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
+				"ImageTagMutability", "IMMUTABLE"
+		)));
+	}
+
+	/**
+	 * Lifecycle rule phải đếm RIÊNG theo tiền tố từng môi trường.
+	 * Với một registry dùng chung, đếm gộp toàn repo thì một tuần push nhiều
+	 * ở `dev` đủ đẩy digest mà PROD ĐANG CHẠY ra khỏi cửa sổ — và AWS ghi rõ
+	 * image bị xoá khiến function chuyển sang trạng thái Failed.
+	 */
+	@Test
+	void lifecycle_rule_scope_theo_tag_prefix_tung_moi_truong() {
+		Template registry = registry();
+
+		// Mỗi prefix phải là thành viên DUY NHẤT của tagPrefixList trong rule
+		// của nó. Gộp cả ba vào một list — ["prod-","qa-","dev-"] — chính là
+		// cái đếm gộp mà javadoc trên cảnh báo, nên assert phải bắt được nó.
+		for (String prefix : List.of("prod-", "qa-", "dev-")) {
+			registry.hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
+					"LifecyclePolicy", Match.objectLike(Map.of(
+							"LifecyclePolicyText", Match.stringLikeRegexp(
+									".*\"tagPrefixList\":\\[\"" + prefix + "\"\\].*")
+					))
+			)));
+		}
 	}
 }

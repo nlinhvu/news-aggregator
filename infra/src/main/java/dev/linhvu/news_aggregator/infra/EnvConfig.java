@@ -33,6 +33,7 @@ public record EnvConfig(
 
 	public static final String TOOLING_ACCOUNT = "237076104209";
 	public static final String TOOLING_REGION = "us-east-1";
+	public static final String ECR_REPOSITORY_NAME = "news-aggregator";
 
 	public Environment awsEnvironment() {
 		return Environment.builder().account(account).region(region).build();

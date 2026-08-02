@@ -16,6 +16,7 @@ public class NewsAggregatorApp {
                 .build();
 
         new OidcHubStack(app, "OidcHubStack", toolingProps);
+        new RegistryStack(app, "RegistryStack", toolingProps);
 
         new AppStage(app, EnvConfig.DEV);
         new AppStage(app, EnvConfig.QA);
