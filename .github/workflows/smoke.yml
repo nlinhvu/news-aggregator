@@ -1,0 +1,57 @@
+name: Smoke
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      site_url:
+        required: true
+        type: string
+      expected_commit:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Chờ /api/health trả 200
+        run: |
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' \
+              "${{ inputs.site_url }}/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "OK sau $i lần thử"; cat /tmp/health.json; exit 0
+            fi
+            echo "lần $i: HTTP $code, chờ 15s"; sleep 15
+          done
+          echo "::error::/api/health không trả 200 sau 20 lần thử"; exit 1
+
+      - name: Xác nhận đúng commit vừa deploy
+        if: inputs.expected_commit != ''
+        run: |
+          actual=$(jq -r '.commit' /tmp/health.json)
+          if [ "$actual" != "${{ inputs.expected_commit }}" ]; then
+            echo "::error::commit không khớp — mong đợi ${{ inputs.expected_commit }}, nhận $actual"
+            echo "Nguyên nhân thường gặp: /api/* đang bị CloudFront cache."
+            exit 1
+          fi
+
+      - name: Function URL trực tiếp phải trả 403
+        run: |
+          url="${{ vars.FUNCTION_URL }}"
+          [ -z "$url" ] && { echo "::error::thiếu vars.FUNCTION_URL"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+          [ "$code" = "403" ] || { echo "::error::Function URL trả $code, phải 403"; exit 1; }
+
+      - name: /api/* không được cache
+        run: |
+          hdr=$(curl -sI "${{ inputs.site_url }}/api/health" | tr -d '\r')
+          echo "$hdr" | grep -qi 'x-cache: *Hit' \
+            && { echo "::error::/api/* đang bị cache"; exit 1; } || true
