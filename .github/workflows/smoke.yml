@@ -9,6 +9,9 @@ on:
       site_url:
         required: true
         type: string
+      function_url:
+        required: true
+        type: string
       expected_commit:
         required: false
         type: string
@@ -21,6 +24,9 @@ jobs:
   smoke:
     runs-on: ubuntu-24.04-arm
     steps:
+      # Lambda tối ưu image sau khi cập nhật; trong lúc đó function ở trạng
+      # thái Pending và request đầu sẽ lỗi. Retry có backoff là bắt buộc,
+      # không phải phòng xa.
       - name: Chờ /api/health trả 200
         run: |
           for i in $(seq 1 20); do
@@ -31,27 +37,36 @@ jobs:
             fi
             echo "lần $i: HTTP $code, chờ 15s"; sleep 15
           done
-          echo "::error::/api/health không trả 200 sau 20 lần thử"; exit 1
+          echo "::error::[${{ inputs.environment }}] /api/health không trả 200 sau 20 lần thử"; exit 1
 
       - name: Xác nhận đúng commit vừa deploy
         if: inputs.expected_commit != ''
         run: |
           actual=$(jq -r '.commit' /tmp/health.json)
           if [ "$actual" != "${{ inputs.expected_commit }}" ]; then
-            echo "::error::commit không khớp — mong đợi ${{ inputs.expected_commit }}, nhận $actual"
+            echo "::error::[${{ inputs.environment }}] commit không khớp — mong đợi ${{ inputs.expected_commit }}, nhận $actual"
             echo "Nguyên nhân thường gặp: /api/* đang bị CloudFront cache."
             exit 1
           fi
 
+      # Layer 7 tồn tại chính vì những khẳng định dưới đây KHÔNG kiểm chứng
+      # được ở local: emulator không cưỡng chế IAM và không có CloudFront.
+      #
+      # function_url phải là INPUT, không được đọc `vars.FUNCTION_URL` ở đây.
+      # Job này không có `environment:` nên `vars` chỉ thấy biến cấp repository,
+      # mà FUNCTION_URL là environment-scoped. Thêm `environment:` vào đây cũng
+      # không phải lời giải: prod có required reviewers, job sẽ chờ approval lần
+      # thứ hai sau khi đã approve lần deploy. Job deploy (vốn đã có
+      # `environment:`) đọc hộ rồi truyền xuống qua output.
       - name: Function URL trực tiếp phải trả 403
         run: |
-          url="${{ vars.FUNCTION_URL }}"
-          [ -z "$url" ] && { echo "::error::thiếu vars.FUNCTION_URL"; exit 1; }
+          url="${{ inputs.function_url }}"
+          [ -z "$url" ] && { echo "::error::[${{ inputs.environment }}] function_url rỗng — job deploy chưa xuất output, hoặc environment này thiếu vars.FUNCTION_URL"; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
-          [ "$code" = "403" ] || { echo "::error::Function URL trả $code, phải 403"; exit 1; }
+          [ "$code" = "403" ] || { echo "::error::[${{ inputs.environment }}] Function URL trả $code, phải 403"; exit 1; }
 
       - name: /api/* không được cache
         run: |
           hdr=$(curl -sI "${{ inputs.site_url }}/api/health" | tr -d '\r')
           echo "$hdr" | grep -qi 'x-cache: *Hit' \
-            && { echo "::error::/api/* đang bị cache"; exit 1; } || true
+            && { echo "::error::[${{ inputs.environment }}] /api/* đang bị cache"; exit 1; } || true

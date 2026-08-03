@@ -1,0 +1,86 @@
+name: Infra deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['infra/**', '.github/workflows/infra-deploy.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dev:
+    runs-on: ubuntu-24.04-arm
+    environment: dev
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: liberica, java-version: '25' }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - name: cdk deploy Dev
+        run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Dev/*' --require-approval never
+  smoke-dev:
+    needs: dev
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: dev
+      site_url: https://news.na-dev.linhvu.dev
+      function_url: ${{ needs.dev.outputs.function_url }}
+
+  qa:
+    needs: smoke-dev
+    runs-on: ubuntu-24.04-arm
+    environment: qa
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: liberica, java-version: '25' }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Qa/*' --require-approval never
+  smoke-qa:
+    needs: qa
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: qa
+      site_url: https://news.na-qa.linhvu.dev
+      function_url: ${{ needs.qa.outputs.function_url }}
+
+  prod:
+    needs: smoke-qa
+    runs-on: ubuntu-24.04-arm
+    environment: prod
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: liberica, java-version: '25' }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Prod/*' --require-approval never
+  smoke-prod:
+    needs: prod
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: prod
+      site_url: https://news.linhvu.dev
+      function_url: ${{ needs.prod.outputs.function_url }}
