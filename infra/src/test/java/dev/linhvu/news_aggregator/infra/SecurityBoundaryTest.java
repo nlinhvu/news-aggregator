@@ -205,6 +205,32 @@ class SecurityBoundaryTest {
 		)));
 	}
 
+	/**
+	 * Image phải tham chiếu bằng DIGEST (`@sha256:…`), không phải TAG (`:sha256:…`).
+	 *
+	 * `Code.fromEcrImage(...tagOrDigest(x))` chọn `@` hay `:` bằng cách gọi
+	 * `x.startsWith("sha256:")`. Nhưng digest của ta là CloudFormation token do
+	 * `valueForStringParameter` sinh ra — lúc synth nó là `${Token[TOKEN.n]}`,
+	 * `startsWith` trả false, và CDK lặng lẽ nối bằng `:`. Lambda nhận về một
+	 * TAG tên `sha256:f4b2…` không tồn tại.
+	 *
+	 * Đây là lỗi mà `cdk synth` VÀ `cdk diff` đều không thấy: template hợp lệ,
+	 * chỉ sai giá trị sau khi resolve. Nó chỉ chết ở `CREATE_FAILED` lúc deploy,
+	 * và đã chết thật một lần ở Task 14. Test này là thứ duy nhất bắt được nó
+	 * trước khi tốn một vòng deploy.
+	 */
+	@Test
+	void image_tham_chieu_bang_digest_khong_phai_tag() {
+		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"Code", Match.objectLike(Map.of(
+						"ImageUri", Match.objectLike(Map.of(
+								"Fn::Join", Match.arrayWith(List.of(
+										Match.arrayWith(List.of("/news-aggregator@"))))
+						))
+				))
+		)));
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {

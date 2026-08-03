@@ -13,6 +13,7 @@ import software.amazon.awscdk.services.ecr.Repository;
 import software.amazon.awscdk.services.iam.Role;
 import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Architecture;
+import software.amazon.awscdk.services.lambda.CfnFunction;
 import software.amazon.awscdk.services.lambda.Code;
 import software.amazon.awscdk.services.lambda.EcrImageCodeProps;
 import software.amazon.awscdk.services.lambda.Function;
@@ -72,6 +73,14 @@ public class AppStack extends Stack {
 				.logGroup(logGroup)
 				.environment(env)
 				.build();
+
+		// `Code.fromEcrImage` chọn `@` hay `:` bằng `tagOrDigest.startsWith("sha256:")`.
+		// Digest của ta là token chưa resolve (`${Token[TOKEN.n]}`) nên check đó luôn
+		// trả false và CDK nối bằng `:` — Lambda hiểu thành TAG và deploy chết.
+		// `repositoryUriForDigest` ép `@` mà không soi chuỗi, nên nó đúng với token.
+		CfnFunction cfnFunction = (CfnFunction) this.function.getNode().getDefaultChild();
+		cfnFunction.addPropertyOverride("Code.ImageUri",
+				repo.repositoryUriForDigest(imageDigest));
 
 		this.functionUrl = this.function.addFunctionUrl(FunctionUrlOptions.builder()
 				.authType(FunctionUrlAuthType.AWS_IAM)
