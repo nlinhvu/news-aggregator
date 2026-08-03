@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import software.amazon.awscdk.App;
 import software.amazon.awscdk.assertions.Match;
 import software.amazon.awscdk.assertions.Template;
@@ -155,27 +157,39 @@ class SecurityBoundaryTest {
 		)));
 	}
 
+	@SuppressWarnings("unchecked")
+	private String lifecyclePolicyText() {
+		Map<String, Object> repo = registry()
+				.findResources("AWS::ECR::Repository").values().iterator().next();
+		Map<String, Object> props = (Map<String, Object>) repo.get("Properties");
+		Map<String, Object> policy = (Map<String, Object>) props.get("LifecyclePolicy");
+		return (String) policy.get("LifecyclePolicyText");
+	}
+
 	/**
-	 * Lifecycle rule phải đếm RIÊNG theo tiền tố từng môi trường.
-	 * Với một registry dùng chung, đếm gộp toàn repo thì một tuần push nhiều
-	 * ở `dev` đủ đẩy digest mà PROD ĐANG CHẠY ra khỏi cửa sổ — và AWS ghi rõ
-	 * image bị xoá khiến function chuyển sang trạng thái Failed.
+	 * Đúng MỘT rule cho image có tag — không tách theo tiền tố môi trường.
+	 *
+	 * Bản đầu tách `prod-` 5 / `qa-` 10 / `dev-` 20, đọc như "mỗi môi trường giữ
+	 * N bản". Nó không hoạt động như vậy: ECR quy định *"an image is expired by
+	 * exactly one or zero rules"* và rule ưu tiên thấp hơn không đụng được image
+	 * mà rule ưu tiên cao đã giữ. Vì promotion gắn nhiều tiền tố lên CÙNG một
+	 * image, rule ưu tiên 1 khống chế tất cả và hai con số kia trở nên trơ — bộ
+	 * rule đó thực tế chỉ giữ 5.
+	 *
+	 * Test này chặn việc dựng lại cái bẫy đó. Nếu sau này thật sự cần bảo vệ prod
+	 * theo kiểu đảm bảo (không phải xác suất), cách đúng là `prod-` ở ưu tiên 1 —
+	 * và khi đó phải sửa test này một cách có ý thức, kèm đọc lại ADR-0004.
 	 */
 	@Test
-	void lifecycle_rule_scope_theo_tag_prefix_tung_moi_truong() {
-		Template registry = registry();
-
-		// Mỗi prefix phải là thành viên DUY NHẤT của tagPrefixList trong rule
-		// của nó. Gộp cả ba vào một list — ["prod-","qa-","dev-"] — chính là
-		// cái đếm gộp mà javadoc trên cảnh báo, nên assert phải bắt được nó.
-		for (String prefix : List.of("prod-", "qa-", "dev-")) {
-			registry.hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
-					"LifecyclePolicy", Match.objectLike(Map.of(
-							"LifecyclePolicyText", Match.stringLikeRegexp(
-									".*\"tagPrefixList\":\\[\"" + prefix + "\"\\].*")
-					))
-			)));
-		}
+	void mot_rule_duy_nhat_cho_image_co_tag() {
+		String policy = lifecyclePolicyText();
+		assertFalse(policy.contains("\"prod-\""), "không tách rule theo prod-: " + policy);
+		assertFalse(policy.contains("\"qa-\""), "không tách rule theo qa-: " + policy);
+		assertFalse(policy.contains("\"dev-\""), "không tách rule theo dev-: " + policy);
+		assertTrue(policy.contains(
+						"\"rulePriority\":1,\"selection\":{\"tagStatus\":\"tagged\","
+								+ "\"tagPrefixList\":[\"main-\"]"),
+				"rule ưu tiên 1 phải là main-, thực tế: " + policy);
 	}
 
 	/**
