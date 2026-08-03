@@ -1,0 +1,43 @@
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: '25'
+      - name: Test app (T1 + T2)
+        run: ./gradlew test
+
+  infra:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: '25'
+      - name: Test infra (T3 — Template assertions + cdk-nag)
+        run: cd infra && ./gradlew test
+      - name: Synth cả 3 môi trường, không credential
+        run: cd infra && npx --yes aws-cdk@2.1134.0 synth --quiet
+
+  frontend:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: cd frontend && npm ci && npm run build
+        continue-on-error: true
