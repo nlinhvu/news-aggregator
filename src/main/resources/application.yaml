@@ -1,6 +1,10 @@
 spring:
   application:
     name: news-aggregator
+  cloud:
+    aws:
+      region:
+        static: us-east-1
 
 news:
   commit-sha: ${NEWS_COMMIT_SHA:local}

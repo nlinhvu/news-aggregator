@@ -30,7 +30,7 @@ jobs:
       - name: Test infra (T3 — Template assertions + cdk-nag)
         run: cd infra && ./gradlew test
       - name: Synth cả 3 môi trường, không credential
-        run: cd infra && npx --yes aws-cdk@2.1121.0 synth --quiet
+        run: cd infra && npx --yes aws-cdk@2.1134.0 synth --quiet
 
   frontend:
     runs-on: ubuntu-24.04-arm
