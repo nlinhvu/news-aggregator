@@ -15,5 +15,7 @@ public class AppStage extends Stage {
 		AppStack appStack = new AppStack(this, "AppStack", cfg);
 		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
 				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());
+		new CicdStack(this, "CicdStack", cfg,
+				appStack.getFunction(), edge.getBucket(), edge.getDistribution());
 	}
 }

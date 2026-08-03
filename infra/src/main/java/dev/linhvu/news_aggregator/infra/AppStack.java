@@ -10,6 +10,8 @@ import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.ecr.IRepository;
 import software.amazon.awscdk.services.ecr.Repository;
+import software.amazon.awscdk.services.iam.Role;
+import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Architecture;
 import software.amazon.awscdk.services.lambda.Code;
 import software.amazon.awscdk.services.lambda.EcrImageCodeProps;
@@ -44,11 +46,21 @@ public class AppStack extends Stack {
 				.removalPolicy(RemovalPolicy.DESTROY)
 				.build();
 
+		// Execution role viết TAY thay vì để CDK tự gắn AWSLambdaBasicExecutionRole.
+		// Managed policy đó cấp `logs:CreateLogGroup` trên `*` và cấp quyền ghi trên
+		// TOÀN BỘ `/aws/lambda/*` — cả hai đều thừa, vì log group ở trên do chính
+		// CloudFormation tạo. Role tự viết thu phạm vi về đúng một log group.
+		Role executionRole = Role.Builder.create(this, "FunctionRole")
+				.assumedBy(new ServicePrincipal("lambda.amazonaws.com"))
+				.build();
+		logGroup.grantWrite(executionRole);
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
 
 		this.function = Function.Builder.create(this, "Function")
+				.role(executionRole)
 				.runtime(Runtime.FROM_IMAGE)
 				.handler(Handler.FROM_IMAGE)
 				.code(Code.fromEcrImage(repo, EcrImageCodeProps.builder()

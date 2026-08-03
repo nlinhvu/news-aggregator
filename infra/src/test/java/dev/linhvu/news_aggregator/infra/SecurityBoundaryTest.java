@@ -34,6 +34,13 @@ class SecurityBoundaryTest {
 				stage.getNode().findChild("EdgeStack"));
 	}
 
+	private Template cicdStack() {
+		App app = new App();
+		AppStage stage = new AppStage(app, EnvConfig.DEV);
+		return Template.fromStack((software.amazon.awscdk.Stack)
+				stage.getNode().findChild("CicdStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -259,5 +266,17 @@ class SecurityBoundaryTest {
 								))
 						))
 				)));
+	}
+
+	/**
+	 * Pipeline ứng dụng KHÔNG ĐƯỢC có quyền CloudFormation nào (master §8.1).
+	 * Ranh giới giữa hai pipeline do IAM cưỡng chế, không do quy ước.
+	 */
+	@Test
+	void deploy_role_khong_co_quyen_cloudformation() {
+		String json = cicdStack().toJSON().toString();
+		org.junit.jupiter.api.Assertions.assertFalse(
+				json.contains("cloudformation:"),
+				"CicdStack không được cấp bất kỳ action cloudformation:* nào");
 	}
 }
