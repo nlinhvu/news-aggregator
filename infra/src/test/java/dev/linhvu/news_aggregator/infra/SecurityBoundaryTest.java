@@ -27,6 +27,13 @@ class SecurityBoundaryTest {
 				stage.getNode().findChild("AppStack"));
 	}
 
+	private Template edgeStack() {
+		App app = new App();
+		AppStage stage = new AppStage(app, EnvConfig.DEV);
+		return Template.fromStack((software.amazon.awscdk.Stack)
+				stage.getNode().findChild("EdgeStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -197,5 +204,60 @@ class SecurityBoundaryTest {
 		appStack().hasResourceProperties("AWS::Logs::LogGroup", Match.objectLike(Map.of(
 				"RetentionInDays", 14
 		)));
+	}
+
+	/** S3 bucket phải chặn TOÀN BỘ public access (master §8.1). */
+	@Test
+	void s3_bucket_chan_toan_bo_public_access() {
+		edgeStack().hasResourceProperties("AWS::S3::Bucket", Match.objectLike(Map.of(
+				"PublicAccessBlockConfiguration", Map.of(
+						"BlockPublicAcls", true,
+						"BlockPublicPolicy", true,
+						"IgnorePublicAcls", true,
+						"RestrictPublicBuckets", true)
+		)));
+	}
+
+	/**
+	 * `/api/*` KHÔNG ĐƯỢC cache. Đây là chế độ hỏng khó nhận ra nhất của
+	 * phương án một-distribution-hai-origin: cache nhầm thì API trả dữ liệu
+	 * cũ mà không có lỗi nào xuất hiện, và commit sha ở /api/health sẽ không
+	 * đổi sau khi deploy (ADR-0005 §7).
+	 *
+	 * CachePolicy CACHING_DISABLED có id cố định do AWS quản.
+	 */
+	@Test
+	void api_khong_duoc_cache() {
+		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
+				Match.objectLike(Map.of(
+						"DistributionConfig", Match.objectLike(Map.of(
+								"CacheBehaviors", Match.arrayWith(List.of(
+										Match.objectLike(Map.of(
+												"PathPattern", "/api/*",
+												"CachePolicyId",
+												"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"))
+								))
+						))
+				)));
+	}
+
+	/** Deep link của SPA phải trả index.html với status 200, không phải 403/404 của S3. */
+	@Test
+	void spa_deep_link_duoc_anh_xa_ve_index_html() {
+		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
+				Match.objectLike(Map.of(
+						"DistributionConfig", Match.objectLike(Map.of(
+								"CustomErrorResponses", Match.arrayWith(List.of(
+										Match.objectLike(Map.of(
+												"ErrorCode", 403,
+												"ResponseCode", 200,
+												"ResponsePagePath", "/index.html")),
+										Match.objectLike(Map.of(
+												"ErrorCode", 404,
+												"ResponseCode", 200,
+												"ResponsePagePath", "/index.html"))
+								))
+						))
+				)));
 	}
 }

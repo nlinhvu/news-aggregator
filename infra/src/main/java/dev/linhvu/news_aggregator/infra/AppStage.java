@@ -11,7 +11,9 @@ public class AppStage extends Stage {
 				.env(cfg.awsEnvironment())
 				.build());
 
-		new DnsStack(this, "DnsStack", cfg);
+		DnsStack dns = new DnsStack(this, "DnsStack", cfg);
 		AppStack appStack = new AppStack(this, "AppStack", cfg);
+		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
+				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());
 	}
 }
