@@ -16,14 +16,13 @@ public record EnvConfig(
 
 	public static final EnvConfig DEV = new EnvConfig(
 			"Dev", "440783445107", "us-east-1",
-			"dev.linhvu.dev", "news.dev.linhvu.dev",
+			"na-dev.linhvu.dev", "news.na-dev.linhvu.dev",
 			RemovalPolicy.DESTROY, false, "dev");
 
 	public static final EnvConfig QA = new EnvConfig(
 			"Qa", "517353742264", "us-east-1",
-			"qa.linhvu.dev", "news.qa.linhvu.dev",
+			"na-qa.linhvu.dev", "news.na-qa.linhvu.dev",
 			RemovalPolicy.DESTROY, false, "qa");
-
 
 	public static final EnvConfig PROD = new EnvConfig(
 			"Prod", "778799435139", "us-east-1",

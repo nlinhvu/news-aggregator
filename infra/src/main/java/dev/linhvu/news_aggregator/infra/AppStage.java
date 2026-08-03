@@ -10,5 +10,7 @@ public class AppStage extends Stage {
 		super(scope, cfg.name(), StageProps.builder()
 				.env(cfg.awsEnvironment())
 				.build());
+
+		new DnsStack(this, "DnsStack", cfg);
 	}
 }
