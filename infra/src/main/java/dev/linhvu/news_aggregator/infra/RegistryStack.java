@@ -39,17 +39,27 @@ public class RegistryStack extends Stack {
 				.repositoryName(EnvConfig.ECR_REPOSITORY_NAME)
 				.imageTagMutability(TagMutability.IMMUTABLE)
 				.removalPolicy(RemovalPolicy.RETAIN)
+				// MỘT rule cho mọi image có tag. Cố ý không tách theo môi trường.
+				//
+				// Bản đầu tách ba tiền tố `prod-`/`qa-`/`dev-` với ba con số khác
+				// nhau, đọc như "mỗi môi trường giữ N bản". Nó KHÔNG hoạt động như
+				// vậy: ECR quy định "an image is expired by exactly one or zero
+				// rules", nên khi promotion gắn nhiều tiền tố lên CÙNG một image,
+				// rule ưu tiên cao nhất khống chế tất cả và con số của các rule
+				// dưới trở nên trơ. Xem đính chính trong ADR-0004.
+				//
+				// Đánh đổi đã chọn: 30 là ngưỡng theo XÁC SUẤT, không phải đảm bảo.
+				// Nó đủ vì pipeline promote tuần tự và prod thường theo sát main.
+				// **Rủi ro còn lại:** nếu ngừng promote lên prod quá 30 build liên
+				// tiếp thì image prod đang chạy rơi ra khỏi cửa sổ và bị xoá —
+				// function chuyển sang `Failed`. Nếu nhịp deploy đổi tới mức đó,
+				// quay lại phương án `prod-` ở ưu tiên 1 (ADR-0004 giữ nguyên lý
+				// do và cách làm).
 				.lifecycleRules(List.of(
 						LifecycleRule.builder().rulePriority(1)
-								.tagPrefixList(List.of("prod-"))
-								.maxImageCount(5).build(),
+								.tagPrefixList(List.of("main-"))
+								.maxImageCount(30).build(),
 						LifecycleRule.builder().rulePriority(2)
-								.tagPrefixList(List.of("qa-"))
-								.maxImageCount(10).build(),
-						LifecycleRule.builder().rulePriority(3)
-								.tagPrefixList(List.of("dev-"))
-								.maxImageCount(20).build(),
-						LifecycleRule.builder().rulePriority(4)
 								.tagStatus(TagStatus.UNTAGGED)
 								.maxImageAge(Duration.days(1)).build()))
 				.build();

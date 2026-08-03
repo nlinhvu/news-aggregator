@@ -23,4 +23,17 @@ class HealthControllerTest {
 				.andExpect(jsonPath("$.status").value("UP"))
 				.andExpect(jsonPath("$.commit").value("abc1234"));
 	}
+
+	/**
+	 * `CachingDisabled` ở CloudFront chỉ chặn cache của CDN — nó không nói gì với
+	 * trình duyệt, mà trình duyệt được phép heuristic-cache một 200 không validator
+	 * (RFC 9111 §4.2.2). Thiếu header này thì sau khi deploy bản mới, người vừa
+	 * deploy tải lại trang có thể thấy commit sha CŨ, và triệu chứng trông y hệt
+	 * "CloudFront cache nhầm /api/*" — tức là sẽ đi tìm sai chỗ.
+	 */
+	@Test
+	void cam_trinh_duyet_cache_health() throws Exception {
+		mockMvc.perform(get("/api/health"))
+				.andExpect(header().string("Cache-Control", "no-store"));
+	}
 }
