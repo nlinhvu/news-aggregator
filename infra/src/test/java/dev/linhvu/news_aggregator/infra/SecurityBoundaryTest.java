@@ -20,6 +20,13 @@ class SecurityBoundaryTest {
 		return Template.fromStack(new RegistryStack(app, "RegistryStack"));
 	}
 
+	private Template appStack() {
+		App app = new App();
+		AppStage stage = new AppStage(app, EnvConfig.DEV);
+		return Template.fromStack((software.amazon.awscdk.Stack)
+				stage.getNode().findChild("AppStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -155,5 +162,40 @@ class SecurityBoundaryTest {
 					))
 			)));
 		}
+	}
+
+	/**
+	 * Function URL PHẢI để AWS_IAM, không bao giờ NONE.
+	 *
+	 * Đây là loại lỗi "hỏng mà vẫn chạy được": để NONE thì trang web vẫn
+	 * hoạt động hoàn hảo, chỉ là Function URL trở thành public và master
+	 * §8.1 bị vi phạm mà không có triệu chứng nào nhìn thấy được.
+	 */
+	@Test
+	void function_url_dung_auth_type_aws_iam() {
+		appStack().hasResourceProperties("AWS::Lambda::Url", Match.objectLike(Map.of(
+				"AuthType", "AWS_IAM"
+		)));
+	}
+
+	/** Lambda phải arm64 và ngoài VPC (ADR-0001). */
+	@Test
+	void lambda_arm64_va_ngoai_vpc() {
+		Template t = appStack();
+		t.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"Architectures", List.of("arm64"),
+				"PackageType", "Image"
+		)));
+		t.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"VpcConfig", Match.absent()
+		)));
+	}
+
+	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
+	@Test
+	void log_retention_toi_da_14_ngay() {
+		appStack().hasResourceProperties("AWS::Logs::LogGroup", Match.objectLike(Map.of(
+				"RetentionInDays", 14
+		)));
 	}
 }

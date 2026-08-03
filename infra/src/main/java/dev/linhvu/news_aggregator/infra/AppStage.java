@@ -12,5 +12,6 @@ public class AppStage extends Stage {
 				.build());
 
 		new DnsStack(this, "DnsStack", cfg);
+		AppStack appStack = new AppStack(this, "AppStack", cfg);
 	}
 }

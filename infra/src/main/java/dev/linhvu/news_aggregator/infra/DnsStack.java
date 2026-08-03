@@ -26,7 +26,7 @@ public class DnsStack extends Stack {
 				.build();
 		zone.applyRemovalPolicy(cfg.removalPolicy());
 		this.hostedZone = zone;
-		
+
 		this.certificate = Certificate.Builder.create(this, "Certificate")
 				.domainName(cfg.appDomain())
 				.validation(CertificateValidation.fromDns(zone))
