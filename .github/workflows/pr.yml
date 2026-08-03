@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -39,5 +43,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: cd frontend && npm ci && npm run build
-        continue-on-error: true
+
+      - run: |
+          [ -f frontend/package.json ] || {
+            echo "::notice::frontend/ chưa có package.json — bỏ qua cho tới Task 27"; exit 0; }
+          cd frontend && npm ci && npm run build
