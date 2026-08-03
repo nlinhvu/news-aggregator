@@ -68,7 +68,7 @@ public class AppStack extends Stack {
 						.tagOrDigest(imageDigest)
 						.build()))
 				.architecture(Architecture.ARM_64)
-				.memorySize(1024)
+				.memorySize(2048)
 				.timeout(Duration.seconds(30))
 				.logGroup(logGroup)
 				.environment(env)
@@ -82,6 +82,12 @@ public class AppStack extends Stack {
 		cfnFunction.addPropertyOverride("Code.ImageUri",
 				repo.repositoryUriForDigest(imageDigest));
 
+		// AI được phép gọi Function URL này thì KHÔNG nằm ở đây — hai
+		// `AWS::Lambda::Permission` (`lambda:InvokeFunctionUrl` +
+		// `lambda:InvokeFunction`) đều ở EdgeStack, vì `SourceArn` của chúng phải
+		// trỏ tới distribution. Đưa ngược về đây sẽ tạo circular dependency
+		// AppStack → EdgeStack → AppStack, trừ khi bỏ `SourceArn` — mà bỏ thì mọi
+		// distribution CloudFront đều gọi được.
 		this.functionUrl = this.function.addFunctionUrl(FunctionUrlOptions.builder()
 				.authType(FunctionUrlAuthType.AWS_IAM)
 				.build());

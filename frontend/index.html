@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>News Aggregator</title>
+</head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;">
+<h1>News Aggregator</h1>
+<p>Trạng thái dịch vụ: <strong id="status">đang kiểm tra…</strong></p>
+<p>Commit: <code id="commit">—</code></p>
+<script>
+    // Đường dẫn TƯƠNG ĐỐI — same-origin, không CORS, không preflight.
+    // Cùng một file này chạy được ở cả ba môi trường (ADR-0005).
+    fetch('/api/health')
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('status').textContent = d.status;
+            document.getElementById('commit').textContent = d.commit;
+        })
+        .catch(e => {
+            document.getElementById('status').textContent = 'LỖI: ' + e.message;
+        });
+</script>
+</body>
+</html>

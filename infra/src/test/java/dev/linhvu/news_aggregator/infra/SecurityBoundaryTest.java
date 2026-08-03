@@ -231,6 +231,26 @@ class SecurityBoundaryTest {
 		)));
 	}
 
+	/**
+	 * `memorySize` là núm chỉnh CPU, KHÔNG phải RAM — đừng hạ xuống để "tiết kiệm".
+	 *
+	 * Đo thật trên dev ở 1024 MB (Task 14): cold start 23,5s, Spring boot 20,9s,
+	 * `Max Memory Used` chỉ 204 MB. RAM thừa gấp năm lần, nên nút thắt là CPU;
+	 * Lambda cấp CPU tỉ lệ với memory nên nâng memory là cách duy nhất mua thêm
+	 * CPU.
+	 *
+	 * Ở 1024 MB, cold start 23,5s so với `timeout` 30s chỉ còn 6,5s dư — một
+	 * image nặng hơn là quay lại 502. Đây là chế độ hỏng NGẪU NHIÊN và chỉ xảy
+	 * ra lúc cold, nên rất khó truy; test này ghim lại cả con số lẫn lý do.
+	 */
+	@Test
+	void lambda_du_cpu_cho_cold_start() {
+		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"MemorySize", 2048,
+				"Timeout", 30
+		)));
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {
@@ -274,24 +294,77 @@ class SecurityBoundaryTest {
 				)));
 	}
 
-	/** Deep link của SPA phải trả index.html với status 200, không phải 403/404 của S3. */
+	/**
+	 * OAC tới Lambda Function URL cần ĐÚNG HAI permission, không phải một.
+	 *
+	 * Tài liệu AWS yêu cầu cả `lambda:InvokeFunctionUrl` VÀ `lambda:InvokeFunction`.
+	 * `FunctionUrlOrigin.withOriginAccessControl()` của CDK chỉ sinh cái thứ nhất,
+	 * nên thiếu cái thứ hai là mặc định im lặng.
+	 *
+	 * Thiếu nó thì CloudFront vẫn ký request đúng, Lambda vẫn nhận, nhưng trả
+	 * 403 AccessDeniedException — và vì lỗi nằm ở tầng authorization chứ không
+	 * phải chữ ký, mọi cách sửa `SourceArn` hay principal đều vô ích. Đã ngốn
+	 * gần trọn buổi debug Task 14.
+	 */
 	@Test
-	void spa_deep_link_duoc_anh_xa_ve_index_html() {
+	void oac_co_du_hai_permission_goi_lambda() {
+		Template t = edgeStack();
+		t.resourceCountIs("AWS::Lambda::Permission", 2);
+		for (String action : List.of("lambda:InvokeFunctionUrl", "lambda:InvokeFunction")) {
+			t.hasResourceProperties("AWS::Lambda::Permission", Match.objectLike(Map.of(
+					"Action", action,
+					"Principal", "cloudfront.amazonaws.com")));
+		}
+	}
+
+	/**
+	 * Distribution phải khai báo TƯỜNG MINH web ACL mà CloudFront đã tự gắn.
+	 *
+	 * Khi account bật CloudFront pricing plan, CloudFront tự tạo một web ACL và
+	 * gắn vào distribution — ngoài tầm CDK. Template không khai báo `WebACLId`
+	 * nên mỗi lần update, CloudFormation gửi giá trị rỗng, AWS hiểu là "gỡ web
+	 * ACL" và từ chối: *"Distributions with a pricing plan subscription must
+	 * have a web ACL resource."*
+	 *
+	 * Đây là drift out-of-band làm HỎNG MỌI LẦN DEPLOY EdgeStack về sau, không
+	 * riêng lần đầu gặp. Ghim ARN vào EnvConfig là cách đưa nó trở lại IaC mà
+	 * không phải tự tạo web ACL mới — web ACL tự tạo có nguy cơ nằm ngoài phạm
+	 * vi miễn phí của pricing plan, trái master §4 nguyên tắc 3.
+	 */
+	@Test
+	void distribution_giu_web_acl_cua_pricing_plan() {
 		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
 				Match.objectLike(Map.of(
 						"DistributionConfig", Match.objectLike(Map.of(
-								"CustomErrorResponses", Match.arrayWith(List.of(
-										Match.objectLike(Map.of(
-												"ErrorCode", 403,
-												"ResponseCode", 200,
-												"ResponsePagePath", "/index.html")),
-										Match.objectLike(Map.of(
-												"ErrorCode", 404,
-												"ResponseCode", 200,
-												"ResponsePagePath", "/index.html"))
-								))
+								"WebACLId", EnvConfig.DEV.wafWebAclArn())
 						))
-				)));
+				));
+	}
+
+	/**
+	 * Distribution KHÔNG ĐƯỢC có `CustomErrorResponses`.
+	 *
+	 * `CustomErrorResponses` là cấu hình cấp DISTRIBUTION, CloudFront không cho
+	 * scope theo cache behavior. Nên rule "403/404 → 200 /index.html" dựng cho
+	 * SPA deep link sẽ áp luôn cho `/api/*`: mọi lỗi 403/404 của API trở thành
+	 * HTTP 200 kèm HTML.
+	 *
+	 * Hậu quả nặng hơn là mất khả năng chẩn đoán — `curl /api/health` trả 200 và
+	 * trang HTML dù backend hỏng hoàn toàn, và smoke test 403 ở Task 14 Step 5
+	 * không bao giờ thấy 403. Đã trả giá thật một lần khi debug Task 14.
+	 *
+	 * SPA deep link quay lại ở Task 27 dưới dạng CloudFront Function
+	 * (viewer-request) gắn RIÊNG vào default behavior — thứ mà error response
+	 * không làm được.
+	 */
+	@Test
+	void loi_cua_api_khong_bi_nguy_trang_thanh_200() {
+		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
+				Match.objectLike(Map.of(
+						"DistributionConfig", Match.objectLike(Map.of(
+								"CustomErrorResponses", Match.absent())
+						))
+				));
 	}
 
 	/**
