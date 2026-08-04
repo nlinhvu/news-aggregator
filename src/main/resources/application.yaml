@@ -8,3 +8,7 @@ spring:
 
 news:
   commit-sha: ${NEWS_COMMIT_SHA:local}
+  catalog:
+    table-name: ${NEWS_ARTICLES_TABLE:articles}
+    default-limit: 20
+    max-limit: 100
