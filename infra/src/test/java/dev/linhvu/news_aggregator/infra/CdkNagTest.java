@@ -39,6 +39,13 @@ class CdkNagTest {
 			"AwsSolutions-CFR1", "Geo restriction không áp dụng: site public toàn cầu "
 					+ "cho người đọc tin kỹ thuật (master §2).",
 
+			"AwsSolutions-DDB3", "PITR là quyết định THEO MÔI TRƯỜNG — prod bật, dev "
+					+ "tắt vì nó tính tiền liên tục theo dung lượng (master §4 nguyên "
+					+ "tắc 3) — mà test này chỉ synth EnvConfig.DEV. Rule KHÔNG tham số "
+					+ "nên entry này nuốt luôn DDB3 của mọi bảng thêm sau vào DataStack; "
+					+ "chốt chặn thật cho prod nằm ở "
+					+ "DataStackTest#pitr_bat_o_prod_tat_o_dev.",
+
 			"AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
 					+ "tiền theo tháng và là chi phí cố định.",
 
@@ -61,7 +68,11 @@ class CdkNagTest {
 	 * trong ./gradlew test. Bất kỳ finding nào KHÔNG nằm trong ACCEPTED đều
 	 * làm test đỏ, kèm nguyên văn rule id để tra.
 	 *
-	 * Gom finding của CẢ BỐN stack rồi mới assert MỘT LẦN. Assert ngay trong
+	 * Danh sách stack phải khớp với AppStage — thêm stack mới vào stage mà quên
+	 * thêm vào đây thì nó nằm NGOÀI tầm quét, và mọi finding của nó biến mất
+	 * lặng lẽ thay vì làm test đỏ. DataStack đã rơi đúng vào bẫy này một lần.
+	 *
+	 * Gom finding của TẤT CẢ stack rồi mới assert MỘT LẦN. Assert ngay trong
 	 * vòng lặp thì stack đỏ đầu tiên che hết finding của các stack sau, và
 	 * mỗi lần sửa lại lòi ra một đợt mới.
 	 */
@@ -71,7 +82,8 @@ class CdkNagTest {
 		AppStage stage = new AppStage(app, EnvConfig.DEV);
 
 		List<String> unexpected = new ArrayList<>();
-		for (String stackId : List.of("DnsStack", "AppStack", "EdgeStack", "CicdStack")) {
+		for (String stackId : List.of("DnsStack", "DataStack", "AppStack", "EdgeStack",
+				"CicdStack")) {
 			Stack stack = (Stack) stage.getNode().findChild(stackId);
 			PolicyValidationPluginReport report =
 					new AwsSolutionsChecks().validateScope(stack);

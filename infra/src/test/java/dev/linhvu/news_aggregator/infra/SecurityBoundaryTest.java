@@ -352,6 +352,35 @@ class SecurityBoundaryTest {
 		)));
 	}
 
+	/**
+	 * Lambda chỉ được Query ĐÚNG index `gsi-recent`, không phải `/index/*`.
+	 *
+	 * `articlesTable.grantReadData()` — cách viết hiển nhiên, và là cách plan
+	 * đề xuất ban đầu — cấp resource `<table>.Arn/index/*` trong khi bảng có
+	 * đúng một index, kèm `dynamodb:Scan` cùng `GetRecords`/`GetShardIterator`
+	 * của DynamoDB Streams (bảng chưa bật stream). cdk-nag bắt được vế wildcard,
+	 * nhưng KHÔNG bắt được `Scan` — vì `Scan` là action tường minh, không phải
+	 * wildcard. Nên riêng CdkNagTest là chưa đủ để chặn việc quay lại
+	 * `grantReadData`, và đó là lý do test này tồn tại.
+	 *
+	 * `Scan` thừa quyền ở đây tốn tiền chứ không chỉ là vấn đề an ninh: nó tính
+	 * theo kích thước BẢNG chứ không theo số item trả về (master §4 nguyên tắc 3).
+	 */
+	@Test
+	void lambda_chi_query_dung_index_gsi_recent() {
+		Template t = appStack();
+		String queryOn = resourceForAction(t, "FunctionRoleDefaultPolicy",
+				"dynamodb:Query");
+
+		assertTrue(queryOn.contains("/index/" + DataStack.RECENT_INDEX_NAME),
+				"Lambda phải được Query trên đúng index gsi-recent, thực tế: " + queryOn);
+		assertFalse(queryOn.contains("/index/*"),
+				"KHÔNG được cấp wildcard /index/*, thực tế: " + queryOn);
+		assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy",
+						"dynamodb:Scan").isEmpty(),
+				"Lambda KHÔNG bao giờ được cấp dynamodb:Scan — findRecent là Query");
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {

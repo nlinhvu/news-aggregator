@@ -1,6 +1,7 @@
 package dev.linhvu.news_aggregator.infra;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import software.amazon.awscdk.CfnOutput;
@@ -8,8 +9,10 @@ import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
+import software.amazon.awscdk.services.dynamodb.ITable;
 import software.amazon.awscdk.services.ecr.IRepository;
 import software.amazon.awscdk.services.ecr.Repository;
+import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Role;
 import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Architecture;
@@ -32,7 +35,7 @@ public class AppStack extends Stack {
 	private final Function function;
 	private final FunctionUrl functionUrl;
 
-	public AppStack(final Construct scope, final String id, final EnvConfig cfg) {
+	public AppStack(final Construct scope, final String id, final EnvConfig cfg, final ITable articlesTable) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -56,9 +59,27 @@ public class AppStack extends Stack {
 				.build();
 		logGroup.grantWrite(executionRole);
 
+		// KHÔNG dùng `articlesTable.grantReadData()`. Nó cấp resource
+		// `<table>.Arn/index/*` trong khi bảng có ĐÚNG MỘT index; kèm theo
+		// `dynamodb:Scan` mà repository không bao giờ gọi (findRecent là Query —
+		// xem TDD §6), và cả `dynamodb:GetRecords`/`GetShardIterator` là quyền của
+		// DynamoDB Streams, thứ DataStack còn chưa bật. Wildcard resource đó chính
+		// là finding cdk-nag AwsSolutions-IAM5, và ở đây nó bắt đúng — cùng loại
+		// với `bucket.grantReadWrite()` đã bị thay ở CicdStack.
+		//
+		// Đường GHI duy nhất vào bảng là `SeedApplication`, một main riêng người
+		// vận hành chạy bằng credential của chính họ, không đi qua role này.
+		// Thêm operation mới cho Lambda thì phải thêm action ở ĐÂY một cách có ý thức.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Query"))
+				.resources(List.of(articlesTable.getTableArn()
+						+ "/index/" + DataStack.RECENT_INDEX_NAME))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
+		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)

@@ -12,7 +12,8 @@ public class AppStage extends Stage {
 				.build());
 
 		DnsStack dns = new DnsStack(this, "DnsStack", cfg);
-		AppStack appStack = new AppStack(this, "AppStack", cfg);
+		DataStack data = new DataStack(this, "DataStack", cfg);
+		AppStack appStack = new AppStack(this, "AppStack", cfg, data.getArticlesTable());
 		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
 				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());
 		new CicdStack(this, "CicdStack", cfg,
