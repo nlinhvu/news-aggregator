@@ -381,6 +381,34 @@ class SecurityBoundaryTest {
 				"Lambda KHÔNG bao giờ được cấp dynamodb:Scan — findRecent là Query");
 	}
 
+	/**
+	 * Lambda chỉ ĐỌC bảng feature-toggles — không bao giờ ghi.
+	 *
+	 * Bộ action đúng lấy từ bytecode togglz-dynamodb 4.6.2: builder gọi
+	 * `describeTable` lúc dựng, `getFeatureState` gọi `getItem`, và `setFeatureState`
+	 * gọi `updateItem`. Chỉ hai cái đầu là đường của ứng dụng.
+	 *
+	 * Hai vế của test này bắt hai lỗi ngược nhau, và cả hai đều IM LẶNG:
+	 * - Thiếu `DescribeTable` → bean `@Lazy` ném RuntimeException ở request đầu tiên
+	 *   chạm flag. Không lộ lúc khởi động, không lộ trong T2 (Floci không cưỡng chế
+	 *   IAM — xem runbook §"Floci KHÔNG cưỡng chế IAM").
+	 * - Có `UpdateItem` → ứng dụng ghi đè được trạng thái flag mà không ai để ý, vì
+	 *   thừa quyền không tạo ra triệu chứng nào.
+	 */
+	@Test
+	void lambda_chi_doc_bang_feature_toggles() {
+		Template t = appStack();
+		for (String action : List.of("dynamodb:DescribeTable", "dynamodb:GetItem")) {
+			assertFalse(resourceForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
+					"Lambda phải được " + action + " trên bảng feature-toggles");
+		}
+		for (String action : List.of("dynamodb:UpdateItem", "dynamodb:PutItem",
+				"dynamodb:DeleteItem")) {
+			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
+					"Lambda KHÔNG được cấp " + action + " — lật flag là việc của người vận hành");
+		}
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {

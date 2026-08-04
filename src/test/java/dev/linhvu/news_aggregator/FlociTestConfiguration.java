@@ -89,4 +89,38 @@ public class FlociTestConfiguration {
 			}
 		};
 	}
+
+	/**
+	 * Bảng feature-toggles, soi gương `DataStack.featureTogglesTable`.
+	 *
+	 * Bắt buộc phải có, không phải "tiện thì thêm": `TogglzAutoConfiguration`
+	 * dựng bean `featureManager` NGAY lúc khởi động và nó inject `StateRepository`
+	 * theo kiểu eager, nên `@Lazy` trên bean đó KHÔNG cứu được. Builder của
+	 * togglz-dynamodb gọi `describeTable` rồi ném RuntimeException — thiếu bảng
+	 * thì MỌI test có Spring context đều chết, kể cả test không liên quan gì tới
+	 * feature flag.
+	 *
+	 * Tên attribute `featureName` là hợp đồng của thư viện, không phải lựa chọn —
+	 * xem `DataStack.TOGGLZ_PRIMARY_KEY`. Hai module không thấy nhau nên chuỗi này
+	 * phải khớp thủ công; lệch nhau thì test vẫn xanh trong khi prod hỏng.
+	 */
+	@Bean
+	InitializingBean featureTogglesTableSchema(DynamoDbClient dynamoDbClient,
+			@Value("${news.togglz.table-name}") String tableName) {
+		return () -> {
+			try {
+				dynamoDbClient.createTable(CreateTableRequest.builder()
+						.tableName(tableName)
+						.keySchema(KeySchemaElement.builder()
+								.attributeName("featureName").keyType(KeyType.HASH).build())
+						.attributeDefinitions(
+								AttributeDefinition.builder().attributeName("featureName")
+										.attributeType(ScalarAttributeType.S).build())
+						.billingMode(BillingMode.PAY_PER_REQUEST)
+						.build());
+			} catch (ResourceInUseException ignored) {
+				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
+	}
 }

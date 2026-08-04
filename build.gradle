@@ -65,6 +65,8 @@ dependencies {
 	implementation 'org.springframework.modulith:spring-modulith-starter-core'
 //	implementation 'org.springframework.modulith:spring-modulith-starter-jdbc'
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
+	implementation "org.togglz:togglz-spring-boot-starter:${togglzVersion}"
+	implementation "org.togglz:togglz-dynamodb:${togglzVersion}"
 
 	// Source set `seed` đã extendsFrom implementation, nên hai dòng này là THỪA
 	// về mặt resolve. Giữ tường minh vì `seed` không đi qua Spring: nếu sau này
@@ -99,6 +101,7 @@ dependencies {
 //	testImplementation 'org.testcontainers:testcontainers-ollama'
 //	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testImplementation "io.floci:spring-boot-testcontainers-floci:${flociTestcontainersVersion}"
+	testImplementation "org.togglz:togglz-junit:${togglzVersion}"
 
 	// Test T2 nạp ĐÚNG fixture mà seed ghi vào dev/qa/prod, qua ĐÚNG loader đó.
 	// `sourceSets.seed.output` mang theo cả class lẫn resource, nên `fixtures/

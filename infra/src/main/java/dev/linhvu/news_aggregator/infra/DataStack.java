@@ -24,7 +24,15 @@ public class DataStack extends Stack {
 	 */
 	public static final String RECENT_INDEX_NAME = "gsi-recent";
 
+	/**
+	 * Partition key của bảng feature-toggles. Giá trị này do `togglz-dynamodb`
+	 * quy định chứ không phải ta chọn — xem comment tại chỗ tạo bảng. Là hằng số
+	 * public để `DataStackTest` khẳng định lại đúng chuỗi đó thay vì chép tay.
+	 */
+	public static final String TOGGLZ_PRIMARY_KEY = "featureName";
+
 	private final Table articlesTable;
+	private final Table featureTogglesTable;
 
 	public DataStack(final Construct scope, final String id, final EnvConfig cfg) {
 		super(scope, id, StackProps.builder()
@@ -59,9 +67,39 @@ public class DataStack extends Stack {
 
 		CfnOutput.Builder.create(this, "ArticlesTableName")
 				.value(articlesTable.getTableName()).build();
+
+		// Schema do module togglz-dynamodb quy định, và nó KHÔNG cấu hình được:
+		// `DynamoDBStateRepositoryBuilder.primaryKey` là `private final` gán cứng
+		// chuỗi "featureName" — chữ f THƯỜNG. Builder chỉ mở ra `withStateStoredInTable`
+		// và `withObjectMapper`. Viết hoa thành "FeatureName" thì bảng tạo ra vẫn hợp
+		// lệ, `cdk deploy` vẫn xanh, và mọi lần đọc flag chết bằng ValidationException
+		// "provided key element does not match the schema" — ở lần request đầu tiên
+		// chạm tới flag, tức là trên môi trường thật chứ không phải lúc build.
+		//
+		// PITR soi gương `articlesTable` (bật ở prod, tắt ở dev) chứ không tắt hẳn.
+		// Bảng này chỉ có 6 dòng nên chi phí backup không đáng kể, còn thứ nó giữ là
+		// TRẠNG THÁI VẬN HÀNH: một lệnh `delete-item` nhầm ở prod sẽ tắt feature mà
+		// không để lại dấu vết nào ngoài việc trang web đổi hành vi.
+		this.featureTogglesTable = Table.Builder.create(this, "FeatureTogglesTable")
+				.partitionKey(Attribute.builder()
+						.name(TOGGLZ_PRIMARY_KEY).type(AttributeType.STRING).build())
+				.billingMode(BillingMode.PAY_PER_REQUEST)
+				.removalPolicy(cfg.removalPolicy())
+				.pointInTimeRecoverySpecification(
+						PointInTimeRecoverySpecification.builder()
+								.pointInTimeRecoveryEnabled(cfg.terminationProtection())
+								.build())
+				.build();
+
+		CfnOutput.Builder.create(this, "FeatureTogglesTableName")
+				.value(featureTogglesTable.getTableName()).build();
 	}
 
 	public Table getArticlesTable() {
 		return articlesTable;
+	}
+
+	public Table getFeatureTogglesTable() {
+		return featureTogglesTable;
 	}
 }

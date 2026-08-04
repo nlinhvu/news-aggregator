@@ -12,3 +12,10 @@ news:
     table-name: ${NEWS_ARTICLES_TABLE:articles}
     default-limit: 20
     max-limit: 100
+  togglz:
+    table-name: ${NEWS_TOGGLES_TABLE:feature-toggles}
+
+togglz:
+  feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
+  console:
+    enabled: false   # Phase 4 mới bật, và phải bảo vệ trước

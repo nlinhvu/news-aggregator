@@ -58,6 +58,51 @@ class DataStackTest {
 	}
 
 	/**
+	 * Partition key của bảng toggles phải là ĐÚNG chuỗi `featureName`.
+	 *
+	 * `togglz-dynamodb` gán cứng tên đó trong `DynamoDBStateRepositoryBuilder`
+	 * (`private final primaryKey`), không có setter nào. Viết hoa thành
+	 * `FeatureName` — như bản đầu của plan — vẫn tạo được bảng hợp lệ và
+	 * `cdk deploy` vẫn xanh; chỗ vỡ là mọi lần đọc flag, bằng
+	 * `ValidationException` trên môi trường thật.
+	 *
+	 * Không có tầng nào khác bắt được lệch này: T2 dùng Floci mà Floci cũng chỉ
+	 * kiểm schema theo bảng nó được tạo, còn cdk-nag không biết gì về hợp đồng
+	 * giữa tên attribute và thư viện.
+	 */
+	@Test
+	void partition_key_cua_bang_toggles_dung_hop_dong_cua_togglz() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"KeySchema", List.of(Map.of(
+								"AttributeName", DataStack.TOGGLZ_PRIMARY_KEY,
+								"KeyType", "HASH")))));
+	}
+
+	/**
+	 * PITR của bảng toggles cũng phải bật ở prod, tắt ở dev.
+	 *
+	 * Khẳng định RIÊNG cho bảng này chứ không dựa vào test PITR bên dưới:
+	 * `hasResourceProperties` xanh khi CÓ MỘT resource khớp, nên từ lúc
+	 * `DataStack` có hai bảng, test kia đã được `articlesTable` làm cho xanh
+	 * bất kể bảng thứ hai cấu hình thế nào. Ghim bằng `KeySchema` là cách trỏ
+	 * đích danh vào bảng cần kiểm.
+	 */
+	@Test
+	void pitr_cua_bang_toggles_bat_o_prod_tat_o_dev() {
+		for (Map.Entry<EnvConfig, Boolean> e
+				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
+			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"KeySchema", List.of(Map.of(
+									"AttributeName", DataStack.TOGGLZ_PRIMARY_KEY,
+									"KeyType", "HASH")),
+							"PointInTimeRecoverySpecification", Map.of(
+									"PointInTimeRecoveryEnabled", e.getValue()))));
+		}
+	}
+
+	/**
 	 * PITR bật ở prod, tắt ở dev.
 	 *
 	 * Khẳng định ở ĐÂY vì CdkNagTest đã allowlist `AwsSolutions-DDB3` — rule đó

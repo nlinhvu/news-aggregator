@@ -35,7 +35,8 @@ public class AppStack extends Stack {
 	private final Function function;
 	private final FunctionUrl functionUrl;
 
-	public AppStack(final Construct scope, final String id, final EnvConfig cfg, final ITable articlesTable) {
+	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
+			final ITable articlesTable, final ITable featureTogglesTable) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -76,10 +77,32 @@ public class AppStack extends Stack {
 						+ "/index/" + DataStack.RECENT_INDEX_NAME))
 				.build());
 
+		// Bộ action dưới đây đọc ra từ bytecode của togglz-dynamodb 4.6.2, không
+		// phải từ tài liệu:
+		//   DynamoDBStateRepositoryBuilder.initializeTable() → describeTable
+		//   DynamoDBStateRepository.getFeatureState()        → getItem
+		//   DynamoDBStateRepository.setFeatureState()        → updateItem
+		//
+		// `DescribeTable` là cái dễ quên nhất và cũng chí mạng nhất: builder gọi nó
+		// ĐÚNG MỘT LẦN lúc dựng bean rồi ném RuntimeException nếu hỏng. Vì bean là
+		// @Lazy, lần chết đầu tiên rơi vào request đầu tiên chạm tới flag — trên
+		// môi trường thật, không phải lúc khởi động.
+		//
+		// KHÔNG cấp `UpdateItem`: đó là đường GHI, chỉ Togglz console dùng, mà console
+		// đang tắt. Lật flag là thao tác của người vận hành bằng credential của họ.
+		// KHÔNG cấp `Query`: repository không có đường code nào gọi tới nó — plan đề
+		// xuất `GetItem + Query`, và `Query` là quyền thừa đúng theo nghĩa mà
+		// `lambda_chi_query_dung_index_gsi_recent` đang canh ở bảng bên kia.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:DescribeTable", "dynamodb:GetItem"))
+				.resources(List.of(featureTogglesTable.getTableArn()))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
 		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
+		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)
