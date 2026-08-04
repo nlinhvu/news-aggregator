@@ -1,0 +1,29 @@
+[
+  {
+    "articleId": "seed-0001",
+    "listBucket": "ALL",
+    "publishedAt": "2026-07-28T09:00:00Z",
+    "title": "Spring Boot 4.1 nâng baseline lên Java 25",
+    "canonicalUrl": "https://spring.io/blog/2026/07/28/spring-boot-4-1",
+    "sourceName": "Spring Blog",
+    "summary": "Bản tóm tắt tĩnh dùng cho Phase 1 — Phase 3 sẽ thay bằng AI sinh."
+  },
+  {
+    "articleId": "seed-0002",
+    "listBucket": "ALL",
+    "publishedAt": "2026-07-25T14:30:00Z",
+    "title": "Project Leyden AOT cache giảm một nửa thời gian khởi động",
+    "canonicalUrl": "https://openjdk.org/projects/leyden/",
+    "sourceName": "OpenJDK",
+    "summary": "Bản tóm tắt tĩnh dùng cho Phase 1."
+  },
+  {
+    "articleId": "seed-0003",
+    "listBucket": "ALL",
+    "publishedAt": "2026-07-20T08:15:00Z",
+    "title": "Lambda hỗ trợ pull container image cross-account",
+    "canonicalUrl": "https://aws.amazon.com/blogs/compute/",
+    "sourceName": "AWS Compute Blog",
+    "summary": "Bản tóm tắt tĩnh dùng cho Phase 1."
+  }
+]

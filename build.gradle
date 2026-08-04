@@ -28,8 +28,12 @@ ext {
 
 sourceSets {
 	seed {
-		java.srcDir 'src/seed/java'
-		resources.srcDir 'src/seed/resources'
+		// KHÔNG khai báo `java.srcDir 'src/seed/java'` / `resources.srcDir
+		// 'src/seed/resources'`: Gradle đã tự gán đúng hai thư mục đó cho source
+		// set tên `seed`, nên khai thêm là đăng ký TRÙNG. Java compile không kêu,
+		// nhưng `processSeedResources` thì chết bằng "Entry … is a duplicate" ngay
+		// khi seed có file resource đầu tiên — tức là ở Task 25, cách chỗ gây lỗi
+		// rất xa.
 		compileClasspath += sourceSets.main.output
 		runtimeClasspath += sourceSets.main.output
 	}
@@ -62,6 +66,13 @@ dependencies {
 //	implementation 'org.springframework.modulith:spring-modulith-starter-jdbc'
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
 
+	// Source set `seed` đã extendsFrom implementation, nên hai dòng này là THỪA
+	// về mặt resolve. Giữ tường minh vì `seed` không đi qua Spring: nếu sau này
+	// ứng dụng bỏ webmvc (kéo theo Jackson) hay đổi starter DynamoDB, seed sẽ
+	// vỡ lúc compile ở đây thay vì lặng lẽ mất dependency.
+	seedImplementation 'tools.jackson.core:jackson-databind'
+	seedImplementation 'software.amazon.awssdk:dynamodb-enhanced'
+
 //	runtimeOnly 'org.postgresql:postgresql'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-actuator'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-observability-core'
@@ -88,6 +99,11 @@ dependencies {
 //	testImplementation 'org.testcontainers:testcontainers-ollama'
 //	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testImplementation "io.floci:spring-boot-testcontainers-floci:${flociTestcontainersVersion}"
+
+	// Test T2 nạp ĐÚNG fixture mà seed ghi vào dev/qa/prod, qua ĐÚNG loader đó.
+	// `sourceSets.seed.output` mang theo cả class lẫn resource, nên `fixtures/
+	// articles.json` vào thẳng test classpath — không phải khai thêm srcDir.
+	testImplementation sourceSets.seed.output
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

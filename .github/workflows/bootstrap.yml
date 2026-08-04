@@ -10,10 +10,6 @@ on:
         required: true
         type: choice
         options: [dev, qa, prod]
-      seed_data:
-        description: Ghi seed data vào bảng articles
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -37,6 +33,12 @@ jobs:
           echo "Thêm các NS record sau vào zone apex linhvu.dev"
           echo "(hosted zone Z086816130ELZ2D5D8YDY, management account 784563198762):"
           aws route53 get-hosted-zone --id "$zid" --query 'DelegationSet.NameServers' --output table
-      - name: Seed data
-        if: inputs.seed_data
-        run: ./gradlew seedRun --args="${{ inputs.environment }}"
+
+# Seed data CỐ Ý không có ở đây, và cũng không có role nào trong IaC để làm việc
+# đó. Seed chỉ hợp lệ khi bảng còn RỖNG — từ Phase 2, ingestion sinh article
+# thật, và một pipeline còn khả năng ghi đè vào bảng đó là rủi ro chứ không phải
+# tiện ích. Cấp một role vĩnh viễn cho một thao tác một-lần cũng là để lại thứ
+# phải nhớ mà gỡ.
+#
+# Cách seed: chạy tay bằng credential của người vận hành, xem
+# docs/runbook/phase-1-bootstrap.md §"Seed data lần đầu".

@@ -1,10 +1,13 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.util.Comparator;
 import java.util.List;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
+import dev.linhvu.seed.ArticleFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -18,32 +21,39 @@ class ArticleRepositoryTest {
 	ArticleRepository repository;
 
 	/**
-	 * Chỉ nạp dữ liệu — bảng do `FlociTestConfiguration` tạo, xem lý do ở đó.
+	 * Nạp ĐÚNG fixture mà `SeedApplication` ghi vào dev/qa/prod — dữ liệu test
+	 * và dữ liệu đã seed không trôi khỏi nhau. Bảng do `FlociTestConfiguration`
+	 * tạo, xem lý do ở đó.
+	 *
+	 * Chèn theo `publishedAt` TĂNG DẦN, tức NGƯỢC hẳn thứ tự mong đợi ở output.
+	 * Chèn theo đúng thứ tự trong file thì test vẫn xanh kể cả khi query trả về
+	 * theo thứ tự chèn — mất sạch khả năng bắt lỗi sắp xếp, mà sắp xếp lại đúng
+	 * là thứ `gsi-recent` sinh ra để làm.
 	 */
 	@BeforeEach
 	void napDuLieu() {
-		repository.save(article("a", "2026-01-01T00:00:00Z", "Bài cũ nhất"));
-		repository.save(article("c", "2026-03-01T00:00:00Z", "Bài mới nhất"));
-		repository.save(article("b", "2026-02-01T00:00:00Z", "Bài ở giữa"));
+		ArticleFixtures.load().stream()
+				.sorted(Comparator.comparing(Article::getPublishedAt))
+				.forEach(repository::save);
 	}
 
-	private Article article(String id, String publishedAt, String title) {
-		Article a = new Article();
-		a.setArticleId(id);
-		a.setListBucket(Article.LIST_BUCKET);
-		a.setPublishedAt(publishedAt);
-		a.setTitle(title);
-		a.setCanonicalUrl("https://example.com/" + id);
-		a.setSourceName("Example Blog");
-		return a;
-	}
-
+	/**
+	 * Thứ tự mong đợi được SUY RA từ fixture chứ không viết cứng, nên thêm bớt
+	 * article trong fixture không làm test này gãy một cách vô cớ.
+	 *
+	 * Sắp xếp bằng Java ở đây là một oracle độc lập thật: nó không dùng chung
+	 * cơ chế nào với việc DynamoDB trả item theo range key của GSI.
+	 */
 	@Test
 	void tra_ve_article_moi_nhat_truoc() {
-		List<Article> found = repository.findRecent(10);
+		List<String> mongDoi = ArticleFixtures.load().stream()
+				.sorted(Comparator.comparing(Article::getPublishedAt).reversed())
+				.map(Article::getArticleId)
+				.toList();
 
-		assertThat(found).extracting(Article::getTitle)
-				.containsExactly("Bài mới nhất", "Bài ở giữa", "Bài cũ nhất");
+		assertThat(repository.findRecent(10))
+				.extracting(Article::getArticleId)
+				.containsExactlyElementsOf(mongDoi);
 	}
 
 	@Test
