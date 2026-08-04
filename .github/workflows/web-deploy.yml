@@ -1,0 +1,132 @@
+name: Web deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/web-deploy.yml']
+
+# Cùng lý do như infra-deploy. `aws s3 sync --delete` chạy song song với chính
+# nó trên cùng bucket là cách chắc chắn để có một bucket nửa cũ nửa mới.
+concurrency:
+  group: web-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      # Build MỘT LẦN. Vì ADR-0005 chọn same-origin, SPA gọi API bằng đường
+      # dẫn tương đối nên KHÔNG có API URL riêng theo môi trường — cùng một
+      # bundle chạy được cả ba.
+      #
+      # Ở slice 1, frontend/ mới chỉ có index.html tĩnh và CHƯA có package.json,
+      # nên `npm ci` sẽ fail. Nhánh else không phải để "cho qua" — nó làm
+      # pipeline tiếp quản luôn việc `aws s3 cp` bằng tay ở Task 15, tức là đúng
+      # lời hứa của slice 1b: sau slice này không ai deploy bằng tay nữa.
+      # Từ Task 27, package.json xuất hiện và nhánh Vite tự động thay thế.
+      - run: |
+          if [ -f frontend/package.json ]; then
+            cd frontend && npm ci && npm run build
+          else
+            echo "::notice::frontend/ chưa có package.json — đóng gói index.html tĩnh"
+            mkdir -p frontend/dist && cp frontend/index.html frontend/dist/
+          fi
+      - uses: actions/upload-artifact@v4
+        with: { name: spa, path: frontend/dist }
+
+  dev:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    environment: dev
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with: { name: spa, path: dist }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/WebDeployRole --role-session-name web-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          aws s3 sync dist s3://${{ vars.SPA_BUCKET }} --delete
+          aws cloudfront create-invalidation --distribution-id ${{ vars.DISTRIBUTION_ID }} --paths '/*'
+  smoke-dev:
+    needs: dev
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: dev
+      site_url: https://news.na-dev.linhvu.dev
+      function_url: ${{ needs.dev.outputs.function_url }}
+
+  qa:
+    needs: smoke-dev
+    runs-on: ubuntu-24.04-arm
+    environment: qa
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with: { name: spa, path: dist }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/WebDeployRole --role-session-name web-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          aws s3 sync dist s3://${{ vars.SPA_BUCKET }} --delete
+          aws cloudfront create-invalidation --distribution-id ${{ vars.DISTRIBUTION_ID }} --paths '/*'
+  smoke-qa:
+    needs: qa
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: qa
+      site_url: https://news.na-qa.linhvu.dev
+      function_url: ${{ needs.qa.outputs.function_url }}
+
+  prod:
+    needs: smoke-qa
+    runs-on: ubuntu-24.04-arm
+    environment: prod
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with: { name: spa, path: dist }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/WebDeployRole --role-session-name web-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          aws s3 sync dist s3://${{ vars.SPA_BUCKET }} --delete
+          aws cloudfront create-invalidation --distribution-id ${{ vars.DISTRIBUTION_ID }} --paths '/*'
+  smoke-prod:
+    needs: prod
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: prod
+      site_url: https://news.linhvu.dev
+      function_url: ${{ needs.prod.outputs.function_url }}

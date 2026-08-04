@@ -1,0 +1,42 @@
+name: Bootstrap
+
+# CHỈ chạy bằng tay. Đây là thao tác MỘT CHIỀU — trộn nó vào pipeline
+# thường ngày là cách chắc chắn để một ngày nào đó nó chạy nhầm.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Môi trường đích
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+      seed_data:
+        description: Ghi seed data vào bảng articles
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04-arm
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: liberica, java-version: '25' }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - name: In NS record của hosted zone để thêm delegation bằng tay
+        run: |
+          zid=$(aws route53 list-hosted-zones --query 'HostedZones[0].Id' --output text)
+          echo "Thêm các NS record sau vào zone apex linhvu.dev"
+          echo "(hosted zone Z086816130ELZ2D5D8YDY, management account 784563198762):"
+          aws route53 get-hosted-zone --id "$zid" --query 'DelegationSet.NameServers' --output table
+      - name: Seed data
+        if: inputs.seed_data
+        run: ./gradlew seedRun --args="${{ inputs.environment }}"
