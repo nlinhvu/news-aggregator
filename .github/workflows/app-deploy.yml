@@ -63,12 +63,22 @@ jobs:
           # tồn tại sẽ FAIL. Re-run workflow trên cùng commit là chuyện thường —
           # sau một lỗi vặt, hoặc sau khi approval hết hạn — nên bước này phải
           # idempotent: có tag rồi thì dùng lại digest thay vì push.
-          if aws ecr describe-images --repository-name $ECR_REPO \
-               --image-ids imageTag=$TAG >/dev/null 2>&1; then
+          #
+          # KHÔNG nuốt stderr ở đây. Chỉ `ImageNotFoundException` mới có nghĩa là
+          # "chưa có tag"; mọi lỗi khác (AccessDenied, throttling) mà bị hiểu thành
+          # thế sẽ rơi xuống nhánh push và chết bằng `ImmutableTagCannotBeUpdated`
+          # — một lỗi nằm cách xa nguyên nhân thật. Task 19 đã mất một vòng debug
+          # đúng vì thế: role thiếu `ecr:DescribeImages`, nhưng `2>&1` giấu mất và
+          # lỗi chỉ hiện ra ở lệnh describe kế tiếp.
+          if out=$(aws ecr describe-images --repository-name $ECR_REPO \
+                     --image-ids imageTag=$TAG 2>&1); then
             echo "::notice::$TAG đã có trong ECR — bỏ qua push, dùng lại digest"
-          else
+          elif grep -q 'ImageNotFoundException' <<<"$out"; then
             docker tag app:local $ECR_REGISTRY/$ECR_REPO:$TAG
             docker push $ECR_REGISTRY/$ECR_REPO:$TAG
+          else
+            echo "$out" >&2
+            exit 1
           fi
           D=$(aws ecr describe-images --repository-name $ECR_REPO \
                 --image-ids imageTag=$TAG --query 'imageDetails[0].imageDigest' --output text)
@@ -98,7 +108,11 @@ jobs:
             --value "${{ needs.build.outputs.digest }}" --overwrite
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
-          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+          # `-v2` CỐ Ý: waiter `function-updated` poll `GetFunctionConfiguration`,
+          # còn `function-updated-v2` poll `GetFunction` — đúng action mà
+          # AppDeployRole đã được cấp. Đổi tên waiter ở đây thì không phải nới
+          # thêm quyền cho role (CicdStack).
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
   smoke-dev:
     needs: [build, dev]
     uses: ./.github/workflows/smoke.yml
@@ -131,7 +145,7 @@ jobs:
             --value "${{ needs.build.outputs.digest }}" --overwrite
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
-          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
   smoke-qa:
     needs: [ build, qa ]
     uses: ./.github/workflows/smoke.yml
@@ -164,7 +178,7 @@ jobs:
             --value "${{ needs.build.outputs.digest }}" --overwrite
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
-          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
   smoke-prod:
     needs: [ build, prod ]
     uses: ./.github/workflows/smoke.yml

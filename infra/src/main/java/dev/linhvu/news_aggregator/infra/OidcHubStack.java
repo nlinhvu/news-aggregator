@@ -38,6 +38,15 @@ public class OidcHubStack extends Stack {
 		IRepository repo = Repository.fromRepositoryName(
 				this, "AppRepository", EnvConfig.ECR_REPOSITORY_NAME);
 		repo.grantPush(buildRole);
+		// `grantPush` dừng lại ở các action GHI. Nhưng `app-deploy.yml` còn phải
+		// ĐỌC lại image vừa push — lấy digest để ba môi trường promote đúng một
+		// image, và kiểm tra tag đã tồn tại chưa để re-run không đâm vào tag
+		// IMMUTABLE. Không grant helper nào của CDK gộp đủ hai nhu cầu đó, nên
+		// action này phải thêm tường minh.
+		buildRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("ecr:DescribeImages"))
+				.resources(List.of(repo.getRepositoryArn()))
+				.build());
 
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			String env = cfg.tagPrefix();

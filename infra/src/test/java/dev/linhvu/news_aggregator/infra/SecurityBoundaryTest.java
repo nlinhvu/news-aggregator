@@ -115,6 +115,64 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Build role còn phải ĐỌC được image vừa push — `grantPush` KHÔNG cấp quyền đó.
+	 *
+	 * `repo.grantPush()` chỉ cấp đúng năm action ghi cộng `ecr:GetAuthorizationToken`.
+	 * Nhưng `app-deploy.yml` gọi `aws ecr describe-images` hai lần: một lần kiểm tra
+	 * tag đã tồn tại chưa (idempotency), một lần lấy digest để ba job môi trường
+	 * promote. Cả hai cần `ecr:DescribeImages`.
+	 *
+	 * Chế độ hỏng của nó độc ở chỗ THỨ TỰ: `docker push` thành công rồi mới chết ở
+	 * bước đọc digest. Tag đã nằm trong ECR, mà repo đặt IMMUTABLE — nên khi re-run
+	 * đúng commit đó, lần describe kiểm tra idempotency (bị `2>&1` nuốt stderr) vẫn
+	 * ngã sang nhánh push và chết bằng `ImmutableTagCannotBeUpdated`, một lỗi hoàn
+	 * toàn KHÁC che mất nguyên nhân thật. Đã trả giá thật ở Task 19.
+	 */
+	@Test
+	void build_role_doc_duoc_digest_cua_image() {
+		assertTrue(buildRoleResourceFor("ecr:DescribeImages")
+						.contains(":repository/news-aggregator"),
+				"GhaBuildRole phải được ecr:DescribeImages trên chính repo app");
+	}
+
+	/**
+	 * Trả về Resource của statement cấp {@code action} cho `GhaBuildRole`, dạng
+	 * chuỗi — rỗng nếu không có statement nào cấp action đó.
+	 *
+	 * Đọc thủ công thay vì dùng `Match` là CỐ Ý. Cùng một policy được CDK render
+	 * ra HAI hình dạng khác nhau: `minimizePolicies` gộp action vào chung một
+	 * mảng khi các statement trùng resource, mà resource chỉ trùng khi stack có
+	 * `env` tường minh (ARN thành chuỗi literal). Test dựng stack KHÔNG `env`
+	 * nên ARN là `Fn::Join`, hai statement không gộp, và statement một-action
+	 * lại được render thành chuỗi chứ không phải mảng.
+	 *
+	 * Nghĩa là một assertion bám theo hình dạng sẽ báo đỏ GIẢ ngay khi ai đó
+	 * thêm `env` vào stack trong test — dù policy không đổi gì. Chuẩn hoá về
+	 * danh sách rồi mới so là cách giữ cho test kiểm tra ĐIỀU KIỆN IAM thật.
+	 */
+	@SuppressWarnings("unchecked")
+	private String buildRoleResourceFor(String action) {
+		for (Map<String, Object> policy : oidcHub()
+				.findResources("AWS::IAM::Policy").values()) {
+			Map<String, Object> props = (Map<String, Object>) policy.get("Properties");
+			if (!String.valueOf(props.get("PolicyName")).startsWith("GhaBuildRole")) {
+				continue;
+			}
+			Map<String, Object> doc = (Map<String, Object>) props.get("PolicyDocument");
+			for (Map<String, Object> stmt
+					: (List<Map<String, Object>>) doc.get("Statement")) {
+				Object actions = stmt.get("Action");
+				List<Object> list = actions instanceof List
+						? (List<Object>) actions : List.of(actions);
+				if (list.contains(action)) {
+					return String.valueOf(stmt.get("Resource"));
+				}
+			}
+		}
+		return "";
+	}
+
+	/**
 	 * Hệ quả của test trên: registry không cần role trung gian nào. Thêm một role
 	 * chỉ để cấp quyền push trong CÙNG account không tạo thêm ranh giới, chỉ thêm
 	 * một hop nữa để quên.
