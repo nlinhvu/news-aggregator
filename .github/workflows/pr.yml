@@ -44,7 +44,4 @@ jobs:
         with:
           node-version: '22'
 
-      - run: |
-          [ -f frontend/package.json ] || {
-            echo "::notice::frontend/ chưa có package.json — bỏ qua cho tới Task 27"; exit 0; }
-          cd frontend && npm ci && npm run build
+      - run: cd frontend && npm ci && npm run build

@@ -26,18 +26,12 @@ jobs:
       # dẫn tương đối nên KHÔNG có API URL riêng theo môi trường — cùng một
       # bundle chạy được cả ba.
       #
-      # Ở slice 1, frontend/ mới chỉ có index.html tĩnh và CHƯA có package.json,
-      # nên `npm ci` sẽ fail. Nhánh else không phải để "cho qua" — nó làm
-      # pipeline tiếp quản luôn việc `aws s3 cp` bằng tay ở Task 15, tức là đúng
-      # lời hứa của slice 1b: sau slice này không ai deploy bằng tay nữa.
-      # Từ Task 27, package.json xuất hiện và nhánh Vite tự động thay thế.
-      - run: |
-          if [ -f frontend/package.json ]; then
-            cd frontend && npm ci && npm run build
-          else
-            echo "::notice::frontend/ chưa có package.json — đóng gói index.html tĩnh"
-            mkdir -p frontend/dist && cp frontend/index.html frontend/dist/
-          fi
+      # Ở slice 1, chỗ này còn một nhánh else đóng gói index.html tĩnh khi
+      # frontend/ chưa có package.json. Đã gỡ ở Task 26: từ khi Vite vào,
+      # nhánh đó không bao giờ chạy nữa. Giữ lại thì nó chỉ còn một tác dụng
+      # duy nhất — biến việc mất package.json thành một bản deploy TĨNH, xanh
+      # lè, thay vì một job đỏ.
+      - run: cd frontend && npm ci && npm run build
       - uses: actions/upload-artifact@v4
         with: { name: spa, path: frontend/dist }
 
