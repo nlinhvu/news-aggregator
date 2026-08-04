@@ -1,0 +1,175 @@
+name: App deploy
+
+on:
+  push:
+    branches: [main]
+    # Allowlist chứ KHÔNG phải paths-ignore. Với paths-ignore, sửa
+    # `.github/workflows/infra-deploy.yml` cũng kích hoạt workflow này — hai
+    # pipeline cùng động vào một Lambda (`cdk deploy` vs `update-function-code`).
+    paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'Dockerfile'
+      - '.github/workflows/app-deploy.yml'
+
+# Cùng lý do như infra-deploy: có approval gate nên run treo lâu, không
+# serialize thì approve run cũ sẽ đẩy image CŨ lên qa/prod.
+concurrency:
+  group: app-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ECR_REGISTRY: 237076104209.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPO: news-aggregator
+
+jobs:
+  # Build MỘT LẦN. Ba môi trường sau đó promote CÙNG MỘT digest — đó là
+  # lý do ECR nằm ở tooling chứ không phải mỗi môi trường một registry.
+  build:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      sha: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: liberica, java-version: '25' }
+      - id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - run: ./gradlew test
+      - name: Build image bằng buildpack + Dockerfile LWA
+        run: |
+          ./gradlew bootBuildImage
+          docker build --build-arg COMMIT_SHA=${{ steps.sha.outputs.short }} -t app:local .
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::237076104209:role/GhaBuildRole
+          aws-region: us-east-1
+      - id: push
+        name: Push lên ECR với tag immutable
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+          # Tag mang GIT sha, để truy ngược image này build từ commit nào. Nó KHÔNG
+          # phải thứ dùng để deploy — deploy đi bằng image digest ở các job dưới.
+          TAG=main-${{ steps.sha.outputs.short }}
+          # RegistryStack đặt imageTagMutability=IMMUTABLE, nên push đè một tag đã
+          # tồn tại sẽ FAIL. Re-run workflow trên cùng commit là chuyện thường —
+          # sau một lỗi vặt, hoặc sau khi approval hết hạn — nên bước này phải
+          # idempotent: có tag rồi thì dùng lại digest thay vì push.
+          if aws ecr describe-images --repository-name $ECR_REPO \
+               --image-ids imageTag=$TAG >/dev/null 2>&1; then
+            echo "::notice::$TAG đã có trong ECR — bỏ qua push, dùng lại digest"
+          else
+            docker tag app:local $ECR_REGISTRY/$ECR_REPO:$TAG
+            docker push $ECR_REGISTRY/$ECR_REPO:$TAG
+          fi
+          D=$(aws ecr describe-images --repository-name $ECR_REPO \
+                --image-ids imageTag=$TAG --query 'imageDetails[0].imageDigest' --output text)
+          echo "digest=$D" >> $GITHUB_OUTPUT
+
+  dev:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    environment: dev
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - name: Chain sang AppDeployRole rồi cập nhật Lambda
+        run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/AppDeployRole --role-session-name app-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          # Ghi digest TRƯỚC, để lần `cdk deploy` sau không kéo lùi phiên bản.
+          aws ssm put-parameter --name /news/dev/image-digest --type String \
+            --value "${{ needs.build.outputs.digest }}" --overwrite
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+  smoke-dev:
+    needs: [build, dev]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: dev
+      site_url: https://news.na-dev.linhvu.dev
+      function_url: ${{ needs.dev.outputs.function_url }}
+      expected_commit: ${{ needs.build.outputs.sha }}
+
+  qa:
+    needs: [ build, smoke-dev ]
+    runs-on: ubuntu-24.04-arm
+    environment: qa            # chờ approval
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - name: Chain sang AppDeployRole rồi cập nhật Lambda
+        run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/AppDeployRole --role-session-name app-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          aws ssm put-parameter --name /news/qa/image-digest --type String \
+            --value "${{ needs.build.outputs.digest }}" --overwrite
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+  smoke-qa:
+    needs: [ build, qa ]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: qa
+      site_url: https://news.na-qa.linhvu.dev
+      function_url: ${{ needs.qa.outputs.function_url }}
+      expected_commit: ${{ needs.build.outputs.sha }}
+
+  prod:
+    needs: [ build, smoke-qa ]
+    runs-on: ubuntu-24.04-arm
+    environment: prod          # chờ approval
+    outputs:
+      function_url: ${{ steps.envvars.outputs.function_url }}
+    steps:
+      - id: envvars
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_HUB_ROLE }}
+          aws-region: us-east-1
+      - name: Chain sang AppDeployRole rồi cập nhật Lambda
+        run: |
+          creds=$(aws sts assume-role --role-arn arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/AppDeployRole --role-session-name app-deploy --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
+          aws ssm put-parameter --name /news/prod/image-digest --type String \
+            --value "${{ needs.build.outputs.digest }}" --overwrite
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda wait function-updated --function-name ${{ vars.LAMBDA_NAME }}
+  smoke-prod:
+    needs: [ build, prod ]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      environment: prod
+      site_url: https://news.linhvu.dev
+      function_url: ${{ needs.prod.outputs.function_url }}
+      expected_commit: ${{ needs.build.outputs.sha }}
