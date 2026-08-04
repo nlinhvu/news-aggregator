@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator.catalog;
 import java.util.List;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
+import dev.linhvu.news_aggregator.platform.NewsFeature;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,11 +32,28 @@ class ArticleController {
 		int effective = Math.clamp(
 				limit == null ? defaultLimit : limit, 1, maxLimit);
 
+		// Fail-closed: nếu đọc flag lỗi thì coi như OFF và request vẫn thành
+		// công. Lỗi đọc flag KHÔNG được làm hỏng cả trang (TDD §5.4).
+		//
+		// Lớp này chặn ở tầng ĐỌC và bổ sung cho — không thay thế —
+		// `FailClosedDynamoDbStateRepository`, thứ chặn ở tầng DỰNG repository.
+		// Cần cả hai: `FeatureContext.getFeatureManager()` còn ném
+		// `IllegalStateException` khi không tìm ra manager nào, và đó là lỗi nằm
+		// ngoài tầm với của state repository.
+		boolean showSummary;
+		try {
+			showSummary = NewsFeature.AI_SUMMARIZATION.isActive();
+		}
+		catch (RuntimeException e) {
+			showSummary = false;
+		}
+
+		final boolean include = showSummary;
 		return repository.findRecent(effective).stream()
 				.map(a -> new ArticleSummaryDto(
 						a.getArticleId(), a.getTitle(), a.getPublishedAt(),
 						a.getCanonicalUrl(), a.getSourceName(),
-						null))   // Task 32 nối summary vào đây theo feature flag
+						include ? a.getSummary() : null))
 				.toList();
 	}
 }
