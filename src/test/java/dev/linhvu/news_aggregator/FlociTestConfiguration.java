@@ -1,7 +1,21 @@
 package dev.linhvu.news_aggregator;
 
+import dev.linhvu.news_aggregator.catalog.Article;
 import io.floci.testcontainers.FlociContainer;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.BillingMode;
+import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
+import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndex;
+import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
+import software.amazon.awssdk.services.dynamodb.model.KeyType;
+import software.amazon.awssdk.services.dynamodb.model.Projection;
+import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
+import software.amazon.awssdk.services.dynamodb.model.ResourceInUseException;
+import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -21,5 +35,58 @@ public class FlociTestConfiguration {
 		return new FlociContainer("floci/floci:latest")
 				.disableAllServices()
 				.withDynamoDbConfig(b -> b.enabled(true));
+	}
+
+	/**
+	 * Schema sống ở ĐÂY, không ở trong test nào cả — fixture này đóng đúng vai
+	 * mà `DataStack` đóng trên AWS thật (master §4 nguyên tắc 7: schema thuộc
+	 * IaC, ứng dụng chỉ đọc/ghi). Ứng dụng KHÔNG được tự tạo bảng, nên mọi test
+	 * T2 phải nhận bảng từ bên ngoài.
+	 *
+	 * Đặt ở tầng config chứ không phải `@BeforeEach` của từng test là CỐ Ý: mỗi
+	 * Spring context lấy một container Floci riêng, nên test nào tự tạo bảng thì
+	 * chỉ tự cứu mình. `ArticleControllerTest` đã chết đúng vì lẽ đó — DynamoDB
+	 * phân biệt "bảng rỗng" với "không có bảng", và cái sau ném
+	 * `ResourceNotFoundException` chứ không trả về danh sách rỗng.
+	 *
+	 * Định nghĩa dưới đây phải soi gương `DataStack.articlesTable`. Hai module
+	 * không thấy nhau nên lệch nhau sẽ KHÔNG có lỗi compile: test vẫn xanh trong
+	 * khi prod hỏng. Sửa GSI ở một bên thì sửa cả bên kia.
+	 */
+	@Bean
+	InitializingBean articlesTableSchema(DynamoDbClient dynamoDbClient,
+			@Value("${news.catalog.table-name}") String tableName) {
+		return () -> {
+			try {
+				dynamoDbClient.createTable(CreateTableRequest.builder()
+						.tableName(tableName)
+						.keySchema(KeySchemaElement.builder()
+								.attributeName("articleId").keyType(KeyType.HASH).build())
+						.attributeDefinitions(
+								AttributeDefinition.builder().attributeName("articleId")
+										.attributeType(ScalarAttributeType.S).build(),
+								AttributeDefinition.builder().attributeName("listBucket")
+										.attributeType(ScalarAttributeType.S).build(),
+								AttributeDefinition.builder().attributeName("publishedAt")
+										.attributeType(ScalarAttributeType.S).build())
+						.globalSecondaryIndexes(GlobalSecondaryIndex.builder()
+								.indexName(Article.RECENT_INDEX)
+								.keySchema(
+										KeySchemaElement.builder().attributeName("listBucket")
+												.keyType(KeyType.HASH).build(),
+										KeySchemaElement.builder().attributeName("publishedAt")
+												.keyType(KeyType.RANGE).build())
+								.projection(Projection.builder()
+										.projectionType(ProjectionType.INCLUDE)
+										.nonKeyAttributes("title", "canonicalUrl",
+												"sourceName", "summary")
+										.build())
+								.build())
+						.billingMode(BillingMode.PAY_PER_REQUEST)
+						.build());
+			} catch (ResourceInUseException ignored) {
+				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
 	}
 }

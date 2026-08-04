@@ -8,6 +8,13 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecon
 @DynamoDbBean
 public class Article {
 
+	/**
+	 * Tên GSI cho AP1. Phải KHỚP TỪNG KÝ TỰ với `DataStack.RECENT_INDEX_NAME`
+	 * bên module `infra` — hai module không thấy nhau nên compiler không bắt
+	 * được, và lệch tên chỉ lộ ra lúc runtime dưới dạng `ResourceNotFoundException`.
+	 */
+	public static final String RECENT_INDEX = "gsi-recent";
+
 	/** Partition key hằng số của gsi-recent — xem TDD §6. */
 	public static final String LIST_BUCKET = "ALL";
 
@@ -23,11 +30,11 @@ public class Article {
 	public String getArticleId() { return articleId; }
 	public void setArticleId(String articleId) { this.articleId = articleId; }
 
-	@DynamoDbSecondaryPartitionKey(indexNames = "gsi-recent")
+	@DynamoDbSecondaryPartitionKey(indexNames = RECENT_INDEX)
 	public String getListBucket() { return listBucket; }
 	public void setListBucket(String listBucket) { this.listBucket = listBucket; }
 
-	@DynamoDbSecondarySortKey(indexNames = "gsi-recent")
+	@DynamoDbSecondarySortKey(indexNames = RECENT_INDEX)
 	public String getPublishedAt() { return publishedAt; }
 	public void setPublishedAt(String publishedAt) { this.publishedAt = publishedAt; }
 

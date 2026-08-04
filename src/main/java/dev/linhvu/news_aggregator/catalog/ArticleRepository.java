@@ -24,7 +24,7 @@ class ArticleRepository {
 	ArticleRepository(DynamoDbEnhancedClient client,
 			@Value("${news.catalog.table-name}") String tableName) {
 		this.table = client.table(tableName, TableSchema.fromBean(Article.class));
-		this.recentIndex = table.index("gsi-recent");
+		this.recentIndex = table.index(Article.RECENT_INDEX);
 	}
 
 	void save(Article article) {
