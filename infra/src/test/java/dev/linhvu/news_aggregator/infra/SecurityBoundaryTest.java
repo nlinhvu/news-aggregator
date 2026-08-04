@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import software.amazon.awscdk.App;
@@ -130,32 +131,60 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	void build_role_doc_duoc_digest_cua_image() {
-		assertTrue(buildRoleResourceFor("ecr:DescribeImages")
+		assertTrue(resourceForAction(oidcHub(), "GhaBuildRole", "ecr:DescribeImages")
 						.contains(":repository/news-aggregator"),
 				"GhaBuildRole phải được ecr:DescribeImages trên chính repo app");
 	}
 
 	/**
-	 * Trả về Resource của statement cấp {@code action} cho `GhaBuildRole`, dạng
-	 * chuỗi — rỗng nếu không có statement nào cấp action đó.
+	 * `AppDeployRole` phải TỰ có quyền đọc ECR ở account tooling.
 	 *
-	 * Đọc thủ công thay vì dùng `Match` là CỐ Ý. Cùng một policy được CDK render
-	 * ra HAI hình dạng khác nhau: `minimizePolicies` gộp action vào chung một
-	 * mảng khi các statement trùng resource, mà resource chỉ trùng khi stack có
-	 * `env` tường minh (ARN thành chuỗi literal). Test dựng stack KHÔNG `env`
-	 * nên ARN là `Fn::Join`, hai statement không gộp, và statement một-action
-	 * lại được render thành chuỗi chứ không phải mảng.
+	 * Truy cập cross-account cần allow ở CẢ HAI phía. Repo policy bên tooling cấp
+	 * cho `arn:aws:iam::<env>:root` mới chỉ DELEGATE quyền xuống account; principal
+	 * thực sự gọi API vẫn phải được identity-based policy của chính nó cho phép.
 	 *
-	 * Nghĩa là một assertion bám theo hình dạng sẽ báo đỏ GIẢ ngay khi ai đó
-	 * thêm `env` vào stack trong test — dù policy không đổi gì. Chuẩn hoá về
-	 * danh sách rồi mới so là cách giữ cho test kiểm tra ĐIỀU KIỆN IAM thật.
+	 * Thiếu vế này, `aws lambda update-function-code` trả về *"Lambda does not have
+	 * permission to access the ECR image. Check the ECR permissions."* — câu lỗi
+	 * trỏ thẳng vào ECR trong khi thứ thiếu nằm ở role BÊN NÀY, nên phản xạ đầu
+	 * tiên là đi sửa repo policy vốn đã đúng.
+	 *
+	 * `cdk deploy` KHÔNG bao giờ lộ ra lỗi này: nó chạy bằng
+	 * `cdk-…-cfn-exec-role` vốn gắn AdministratorAccess, nên vế identity luôn
+	 * thoả. Chỉ pipeline ứng dụng — chạy bằng role hẹp — mới đụng phải. Đó là lý
+	 * do image bootstrap deploy trót lọt mà `app-deploy.yml` thì chết (Task 19).
+	 */
+	@Test
+	void app_deploy_role_keo_duoc_image_tu_tooling() {
+		for (String action : List.of("ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer")) {
+			assertEquals("arn:aws:ecr:us-east-1:" + EnvConfig.TOOLING_ACCOUNT
+							+ ":repository/news-aggregator",
+					resourceForAction(cicdStack(), "AppDeployRole", action),
+					"AppDeployRole phải được " + action + " trên repo ở tooling");
+		}
+	}
+
+	/**
+	 * Trả về Resource của statement cấp {@code action} trong policy có tên bắt đầu
+	 * bằng {@code policyPrefix}, dạng chuỗi — rỗng nếu không statement nào cấp.
+	 *
+	 * Đọc thủ công thay vì dùng `Match` là CỐ Ý. Cùng một policy được CDK render ra
+	 * HAI hình dạng khác nhau: `minimizePolicies` gộp action vào chung một mảng khi
+	 * các statement trùng resource, mà resource chỉ trùng khi stack có `env` tường
+	 * minh (ARN thành chuỗi literal). Stack dựng KHÔNG `env` thì ARN là `Fn::Join`,
+	 * hai statement không gộp, và statement một-action lại render thành chuỗi chứ
+	 * không phải mảng.
+	 *
+	 * Nghĩa là assertion bám theo hình dạng sẽ báo đỏ GIẢ ngay khi ai đó thêm `env`
+	 * vào stack trong test — dù policy không đổi gì. Chuẩn hoá về danh sách rồi mới
+	 * so là cách giữ cho test kiểm tra ĐIỀU KIỆN IAM thật.
 	 */
 	@SuppressWarnings("unchecked")
-	private String buildRoleResourceFor(String action) {
-		for (Map<String, Object> policy : oidcHub()
-				.findResources("AWS::IAM::Policy").values()) {
+	private String resourceForAction(Template template, String policyPrefix,
+			String action) {
+		for (Map<String, Object> policy
+				: template.findResources("AWS::IAM::Policy").values()) {
 			Map<String, Object> props = (Map<String, Object>) policy.get("Properties");
-			if (!String.valueOf(props.get("PolicyName")).startsWith("GhaBuildRole")) {
+			if (!String.valueOf(props.get("PolicyName")).startsWith(policyPrefix)) {
 				continue;
 			}
 			Map<String, Object> doc = (Map<String, Object>) props.get("PolicyDocument");

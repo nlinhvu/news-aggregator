@@ -36,6 +36,19 @@ public class CicdStack extends Stack {
 				.resources(List.of("arn:aws:ssm:" + cfg.region() + ":" + cfg.account()
 						+ ":parameter/news/" + cfg.tagPrefix() + "/image-digest"))
 				.build());
+		// Cross-account cần allow ở CẢ HAI phía. Repo policy bên tooling cấp cho
+		// `arn:aws:iam::<env>:root` mới chỉ DELEGATE quyền xuống account này —
+		// principal gọi API vẫn phải được chính identity-based policy của nó cho
+		// phép. Thiếu nó, `lambda:UpdateFunctionCode` trả về "Lambda does not have
+		// permission to access the ECR image", câu lỗi trỏ vào ECR trong khi thứ
+		// thiếu nằm ở ĐÂY. `cdk deploy` không lộ ra vì cdk-…-cfn-exec-role có
+		// AdministratorAccess; chỉ pipeline ứng dụng mới đụng.
+		appDeploy.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"))
+				.resources(List.of("arn:aws:ecr:" + EnvConfig.TOOLING_REGION + ":"
+						+ EnvConfig.TOOLING_ACCOUNT + ":repository/"
+						+ EnvConfig.ECR_REPOSITORY_NAME))
+				.build());
 
 		Role webDeploy = Role.Builder.create(this, "WebDeployRole")
 				.roleName("WebDeployRole")
