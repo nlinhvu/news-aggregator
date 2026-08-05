@@ -90,20 +90,14 @@ jobs:
     environment: dev
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
-      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
-      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
-      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
-      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
-      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
-      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: |
-          {
-            echo "function_url=${{ vars.FUNCTION_URL }}"
-            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
-            echo "function_name=${{ vars.LAMBDA_NAME }}"
-          } >> "$GITHUB_OUTPUT"
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      # `uses: ./...` cần file action nằm trên đĩa. Sparse checkout chỉ lấy
+      # thư mục action, không kéo cả repo.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_HUB_ROLE }}
@@ -124,6 +118,15 @@ jobs:
           # AppDeployRole đã được cấp. Đổi tên waiter ở đây thì không phải nới
           # thêm quyền cho role (CicdStack).
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
+      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
+      # này đã có `environment:` — điều kiện để OIDC token mang claim
+      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
+      - uses: ./.github/actions/invoke-scheduled
+        with:
+          environment: dev
+          account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-dev:
     needs: [build, dev]
     uses: ./.github/workflows/smoke.yml
@@ -131,8 +134,6 @@ jobs:
       environment: dev
       site_url: https://news.na-dev.linhvu.dev
       function_url: ${{ needs.dev.outputs.function_url }}
-      smoke_role: ${{ needs.dev.outputs.smoke_role }}
-      function_name: ${{ needs.dev.outputs.function_name }}
       expected_commit: ${{ needs.build.outputs.sha }}
 
   qa:
@@ -141,20 +142,14 @@ jobs:
     environment: qa            # chờ approval
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
-      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
-      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
-      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
-      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
-      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
-      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: |
-          {
-            echo "function_url=${{ vars.FUNCTION_URL }}"
-            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
-            echo "function_name=${{ vars.LAMBDA_NAME }}"
-          } >> "$GITHUB_OUTPUT"
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      # `uses: ./...` cần file action nằm trên đĩa. Sparse checkout chỉ lấy
+      # thư mục action, không kéo cả repo.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_HUB_ROLE }}
@@ -170,6 +165,15 @@ jobs:
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
+      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
+      # này đã có `environment:` — điều kiện để OIDC token mang claim
+      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
+      - uses: ./.github/actions/invoke-scheduled
+        with:
+          environment: qa
+          account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-qa:
     needs: [ build, qa ]
     uses: ./.github/workflows/smoke.yml
@@ -177,8 +181,6 @@ jobs:
       environment: qa
       site_url: https://news.na-qa.linhvu.dev
       function_url: ${{ needs.qa.outputs.function_url }}
-      smoke_role: ${{ needs.qa.outputs.smoke_role }}
-      function_name: ${{ needs.qa.outputs.function_name }}
       expected_commit: ${{ needs.build.outputs.sha }}
 
   prod:
@@ -187,20 +189,14 @@ jobs:
     environment: prod          # chờ approval
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
-      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
-      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
-      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
-      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
-      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
-      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: |
-          {
-            echo "function_url=${{ vars.FUNCTION_URL }}"
-            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
-            echo "function_name=${{ vars.LAMBDA_NAME }}"
-          } >> "$GITHUB_OUTPUT"
+        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+      # `uses: ./...` cần file action nằm trên đĩa. Sparse checkout chỉ lấy
+      # thư mục action, không kéo cả repo.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_HUB_ROLE }}
@@ -216,6 +212,15 @@ jobs:
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
+      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
+      # này đã có `environment:` — điều kiện để OIDC token mang claim
+      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
+      - uses: ./.github/actions/invoke-scheduled
+        with:
+          environment: prod
+          account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-prod:
     needs: [ build, prod ]
     uses: ./.github/workflows/smoke.yml
@@ -223,6 +228,4 @@ jobs:
       environment: prod
       site_url: https://news.linhvu.dev
       function_url: ${{ needs.prod.outputs.function_url }}
-      smoke_role: ${{ needs.prod.outputs.smoke_role }}
-      function_name: ${{ needs.prod.outputs.function_name }}
       expected_commit: ${{ needs.build.outputs.sha }}

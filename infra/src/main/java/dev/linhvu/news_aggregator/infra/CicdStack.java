@@ -84,8 +84,12 @@ public class CicdStack extends Stack {
 		// chiếu được resource của stack ở account khác nên nó dựng ARN bằng chuỗi.
 		// Tên sinh tự động sẽ khiến chuỗi đó sai và job smoke đỏ ở bước AssumeRole,
 		// với thông báo không liên quan gì tới nguyên nhân.
+		//
+		// KHÔNG hậu tố theo môi trường. Mỗi môi trường là một ACCOUNT riêng, nên
+		// account id trong ARN đã tách chúng ra rồi — `-dev` chỉ lặp lại thông tin
+		// đã có. Đặt tên trần giống `AppDeployRole` và `WebDeployRole` ngay trên.
 		Role smokeRole = Role.Builder.create(this, "SmokeRole")
-				.roleName("NewsAggregator-Smoke-" + cfg.tagPrefix())
+				.roleName("SmokeRole")
 				.assumedBy(hub)
 				.build();
 		smokeRole.addToPolicy(PolicyStatement.Builder.create()

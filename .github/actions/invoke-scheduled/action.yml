@@ -1,0 +1,84 @@
+name: Invoke đường scheduled
+description: >
+  Gọi thẳng Lambda bằng payload của EventBridge Scheduler để kiểm chứng đường
+  LWA pass-through. Là composite action chứ không phải reusable workflow: nó
+  phải chạy như một STEP bên trong job deploy.
+
+# Vì sao không nằm trong smoke.yml (đã thử và hỏng thật, 2026-08-05):
+#
+# Đường scheduled không kiểm được bằng `curl` — không có URL public nào dẫn tới
+# nó — nên phải `aws lambda invoke`, và cái đó cần credential AWS. Credential
+# đến từ OIDC, mà claim `sub` của token phụ thuộc `environment:` CỦA JOB:
+#   - job có `environment: dev`  → sub = repo:<repo>:environment:dev
+#   - job không có               → sub = repo:<repo>:ref:refs/heads/main
+# `GhaHubRole-<Env>` ghim theo `environment:<env>` (ADR-0003 §7), nên một job
+# không khai `environment:` KHÔNG assume được nó. Job `smoke` cố ý không có
+# `environment:` vì prod có required reviewers và nó sẽ đòi approve lần thứ hai.
+#
+# Thử assume thẳng `SmokeRole` bằng OIDC cũng không được: OIDC provider chỉ tồn
+# tại ở account tooling, còn `SmokeRole` nằm ở account môi trường — STS trả
+# "The web identity token provided could not be validated", một câu lỗi không hề
+# gợi ý rằng nguyên nhân là thiếu provider ở account đó.
+#
+# Job deploy thì đã có `environment:` VÀ đã cầm credential của hub role. Chạy ở
+# đây là mượn đúng thứ đã có, không thêm role, không thêm approval.
+
+inputs:
+  environment:
+    description: dev | qa | prod — chỉ dùng cho thông báo lỗi
+    required: true
+  account_id:
+    description: Account của môi trường, để dựng ARN của SmokeRole
+    required: true
+  function_name:
+    description: Tên function cần invoke
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Invoke đường scheduled qua LWA pass-through
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        [ -n "${{ inputs.account_id }}" ] || {
+          echo "::error::[${{ inputs.environment }}] account_id rỗng — environment '${{ inputs.environment }}' thiếu vars.AWS_ACCOUNT_ID"; exit 1; }
+        [ -n "${{ inputs.function_name }}" ] || {
+          echo "::error::[${{ inputs.environment }}] function_name rỗng — environment '${{ inputs.environment }}' thiếu vars.LAMBDA_NAME"; exit 1; }
+
+        # ARN dựng tại chỗ từ account id, KHÔNG lấy từ một biến riêng: mỗi môi
+        # trường là một account, nên account id là phần DUY NHẤT thay đổi. Đúng
+        # cách app-deploy.yml và web-deploy.yml dựng ARN của AppDeployRole và
+        # WebDeployRole — hai role đó cũng không có biến riêng nào.
+        #
+        # Chuỗi "SmokeRole" phải khớp `CicdStack` .roleName(). Đây là chỗ DUY NHẤT
+        # nó xuất hiện phía CI, nên đổi tên role thì chỉ sửa một dòng ở đây.
+        SMOKE_ROLE="arn:aws:iam::${{ inputs.account_id }}:role/SmokeRole"
+
+        # Chain từ credential hub role mà job deploy đã cấu hình, sang SmokeRole.
+        # Cùng cách app-deploy.yml chain sang AppDeployRole. Credential tạm chỉ
+        # sống trong block này, không rò sang step sau.
+        creds=$(aws sts assume-role \
+          --role-arn "$SMOKE_ROLE" \
+          --role-session-name smoke-scheduled \
+          --query Credentials --output json)
+        export AWS_ACCESS_KEY_ID=$(jq -r .AccessKeyId <<<"$creds")
+        export AWS_SECRET_ACCESS_KEY=$(jq -r .SecretAccessKey <<<"$creds")
+        export AWS_SESSION_TOKEN=$(jq -r .SessionToken <<<"$creds")
+
+        aws lambda invoke \
+          --function-name "${{ inputs.function_name }}" \
+          --cli-binary-format raw-in-base64-out \
+          --payload '{"job":"ingest-feeds"}' \
+          /tmp/ingest.json > /tmp/meta.json
+        cat /tmp/meta.json
+        cat /tmp/ingest.json
+
+        # FunctionError xuất hiện khi hàm ném exception. Lambda vẫn trả HTTP 200
+        # cho lời gọi invoke, nên KHÔNG kiểm được bằng exit code của aws-cli.
+        if grep -q FunctionError /tmp/meta.json; then
+          echo "::error::[${{ inputs.environment }}] lượt ingestion ném lỗi"; exit 1
+        fi
+        jq -e 'has("discovered") and has("added") and has("failed")' /tmp/ingest.json \
+          || { echo "::error::[${{ inputs.environment }}] response không đúng hình dạng IngestResult"; exit 1; }
