@@ -31,15 +31,6 @@ jobs:
           aws-region: us-east-1
       - name: cdk deploy Dev
         run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Dev/*' --require-approval never
-      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
-      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
-      # này đã có `environment:` — điều kiện để OIDC token mang claim
-      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
-      - uses: ./.github/actions/invoke-scheduled
-        with:
-          environment: dev
-          account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-dev:
     needs: dev
     uses: ./.github/workflows/smoke.yml
@@ -65,15 +56,6 @@ jobs:
           role-to-assume: ${{ vars.AWS_HUB_ROLE }}
           aws-region: us-east-1
       - run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Qa/*' --require-approval never
-      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
-      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
-      # này đã có `environment:` — điều kiện để OIDC token mang claim
-      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
-      - uses: ./.github/actions/invoke-scheduled
-        with:
-          environment: qa
-          account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-qa:
     needs: qa
     uses: ./.github/workflows/smoke.yml
@@ -99,15 +81,6 @@ jobs:
           role-to-assume: ${{ vars.AWS_HUB_ROLE }}
           aws-region: us-east-1
       - run: cd infra && npx --yes aws-cdk@2.1134.0 deploy 'Prod/*' --require-approval never
-      # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
-      # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
-      # này đã có `environment:` — điều kiện để OIDC token mang claim
-      # `environment:<env>` mà GhaHubRole ghim theo. Xem comment trong action.
-      - uses: ./.github/actions/invoke-scheduled
-        with:
-          environment: prod
-          account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
   smoke-prod:
     needs: prod
     uses: ./.github/workflows/smoke.yml
