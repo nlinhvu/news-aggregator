@@ -24,8 +24,18 @@ class SecurityBoundaryTest {
 	}
 
 	private Template appStack() {
+		return appStack(EnvConfig.DEV);
+	}
+
+	/**
+	 * Từ Phase 2, `AppStack` KHÁC NHAU theo môi trường — `qa` cố ý không có
+	 * Schedule (TDD §17 #1) và nhịp của dev khác prod. Tham số hoá theo đúng
+	 * cách `DataStackTest#dataStack(EnvConfig)` đã làm, thay vì thêm ba helper
+	 * `devApp()/qaApp()/prodApp()` song song với helper sẵn có.
+	 */
+	private Template appStack(EnvConfig cfg) {
 		App app = new App();
-		AppStage stage = new AppStage(app, EnvConfig.DEV);
+		AppStage stage = new AppStage(app, cfg);
 		return Template.fromStack((software.amazon.awscdk.Stack)
 				stage.getNode().findChild("AppStack"));
 	}
@@ -343,13 +353,83 @@ class SecurityBoundaryTest {
 	 * Ở 1024 MB, cold start 23,5s so với `timeout` 30s chỉ còn 6,5s dư — một
 	 * image nặng hơn là quay lại 502. Đây là chế độ hỏng NGẪU NHIÊN và chỉ xảy
 	 * ra lúc cold, nên rất khó truy; test này ghim lại cả con số lẫn lý do.
+	 *
+	 * `Timeout` KHÔNG còn khẳng định ở đây: từ Phase 2 nó là 120s và lý do
+	 * thuộc về đường ingestion, không phải cold start — xem
+	 * {@link #timeout_du_cho_mot_luot_ingestion()}. Hai con số cùng nằm trong
+	 * một `Map.of` sẽ khiến bất kỳ ai chỉnh timeout cũng phải đọc lý do của
+	 * memory, và ngược lại.
 	 */
 	@Test
 	void lambda_du_cpu_cho_cold_start() {
 		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
-				"MemorySize", 2048,
-				"Timeout", 30
+				"MemorySize", 2048
 		)));
+	}
+
+	/**
+	 * `MaximumRetryAttempts` mặc định của EventBridge Scheduler là **185**
+	 * (AWS API reference). Không set tường minh nghĩa là một nguồn hỏng kéo dài
+	 * sẽ thành 185 lần invoke Lambda — đây là footgun về CHI PHÍ, và nó không có
+	 * triệu chứng nào ngoài hoá đơn.
+	 */
+	@Test
+	void schedule_gioi_han_retry_va_co_dlq() {
+		appStack().hasResourceProperties("AWS::Scheduler::Schedule", Match.objectLike(Map.of(
+				"Target", Match.objectLike(Map.of(
+						"RetryPolicy", Match.objectLike(Map.of(
+								"MaximumRetryAttempts", 2)),
+						"DeadLetterConfig", Match.anyValue())))));
+	}
+
+	/**
+	 * `qa` cố ý KHÔNG có schedule (TDD §17 #1): ba môi trường cùng đập vào blog
+	 * gốc mỗi giờ là ×3 lượng request từ một org. Deploy qa vẫn phải xanh —
+	 * chỉ là không có lượt ingestion nào chạy.
+	 */
+	@Test
+	void qa_khong_co_schedule() {
+		appStack(EnvConfig.QA).resourceCountIs("AWS::Scheduler::Schedule", 0);
+	}
+
+	@Test
+	void prod_chay_moi_gio_dev_moi_sau_gio() {
+		appStack(EnvConfig.PROD).hasResourceProperties(
+				"AWS::Scheduler::Schedule",
+				Match.objectLike(Map.of("ScheduleExpression", "rate(1 hour)")));
+		appStack(EnvConfig.DEV).hasResourceProperties(
+				"AWS::Scheduler::Schedule",
+				Match.objectLike(Map.of("ScheduleExpression", "rate(6 hours)")));
+	}
+
+	/**
+	 * Path pass-through khai TƯỜNG MINH trong CDK dù nó trùng mặc định của LWA.
+	 * Lý do: nó phải grep được và test được, thay vì là hằng số ngầm nằm trong
+	 * binary của extension. Giá trị này phải khớp
+	 * `IngestionController.PASS_THROUGH_PATH` — hai repo không thấy nhau nên
+	 * compiler không bắt được lệch.
+	 *
+	 * Và nó phải KHÔNG nằm dưới `/api/*`: CloudFront chỉ route `/api/*` tới
+	 * Lambda origin, nên một path như `/api/events` biến đường ingestion thành
+	 * public — hỏng mà vẫn chạy được, đúng loại lỗi không có triệu chứng.
+	 */
+	@Test
+	void lwa_pass_through_path_khai_tuong_minh_va_khong_duoi_api() {
+		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"Environment", Match.objectLike(Map.of(
+						"Variables", Match.objectLike(Map.of(
+								"AWS_LWA_PASS_THROUGH_PATH", "/events")))))));
+	}
+
+	/**
+	 * Cold start median 15s CHỈ để boot Spring (Phase 1 §16). 30s để lại ~15s
+	 * cho việc fetch 4 feed — quá sát. Timeout cao không tốn tiền: Lambda tính
+	 * theo duration THẬT.
+	 */
+	@Test
+	void timeout_du_cho_mot_luot_ingestion() {
+		appStack().hasResourceProperties(
+				"AWS::Lambda::Function", Match.objectLike(Map.of("Timeout", 120)));
 	}
 
 	/**

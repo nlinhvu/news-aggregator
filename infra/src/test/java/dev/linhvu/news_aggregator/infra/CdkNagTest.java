@@ -53,6 +53,25 @@ class CdkNagTest {
 					+ "(Observability & Cost Governance, master §7). Phase 1 chỉ quan sát "
 					+ "qua CloudWatch log của Lambda, retention 14 ngày.",
 
+			"AwsSolutions-SQS3", "Queue `IngestDlq` CHÍNH LÀ dead-letter queue của "
+					+ "IngestSchedule — cấp DLQ cho một DLQ là đệ quy vô hạn, và cdk-nag "
+					+ "3.x không có cách đánh dấu 'đây là DLQ'. Rule KHÔNG tham số nên "
+					+ "entry này nuốt luôn SQS3 của MỌI queue thêm sau vào bất kỳ stack "
+					+ "nào — Phase 3 sẽ thêm queue thật, và khi ấy phải tự viết test "
+					+ "canh DLQ cho nó. Chốt chặn hiện tại cho đường ingestion là "
+					+ "SecurityBoundaryTest#schedule_gioi_han_retry_va_co_dlq.",
+
+			// Hash 76856677 là logical id CDK sinh cho `AppStack/Function`. Cùng loại
+			// footgun với entry SpaBucket bên dưới: đổi tên construct đó là entry lệch.
+			"AwsSolutions-IAM5[Resource::<Function76856677.Arn>:*]",
+			"Role do `scheduler.targets.LambdaInvoke` tự dựng. `Function#grantInvoke` "
+					+ "của CDK luôn cấp trên CẢ HAI `<arn>` và `<arn>:*` (vế thứ hai là "
+					+ "alias/version), và target L2 gọi thẳng `grantInvoke` — truyền role "
+					+ "tự viết vào `.role()` cũng không tránh được, vì chính target thêm "
+					+ "statement đó. Wildcard còn lại chỉ nằm ở phần QUALIFIER của đúng "
+					+ "MỘT function; function này chưa có alias hay version nào. Entry có "
+					+ "tham số nên nó chỉ áp cho đúng resource này.",
+
 			// Hash 48E1059F là logical id CDK sinh cho `EdgeStack/SpaBucket`. Đổi tên
 			// construct đó sẽ làm entry này lệch và test đỏ — khi ấy đọc tên rule mới
 			// trong thông báo lỗi rồi cập nhật lại, ĐỪNG nới thành `AwsSolutions-IAM5`

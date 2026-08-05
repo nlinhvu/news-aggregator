@@ -27,6 +27,11 @@ import software.amazon.awscdk.services.lambda.Handler;
 import software.amazon.awscdk.services.lambda.Runtime;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.amazon.awscdk.services.logs.RetentionDays;
+import software.amazon.awscdk.services.scheduler.Schedule;
+import software.amazon.awscdk.services.scheduler.ScheduleExpression;
+import software.amazon.awscdk.services.scheduler.ScheduleTargetInput;
+import software.amazon.awscdk.services.scheduler.targets.LambdaInvoke;
+import software.amazon.awscdk.services.sqs.Queue;
 import software.amazon.awscdk.services.ssm.StringParameter;
 import software.constructs.Construct;
 
@@ -103,6 +108,10 @@ public class AppStack extends Stack {
 		env.put("NEWS_ENV", cfg.tagPrefix());
 		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
 		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
+		// Khai TƯỜNG MINH dù trùng mặc định của LWA — để nó grep được và test
+		// được. Phải khớp `IngestionController.PASS_THROUGH_PATH` bên repo app;
+		// hai bên không thấy nhau nên compiler không bắt được lệch.
+		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)
@@ -113,7 +122,10 @@ public class AppStack extends Stack {
 						.build()))
 				.architecture(Architecture.ARM_64)
 				.memorySize(2048)
-				.timeout(Duration.seconds(30))
+				// 30s → 120s: cold start median 15s CHỈ để boot Spring (Phase 1 §16),
+				// để lại ~15s cho việc fetch 4 feed là quá sát. Timeout cao không
+				// tốn tiền — Lambda tính theo duration thật, không theo cấu hình.
+				.timeout(Duration.seconds(120))
 				.logGroup(logGroup)
 				.environment(env)
 				.build();
@@ -138,6 +150,33 @@ public class AppStack extends Stack {
 
 		CfnOutput.Builder.create(this, "FunctionUrl")
 				.value(this.functionUrl.getUrl()).build();
+
+		// Schedule và DLQ nằm trong AppStack chứ không tách stack riêng (TDD §17 #2):
+		// schedule là TRIGGER CỦA FUNCTION, tách ra sẽ thành một stack chỉ chứa
+		// một trigger trỏ ngược về stack bên cạnh.
+		if (cfg.ingestionRate() != null) {
+			Queue dlq = Queue.Builder.create(this, "IngestDlq")
+					.retentionPeriod(Duration.days(14))
+					.enforceSsl(true)
+					.build();
+
+			Schedule.Builder.create(this, "IngestSchedule")
+					.schedule(ScheduleExpression.rate(cfg.ingestionRate()))
+					.description("Kích hoạt một lượt ingestion RSS/Atom")
+					.target(LambdaInvoke.Builder.create(this.function)
+							// Payload là HỢP ĐỒNG, không phải mặc định của EventBridge:
+							// Phase 3 đổ message SQS vào cùng path /events, nên cần một
+							// discriminator. Chọn sẵn bây giờ tốn 0 dòng.
+							.input(ScheduleTargetInput.fromObject(
+									Map.of("job", "ingest-feeds")))
+							// MẶC ĐỊNH LÀ 185. Không set = một lỗi kéo dài thành 185
+							// lần invoke.
+							.retryAttempts(2)
+							.maxEventAge(Duration.minutes(15))
+							.deadLetterQueue(dlq)
+							.build())
+					.build();
+		}
 	}
 
 	public Function getFunction() {

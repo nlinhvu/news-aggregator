@@ -1,5 +1,6 @@
 package dev.linhvu.news_aggregator.infra;
 
+import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.Environment;
 import software.amazon.awscdk.RemovalPolicy;
 
@@ -25,7 +26,21 @@ public record EnvConfig(
 		 * `aws wafv2 list-web-acls --scope CLOUDFRONT` và điền vào đây. Bỏ bước
 		 * đó thì lần deploy EdgeStack THỨ HAI sẽ fail, không phải lần đầu.
 		 */
-		String wafWebAclArn
+		String wafWebAclArn,
+
+		/**
+		 * Nhịp chạy ingestion. `null` nghĩa là **không tạo Schedule** cho môi
+		 * trường này.
+		 *
+		 * `qa` để `null` có chủ đích: ba môi trường cùng poll blog gốc mỗi giờ
+		 * là ×3 lượng request từ một org, và master §8.4 coi lịch sự với nguồn
+		 * là ràng buộc chứ không phải phép xã giao. `qa` tồn tại để kiểm chứng
+		 * deploy, không để tích luỹ dữ liệu.
+		 *
+		 * `prod` 1 giờ là con số master §3.1 yêu cầu: "bài mới trong vòng tối đa
+		 * một giờ". Đó là yêu cầu của prod, không phải của cả ba.
+		 */
+		Duration ingestionRate
 ) {
 
 	public static final EnvConfig DEV = new EnvConfig(
@@ -33,17 +48,20 @@ public record EnvConfig(
 			"na-dev.linhvu.dev", "news.na-dev.linhvu.dev",
 			RemovalPolicy.DESTROY, false, "dev",
 			"arn:aws:wafv2:us-east-1:440783445107:global/webacl/"
-					+ "CreatedByCloudFront-7ba3b475/82fc786b-fdcc-412e-9c40-053693386dc1");
+					+ "CreatedByCloudFront-7ba3b475/82fc786b-fdcc-412e-9c40-053693386dc1",
+			Duration.hours(6));
 
 	public static final EnvConfig QA = new EnvConfig(
 			"Qa", "517353742264", "us-east-1",
 			"na-qa.linhvu.dev", "news.na-qa.linhvu.dev",
-			RemovalPolicy.DESTROY, false, "qa", null);
+			RemovalPolicy.DESTROY, false, "qa", null,
+			null);
 
 	public static final EnvConfig PROD = new EnvConfig(
 			"Prod", "778799435139", "us-east-1",
 			"news.linhvu.dev", "news.linhvu.dev",
-			RemovalPolicy.RETAIN, true, "prod", null);
+			RemovalPolicy.RETAIN, true, "prod", null,
+			Duration.hours(1));
 
 
 	public static final String TOOLING_ACCOUNT = "237076104209";
