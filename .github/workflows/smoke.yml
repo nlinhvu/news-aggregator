@@ -12,6 +12,14 @@ on:
       function_url:
         required: true
         type: string
+      # Cùng lý do như function_url bên dưới: cả hai đều là biến ENVIRONMENT-SCOPED,
+      # nên chúng phải đi vào đây bằng INPUT chứ không đọc `vars.*` tại chỗ.
+      smoke_role:
+        required: true
+        type: string
+      function_name:
+        required: true
+        type: string
       expected_commit:
         required: false
         type: string
@@ -19,6 +27,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write     # MỚI — không có dòng này thì configure-aws-credentials
+                      # thất bại với "Could not load credentials", một thông báo
+                      # không hề gợi ý rằng nguyên nhân là permission của workflow
 
 jobs:
   smoke:
@@ -70,3 +81,37 @@ jobs:
           hdr=$(curl -sI "${{ inputs.site_url }}/api/health" | tr -d '\r')
           echo "$hdr" | grep -qi 'x-cache: *Hit' \
             && { echo "::error::[${{ inputs.environment }}] /api/* đang bị cache"; exit 1; } || true
+
+      # `required: true` của workflow_call KHÔNG bắt được chuỗi rỗng — job gọi
+      # vẫn truyền xuống được một biến chưa ai đặt. Kiểm ở đây để lỗi nói đúng
+      # nguyên nhân, thay vì để configure-aws-credentials chết bằng
+      # "Could not assume role with OIDC" ở bước sau.
+      - name: Xác nhận input của đường scheduled không rỗng
+        run: |
+          [ -n "${{ inputs.smoke_role }}" ] || { echo "::error::[${{ inputs.environment }}] smoke_role rỗng — environment này thiếu vars.AWS_SMOKE_ROLE"; exit 1; }
+          [ -n "${{ inputs.function_name }}" ] || { echo "::error::[${{ inputs.environment }}] function_name rỗng — environment này thiếu vars.LAMBDA_NAME"; exit 1; }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.smoke_role }}
+          aws-region: us-east-1
+
+      # Đường scheduled KHÔNG kiểm được bằng curl: không có URL public nào dẫn
+      # tới nó, và đó là thiết kế chứ không phải thiếu sót. Invoke trực tiếp là
+      # cách duy nhất để máy trả lời "pass-through có chạy không".
+      - name: Invoke đường scheduled qua LWA pass-through
+        run: |
+          aws lambda invoke \
+            --function-name "${{ inputs.function_name }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"job":"ingest-feeds"}' \
+            /tmp/ingest.json > /tmp/meta.json
+          cat /tmp/meta.json
+          cat /tmp/ingest.json
+          # FunctionError xuất hiện khi hàm ném exception. Lambda vẫn trả HTTP 200
+          # cho lời gọi invoke, nên KHÔNG kiểm được bằng exit code của aws-cli.
+          if grep -q FunctionError /tmp/meta.json; then
+            echo "::error::[${{ inputs.environment }}] lượt ingestion ném lỗi"; exit 1
+          fi
+          jq -e 'has("discovered") and has("added") and has("failed")' /tmp/ingest.json \
+            || { echo "::error::[${{ inputs.environment }}] response không đúng hình dạng IngestResult"; exit 1; }

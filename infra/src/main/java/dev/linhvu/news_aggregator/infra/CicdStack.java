@@ -2,6 +2,7 @@ package dev.linhvu.news_aggregator.infra;
 
 import java.util.List;
 
+import software.amazon.awscdk.CfnOutput;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.cloudfront.IDistribution;
@@ -73,5 +74,26 @@ public class CicdStack extends Stack {
 				.resources(List.of("arn:aws:cloudfront::" + cfg.account()
 						+ ":distribution/" + distribution.getDistributionId()))
 				.build());
+
+		// Role hẹp nhất chương trình: một action, một resource.
+		// KHÔNG gộp vào AppDeployRole — role đó có `lambda:UpdateFunctionCode`, và
+		// gộp lại nghĩa là job smoke (chạy sau MỌI lần deploy) mang theo quyền ghi
+		// code. Master §4 nguyên tắc 8: phân vân thì tách.
+		//
+		// `roleName` phải CỐ ĐỊNH: OidcHubStack nằm ở account tooling, không tham
+		// chiếu được resource của stack ở account khác nên nó dựng ARN bằng chuỗi.
+		// Tên sinh tự động sẽ khiến chuỗi đó sai và job smoke đỏ ở bước AssumeRole,
+		// với thông báo không liên quan gì tới nguyên nhân.
+		Role smokeRole = Role.Builder.create(this, "SmokeRole")
+				.roleName("NewsAggregator-Smoke-" + cfg.tagPrefix())
+				.assumedBy(hub)
+				.build();
+		smokeRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("lambda:InvokeFunction"))
+				.resources(List.of(function.getFunctionArn()))
+				.build());
+
+		CfnOutput.Builder.create(this, "SmokeRoleArn")
+				.value(smokeRole.getRoleArn()).build();
 	}
 }

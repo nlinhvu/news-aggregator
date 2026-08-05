@@ -58,7 +58,13 @@ public class OidcHubStack extends Stack {
 					.resources(List.of(
 							"arn:aws:iam::" + cfg.account() + ":role/cdk-*",
 							"arn:aws:iam::" + cfg.account() + ":role/AppDeployRole",
-							"arn:aws:iam::" + cfg.account() + ":role/WebDeployRole"))
+							"arn:aws:iam::" + cfg.account() + ":role/WebDeployRole",
+							// Dựng bằng CHUỖI, không bằng tham chiếu: stack này ở account
+							// tooling còn SmokeRole ở account môi trường, và CloudFormation
+							// không cross-account reference được. Đó là lý do CicdStack
+							// phải ghim `roleName` cố định — xem comment ở đó.
+							"arn:aws:iam::" + cfg.account()
+									+ ":role/NewsAggregator-Smoke-" + env))
 					.build());
 
 			CfnOutput.Builder.create(this, "HubRoleArn" + cfg.name())

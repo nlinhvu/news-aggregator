@@ -19,9 +19,20 @@ jobs:
     environment: dev
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
+      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
+      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
+      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
+      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
+      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
+      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "function_url=${{ vars.FUNCTION_URL }}"
+            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
+            echo "function_name=${{ vars.LAMBDA_NAME }}"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: liberica, java-version: '25' }
@@ -38,6 +49,8 @@ jobs:
       environment: dev
       site_url: https://news.na-dev.linhvu.dev
       function_url: ${{ needs.dev.outputs.function_url }}
+      smoke_role: ${{ needs.dev.outputs.smoke_role }}
+      function_name: ${{ needs.dev.outputs.function_name }}
 
   qa:
     needs: smoke-dev
@@ -45,9 +58,20 @@ jobs:
     environment: qa
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
+      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
+      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
+      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
+      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
+      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
+      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "function_url=${{ vars.FUNCTION_URL }}"
+            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
+            echo "function_name=${{ vars.LAMBDA_NAME }}"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: liberica, java-version: '25' }
@@ -63,6 +87,8 @@ jobs:
       environment: qa
       site_url: https://news.na-qa.linhvu.dev
       function_url: ${{ needs.qa.outputs.function_url }}
+      smoke_role: ${{ needs.qa.outputs.smoke_role }}
+      function_name: ${{ needs.qa.outputs.function_name }}
 
   prod:
     needs: smoke-qa
@@ -70,9 +96,20 @@ jobs:
     environment: prod
     outputs:
       function_url: ${{ steps.envvars.outputs.function_url }}
+      smoke_role: ${{ steps.envvars.outputs.smoke_role }}
+      function_name: ${{ steps.envvars.outputs.function_name }}
     steps:
+      # Job `smoke-*` KHÔNG có `environment:`, nên `vars.*` ở đó chỉ thấy biến cấp
+      # repository — cả ba biến dưới đây đều environment-scoped. Job này có
+      # `environment:` nên nó đọc hộ rồi truyền xuống qua output. Đọc thẳng
+      # `vars.AWS_SMOKE_ROLE` trong `with:` của smoke-* sẽ ra chuỗi RỖNG, im lặng.
       - id: envvars
-        run: echo "function_url=${{ vars.FUNCTION_URL }}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "function_url=${{ vars.FUNCTION_URL }}"
+            echo "smoke_role=${{ vars.AWS_SMOKE_ROLE }}"
+            echo "function_name=${{ vars.LAMBDA_NAME }}"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: liberica, java-version: '25' }
@@ -88,3 +125,5 @@ jobs:
       environment: prod
       site_url: https://news.linhvu.dev
       function_url: ${{ needs.prod.outputs.function_url }}
+      smoke_role: ${{ needs.prod.outputs.smoke_role }}
+      function_name: ${{ needs.prod.outputs.function_name }}

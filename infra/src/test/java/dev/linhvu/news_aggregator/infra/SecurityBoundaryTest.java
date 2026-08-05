@@ -212,6 +212,30 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * `SmokeRole` là role hẹp nhất trong chương trình: đúng MỘT action trên
+	 * đúng MỘT resource. Nó tồn tại vì đường scheduled không kiểm được bằng
+	 * `curl` — không có URL public nào dẫn tới nó, theo đúng thiết kế.
+	 *
+	 * Vế thứ hai mới là vế đáng giá. Job smoke chạy sau MỌI lần deploy, nên gộp
+	 * nó vào `AppDeployRole` — role đang có `lambda:UpdateFunctionCode` — nghĩa
+	 * là mỗi lượt kiểm tra sức khoẻ đều cầm sẵn quyền thay binary. Thừa quyền
+	 * không tạo ra triệu chứng nào, nên test là thứ duy nhất giữ được ranh giới.
+	 */
+	@Test
+	void smoke_role_chi_invoke_duoc_dung_mot_function() {
+		Template t = cicdStack();
+
+		assertFalse(resourceForAction(t, "SmokeRoleDefaultPolicy",
+						"lambda:InvokeFunction").isEmpty(),
+				"SmokeRole phải được lambda:InvokeFunction trên function của môi trường");
+		for (String action : List.of("lambda:UpdateFunctionCode", "lambda:GetFunction",
+				"ssm:PutParameter", "s3:PutObject")) {
+			assertTrue(resourceForAction(t, "SmokeRoleDefaultPolicy", action).isEmpty(),
+					"SmokeRole KHÔNG được cấp " + action + " — nó chỉ để invoke");
+		}
+	}
+
+	/**
 	 * Hệ quả của test trên: registry không cần role trung gian nào. Thêm một role
 	 * chỉ để cấp quyền push trong CÙNG account không tạo thêm ranh giới, chỉ thêm
 	 * một hop nữa để quên.
