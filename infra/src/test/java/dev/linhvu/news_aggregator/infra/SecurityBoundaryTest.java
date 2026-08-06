@@ -174,8 +174,25 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * Trả về Resource của statement cấp {@code action} trong policy có tên bắt đầu
-	 * bằng {@code policyPrefix}, dạng chuỗi — rỗng nếu không statement nào cấp.
+	 * Trả về Resource của statement ĐẦU TIÊN cấp {@code action} trong policy có tên
+	 * bắt đầu bằng {@code policyPrefix}, dạng chuỗi — rỗng nếu không statement nào
+	 * cấp.
+	 *
+	 * Chỉ dùng khi câu hỏi là "có được cấp không / cấp ở đâu" và cả stack chỉ có
+	 * MỘT statement cấp action đó. Khi cùng một action được cấp trên nhiều bảng —
+	 * từ Phase 2 thì `Scan`, `UpdateItem`, `PutItem` đều rơi vào diện này — hàm này
+	 * chỉ thấy statement đầu tiên và sẽ bỏ lọt statement thứ hai. Dùng
+	 * {@link #resourcesForAction} cho những trường hợp đó.
+	 */
+	private String resourceForAction(Template template, String policyPrefix,
+			String action) {
+		List<String> resources = resourcesForAction(template, policyPrefix, action);
+		return resources.isEmpty() ? "" : resources.get(0);
+	}
+
+	/**
+	 * Trả về Resource của MỌI statement cấp {@code action}, mỗi phần tử là một
+	 * statement — rỗng nếu không statement nào cấp.
 	 *
 	 * Đọc thủ công thay vì dùng `Match` là CỐ Ý. Cùng một policy được CDK render ra
 	 * HAI hình dạng khác nhau: `minimizePolicies` gộp action vào chung một mảng khi
@@ -187,10 +204,16 @@ class SecurityBoundaryTest {
 	 * Nghĩa là assertion bám theo hình dạng sẽ báo đỏ GIẢ ngay khi ai đó thêm `env`
 	 * vào stack trong test — dù policy không đổi gì. Chuẩn hoá về danh sách rồi mới
 	 * so là cách giữ cho test kiểm tra ĐIỀU KIỆN IAM thật.
+	 *
+	 * Ba bảng của ta nằm ở `DataStack` nên ARN sang tới đây là `Fn::ImportValue`,
+	 * và tên export mang theo logical id (`…ArticlesTable…Arn…`). Đó là lý do các
+	 * test dưới nhận diện bảng bằng `contains("ArticlesTable")` — chuỗi đó đến từ
+	 * CDK chứ không phải ta bịa ra.
 	 */
 	@SuppressWarnings("unchecked")
-	private String resourceForAction(Template template, String policyPrefix,
+	private List<String> resourcesForAction(Template template, String policyPrefix,
 			String action) {
+		List<String> resources = new java.util.ArrayList<>();
 		for (Map<String, Object> policy
 				: template.findResources("AWS::IAM::Policy").values()) {
 			Map<String, Object> props = (Map<String, Object>) policy.get("Properties");
@@ -204,11 +227,11 @@ class SecurityBoundaryTest {
 				List<Object> list = actions instanceof List
 						? (List<Object>) actions : List.of(actions);
 				if (list.contains(action)) {
-					return String.valueOf(stmt.get("Resource"));
+					resources.add(String.valueOf(stmt.get("Resource")));
 				}
 			}
 		}
-		return "";
+		return resources;
 	}
 
 	/**
@@ -467,22 +490,21 @@ class SecurityBoundaryTest {
 	 * wildcard. Nên riêng CdkNagTest là chưa đủ để chặn việc quay lại
 	 * `grantReadData`, và đó là lý do test này tồn tại.
 	 *
-	 * `Scan` thừa quyền ở đây tốn tiền chứ không chỉ là vấn đề an ninh: nó tính
-	 * theo kích thước BẢNG chứ không theo số item trả về (master §4 nguyên tắc 3).
+	 * Vế `Scan` KHÔNG còn ở đây. Tới Phase 2 thì `Scan` là quyền HỢP LỆ trên bảng
+	 * `sources`, nên khẳng định "Lambda không bao giờ có Scan" trở thành sai; nó
+	 * chuyển thành "không bao giờ trên `articles`" và có nhà riêng ở
+	 * {@link #khong_bao_gio_scan_bang_articles()}. Để lại một bản sao ở đây thì
+	 * lần sửa quy tắc tiếp theo sẽ chỉ sửa một trong hai chỗ.
 	 */
 	@Test
 	void lambda_chi_query_dung_index_gsi_recent() {
-		Template t = appStack();
-		String queryOn = resourceForAction(t, "FunctionRoleDefaultPolicy",
+		String queryOn = resourceForAction(appStack(), "FunctionRoleDefaultPolicy",
 				"dynamodb:Query");
 
 		assertTrue(queryOn.contains("/index/" + DataStack.RECENT_INDEX_NAME),
 				"Lambda phải được Query trên đúng index gsi-recent, thực tế: " + queryOn);
 		assertFalse(queryOn.contains("/index/*"),
 				"KHÔNG được cấp wildcard /index/*, thực tế: " + queryOn);
-		assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy",
-						"dynamodb:Scan").isEmpty(),
-				"Lambda KHÔNG bao giờ được cấp dynamodb:Scan — findRecent là Query");
 	}
 
 	/**
@@ -498,18 +520,112 @@ class SecurityBoundaryTest {
 	 *   IAM — xem runbook §"Floci KHÔNG cưỡng chế IAM").
 	 * - Có `UpdateItem` → ứng dụng ghi đè được trạng thái flag mà không ai để ý, vì
 	 *   thừa quyền không tạo ra triệu chứng nào.
+	 *
+	 * Vế phủ định soi theo BẢNG chứ không còn theo action. Tới Phase 2, cả ba action
+	 * ghi đều hợp lệ ở nơi khác — `PutItem` trên `articles`, `UpdateItem` trên
+	 * `sources` — nên "Lambda không có UpdateItem" là câu sai. Câu đúng, và cũng là
+	 * câu test này vẫn muốn nói từ đầu, là "không có trên bảng NÀY".
 	 */
 	@Test
 	void lambda_chi_doc_bang_feature_toggles() {
 		Template t = appStack();
+
 		for (String action : List.of("dynamodb:DescribeTable", "dynamodb:GetItem")) {
-			assertFalse(resourceForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
+			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action)
+							.contains("FeatureTogglesTable"),
 					"Lambda phải được " + action + " trên bảng feature-toggles");
 		}
 		for (String action : List.of("dynamodb:UpdateItem", "dynamodb:PutItem",
 				"dynamodb:DeleteItem")) {
-			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
-					"Lambda KHÔNG được cấp " + action + " — lật flag là việc của người vận hành");
+			for (String resource
+					: resourcesForAction(t, "FunctionRoleDefaultPolicy", action)) {
+				assertFalse(resource.contains("FeatureTogglesTable"),
+						"Lambda KHÔNG được cấp " + action + " trên bảng feature-toggles — "
+								+ "lật flag là việc của người vận hành, thực tế: " + resource);
+			}
+		}
+	}
+
+	/**
+	 * Đường GHI mở lần đầu trong chương trình — Phase 1 cố ý chỉ có `Query`.
+	 *
+	 * Hai vế phụ đáng giá hơn vế "có PutItem":
+	 * - Resource phải là ARN của BẢNG, không phải của index. `PutItem` trên
+	 *   `…/index/gsi-recent` là thứ synth vẫn xanh, cdk-nag vẫn im, và mọi lượt
+	 *   ingestion chết bằng AccessDenied trên môi trường thật. Đây là lỗi copy
+	 *   dòng `Query` ngay phía trên rồi đổi mỗi action.
+	 * - Đúng MỘT statement. `PutItem` là quyền ghi mạnh nhất Lambda có; nó lan
+	 *   sang bảng thứ hai thì phải là một quyết định có ý thức, không phải hệ quả
+	 *   phụ của việc ai đó sửa dòng `resources(...)`.
+	 */
+	@Test
+	void lambda_ghi_duoc_vao_articles() {
+		List<String> putOn = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
+				"dynamodb:PutItem");
+
+		assertEquals(1, putOn.size(),
+				"PutItem phải được cấp trên đúng một bảng, thực tế: " + putOn);
+		assertTrue(putOn.get(0).contains("ArticlesTable"),
+				"PutItem phải trỏ vào bảng articles, thực tế: " + putOn.get(0));
+		assertFalse(putOn.get(0).contains("/index/"),
+				"PutItem phải trỏ vào ARN của BẢNG chứ không phải index, thực tế: "
+						+ putOn.get(0));
+	}
+
+	/**
+	 * `Scan` xuất hiện lần đầu trong chương trình và CHỈ trên `sources` — bảng bị
+	 * chặn trên ~30 dòng bởi master §2. Bảng `articles` tăng vô hạn và `Scan` tính
+	 * tiền theo kích thước BẢNG chứ không theo số item trả về (master §4 nguyên
+	 * tắc 3), nên `Scan` trên nó phải là KHÔNG THỂ, không phải "không xảy ra".
+	 *
+	 * Kiểm cả hai vế, và vế "không articles" KHÔNG thừa dù đã có vế "phải là
+	 * sources": Resource của một statement được phép là MỘT DANH SÁCH ARN. Một
+	 * statement cấp `Scan` trên cả hai bảng vẫn thoả vế thứ nhất trong khi mở đúng
+	 * cái cửa mà test này tồn tại để đóng.
+	 */
+	@Test
+	void khong_bao_gio_scan_bang_articles() {
+		List<String> scanOn = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
+				"dynamodb:Scan");
+
+		assertFalse(scanOn.isEmpty(), "AP5 đọc mọi nguồn bằng Scan trên bảng sources");
+		for (String resource : scanOn) {
+			assertTrue(resource.contains("SourcesTable"),
+					"Scan chỉ được cấp trên bảng sources, thực tế: " + resource);
+			assertFalse(resource.contains("ArticlesTable"),
+					"Scan KHÔNG bao giờ được chạm bảng articles, thực tế: " + resource);
+		}
+	}
+
+	/**
+	 * Bảng `sources` là bảng duy nhất Lambda vừa đọc vừa ghi — và ranh giới nằm ở
+	 * CHỖ NÀO của item nó được ghi.
+	 *
+	 * `UpdateItem` là AP6: `SourceRepository.updateFetchState` chỉ đụng ba
+	 * attribute trạng thái (`etag`, `lastModified`, `lastFetchedAt`) bằng
+	 * UpdateExpression. `PutItem` thì ghi đè cả item — nghĩa là xoá luôn `name`,
+	 * `feedUrl`, `enabled`, những thứ do `sourcesSync` sở hữu và người vận hành
+	 * chạy bằng credential của chính họ.
+	 *
+	 * Thừa `PutItem` ở đây không tạo ra triệu chứng nào cho tới ngày một bug trong
+	 * ingestion tắt sạch cấu hình nguồn. Đó là lý do vế phủ định phải được canh.
+	 */
+	@Test
+	void lambda_chi_cap_nhat_trang_thai_bang_sources() {
+		Template t = appStack();
+
+		for (String action : List.of("dynamodb:Scan", "dynamodb:UpdateItem")) {
+			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action)
+							.contains("SourcesTable"),
+					"Lambda phải được " + action + " trên bảng sources");
+		}
+		for (String action : List.of("dynamodb:PutItem", "dynamodb:DeleteItem")) {
+			for (String resource
+					: resourcesForAction(t, "FunctionRoleDefaultPolicy", action)) {
+				assertFalse(resource.contains("SourcesTable"),
+						"Lambda KHÔNG được cấp " + action + " trên bảng sources — ghi cấu "
+								+ "hình là việc của sourcesSync, thực tế: " + resource);
+			}
 		}
 	}
 

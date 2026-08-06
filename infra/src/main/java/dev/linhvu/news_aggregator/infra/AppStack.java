@@ -106,6 +106,30 @@ public class AppStack extends Stack {
 				.resources(List.of(featureTogglesTable.getTableArn()))
 				.build());
 
+		// Đường GHI mở lần đầu trong chương trình. Đường HTTP không bao giờ dùng tới
+		// quyền này — đó là cái giá đã ghi nhận của ADR-0011 §7 khi từ chối phương án
+		// tách thành hai function.
+		//
+		// Resource là ARN của BẢNG, không phải của index như dòng `Query` phía trên.
+		// `PutItem` trên ARN index synth vẫn xanh và chỉ chết lúc runtime.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:PutItem"))
+				.resources(List.of(articlesTable.getTableArn()))
+				.build());
+
+		// AP5 + AP6. `Scan` chỉ trên bảng này — nó bị chặn trên ~30 dòng bởi master
+		// §2, trong khi `articles` tăng vô hạn và `Scan` tính tiền theo kích thước
+		// BẢNG chứ không theo số item trả về.
+		//
+		// `UpdateItem` chứ KHÔNG phải `PutItem`: `SourceRepository.updateFetchState`
+		// chỉ đụng ba attribute trạng thái bằng UpdateExpression. `PutItem` ghi đè cả
+		// item, tức xoá `name`/`feedUrl`/`enabled` — những thứ `sourcesSync` sở hữu và
+		// người vận hành ghi bằng credential của chính họ.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Scan", "dynamodb:UpdateItem"))
+				.resources(List.of(sourcesTable.getTableArn()))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
