@@ -5,10 +5,13 @@ import java.util.List;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbIndex;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
+import software.amazon.awssdk.enhanced.dynamodb.Expression;
 import software.amazon.awssdk.enhanced.dynamodb.Key;
 import software.amazon.awssdk.enhanced.dynamodb.TableSchema;
+import software.amazon.awssdk.enhanced.dynamodb.model.PutItemEnhancedRequest;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -29,6 +32,34 @@ class ArticleRepository {
 
 	void save(Article article) {
 		table.putItem(article);
+	}
+
+	/**
+	 * AP3. Ghi nếu chưa tồn tại, MỘT lời gọi, không cửa sổ race.
+	 *
+	 * `ConditionalCheckFailedException` là LUỒNG BÌNH THƯỜNG, không phải lỗi:
+	 * từ lượt thứ hai trở đi đa số item là trùng. Log nó ở mức lỗi là cách chắc
+	 * chắn để không ai đọc log nữa.
+	 *
+	 * Phương án `GetItem` rồi `PutItem` thực ra RẺ HƠN (~$0,02 so với ~$0,17
+	 * mỗi tháng — conditional write thất bại vẫn tốn WCU), nhưng nó có cửa sổ
+	 * race giữa hai lời gọi. Chênh lệch $0,15/tháng là nhiễu so với trần $5.
+	 *
+	 * @return true nếu article là MỚI
+	 */
+	boolean saveIfAbsent(Article article) {
+		try {
+			table.putItem(PutItemEnhancedRequest.builder(Article.class)
+					.item(article)
+					.conditionExpression(Expression.builder()
+							.expression("attribute_not_exists(articleId)")
+							.build())
+					.build());
+			return true;
+		}
+		catch (ConditionalCheckFailedException ex) {
+			return false;
+		}
 	}
 
 	/**

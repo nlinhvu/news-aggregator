@@ -1,8 +1,13 @@
 package dev.linhvu.news_aggregator;
 
+import java.lang.reflect.RecordComponent;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import org.springframework.modulith.core.ApplicationModules;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ModuleBoundaryTest {
 
@@ -17,5 +22,57 @@ class ModuleBoundaryTest {
 	@Test
 	void validModule() {
 		MODULES.verify();
+	}
+
+	/**
+	 * Điều kiện tiên quyết của ADR-0012. Phase 3 sẽ loại event type khỏi phạm vi
+	 * `ApplicationModules.verify()` để chấp nhận cycle `catalog ↔ summarization`;
+	 * khoảng trống đó chỉ bịt được nếu event record không thể mang theo type nội
+	 * bộ của publisher. Test này phải có TRƯỚC cái predicate kia.
+	 */
+	@Test
+	void event_record_chi_chua_string() {
+		List<Class<?>> eventTypes = List.of(
+				dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered.class,
+				dev.linhvu.news_aggregator.catalog.events.ArticleAdded.class);
+
+		for (Class<?> type : eventTypes) {
+			assertThat(type.isRecord())
+					.as("%s phải là record", type.getSimpleName()).isTrue();
+			for (RecordComponent component : type.getRecordComponents()) {
+				assertThat(component.getType())
+						.as("%s.%s phải là String", type.getSimpleName(),
+								component.getName())
+						.isEqualTo(String.class);
+			}
+		}
+	}
+
+	/**
+	 * `CanonicalUrl.articleId` (ingestion) và `CatalogIds.articleId` (catalog)
+	 * là trùng lặp có ý thức. Test này là thứ giữ cho chúng không trôi khỏi nhau.
+	 * Cả hai đều package-private nên test phải nằm đúng package tương ứng —
+	 * dùng phản chiếu ở đây thay vì mở visibility của production code.
+	 *
+	 * Nhiều URL chứ không một: hai hàm cùng trả hằng số cũng làm một phép so
+	 * đơn lẻ xanh, mà "cùng sai" thì lệch id là vĩnh viễn — dedupe chặn ghi lại.
+	 */
+	@Test
+	void hai_module_suy_ra_cung_mot_id() throws Exception {
+		var ingestion = Class.forName(
+						"dev.linhvu.news_aggregator.ingestion.CanonicalUrl")
+				.getDeclaredMethod("articleId", String.class);
+		var catalog = Class.forName(
+						"dev.linhvu.news_aggregator.catalog.CatalogIds")
+				.getDeclaredMethod("articleId", String.class);
+		ingestion.setAccessible(true);
+		catalog.setAccessible(true);
+
+		for (String url : List.of("https://spring.io/blog/post",
+				"https://a.test/1", "https://a.test/2", "")) {
+			assertThat(catalog.invoke(null, url))
+					.as("id của %s phải khớp giữa hai module", url)
+					.isEqualTo(ingestion.invoke(null, url));
+		}
 	}
 }

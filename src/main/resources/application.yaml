@@ -16,6 +16,12 @@ news:
     table-name: ${NEWS_TOGGLES_TABLE:feature-toggles}
   sources:
     table-name: ${NEWS_SOURCES_TABLE:sources}
+  ingestion:
+    user-agent: ${NEWS_USER_AGENT:NewsAggregator/1.0 (+https://news.linhvu.dev)}
+    connect-timeout: 5s
+    read-timeout: 10s
+    max-concurrency: 8
+    max-body-bytes: 5242880
 
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
