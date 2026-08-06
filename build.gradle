@@ -52,7 +52,7 @@ dependencies {
 //	implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
 //	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 //	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
-//	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 //	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 //	implementation 'org.springframework.boot:spring-boot-starter-websocket'
@@ -67,13 +67,21 @@ dependencies {
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
 	implementation "org.togglz:togglz-spring-boot-starter:${togglzVersion}"
 	implementation "org.togglz:togglz-dynamodb:${togglzVersion}"
+	// KHÔNG ghim version: BOM của Boot quản. Kéo theo woodstox-core + stax2-api.
+	implementation 'tools.jackson.dataformat:jackson-dataformat-xml'
 
-	// Source set `seed` đã extendsFrom implementation, nên hai dòng này là THỪA
+	// Source set `seed` đã extendsFrom implementation, nên mấy dòng này là THỪA
 	// về mặt resolve. Giữ tường minh vì `seed` không đi qua Spring: nếu sau này
 	// ứng dụng bỏ webmvc (kéo theo Jackson) hay đổi starter DynamoDB, seed sẽ
 	// vỡ lúc compile ở đây thay vì lặng lẽ mất dependency.
-	seedImplementation 'tools.jackson.core:jackson-databind'
-	seedImplementation 'software.amazon.awssdk:dynamodb-enhanced'
+	//
+	// Danh sách này phải soi gương thứ `seed` THẬT SỰ dùng, nếu không nó thành
+	// lời khai sai và mất hẳn tác dụng cảnh báo. Task 7 đổi cả ba:
+	// `jackson-databind` và `dynamodb-enhanced` đi theo `ArticleFixtures` /
+	// `SeedApplication`; `SourcesSyncApplication` đọc YAML và dùng client
+	// low-level.
+	seedImplementation 'org.yaml:snakeyaml'
+	seedImplementation 'software.amazon.awssdk:dynamodb'
 
 //	runtimeOnly 'org.postgresql:postgresql'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-actuator'
@@ -103,10 +111,10 @@ dependencies {
 	testImplementation "io.floci:spring-boot-testcontainers-floci:${flociTestcontainersVersion}"
 	testImplementation "org.togglz:togglz-junit:${togglzVersion}"
 
-	// Test T2 nạp ĐÚNG fixture mà seed ghi vào dev/qa/prod, qua ĐÚNG loader đó.
-	// `sourceSets.seed.output` mang theo cả class lẫn resource, nên `fixtures/
-	// articles.json` vào thẳng test classpath — không phải khai thêm srcDir.
-	testImplementation sourceSets.seed.output
+	// Task 7 gỡ `testImplementation sourceSets.seed.output`: `ArticleFixtures` và
+	// `fixtures/articles.json` đã về `src/test`, nên test không còn cần gì của
+	// seed. Hệ quả CỐ Ý: `SourcesSyncApplication` nằm NGOÀI tầm với của test —
+	// xem ⚠️ ở khối `sourcesSync` bên dưới.
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -121,13 +129,26 @@ dependencyManagement {
 
 tasks.named('test') {
 	useJUnitPlatform()
+
+	// `src/seed` KHÔNG có gì kéo nó vào build graph nữa. Trước Task 7 nó được
+	// `testImplementation sourceSets.seed.output` kéo vào gián tiếp; Task 7 gỡ
+	// dòng đó, và hệ quả kèm theo — đã đo: `./gradlew build` BUILD SUCCESSFUL
+	// với file Java sai cú pháp nằm trong `src/seed` — là seed rơi khỏi mọi
+	// đường kiểm. CI chạy `./gradlew test` nên móc vào đây, không phải `check`.
+	dependsOn 'compileSeedJava'
 }
 
-tasks.register('seedRun', JavaExec) {
+// ⚠️ `seed` KHÔNG nằm trên test classpath, nên `SourcesSyncApplication` không có
+// test tự động nào — kể cả tính chất quan trọng nhất của nó là "UpdateItem chứ
+// không PutItem, để etag của lượt fetch trước sống sót qua mỗi lần đồng bộ".
+// Đổi nó sang PutItem sẽ vô hiệu conditional GET của slice 4 mà mọi test vẫn
+// xanh. Chốt chặn hiện tại là bước kiểm tay trong runbook Phase 2
+// §"sourcesSync — kiểm chứng UpdateItem".
+tasks.register('sourcesSync', JavaExec) {
 	group = 'application'
-	description = 'Seed data into DynamoDB of destination environment'
+	description = 'Đồng bộ sources.yaml vào bảng sources của môi trường đích'
 	classpath = sourceSets.seed.runtimeClasspath
-	mainClass = 'dev.linhvu.seed.SeedApplication'
+	mainClass = 'dev.linhvu.seed.SourcesSyncApplication'
 }
 
 tasks.named('bootBuildImage') {

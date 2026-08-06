@@ -1,0 +1,22 @@
+# Danh sách nguồn là CẤU HÌNH, không phải fixture: nó có lịch sử git và đi qua
+# review. Trạng thái runtime (etag, lastModified, lastFetchedAt) KHÔNG nằm ở
+# đây — sourcesSync dùng UpdateItem nên nó không bao giờ đụng tới.
+#
+# Checklist bắt buộc khi THÊM một nguồn:
+#   1. curl -A 'NewsAggregator/1.0 (+https://news.linhvu.dev)' <feedUrl> → phải 200
+#   2. Kiểm robots.txt của host cho phép (master §8.4 — Phase 2 kiểm tay, Phase 5 mới có bản runtime)
+#   3. Ghi lại root element THẬT, đừng tin đuôi URL hay Content-Type
+sources:
+  - sourceId: spring-blog
+    name: Spring Blog
+    # Đo lại 2026-08-06: 200, robots.txt `Allow: /`. Đuôi .atom và header
+    # `application/atom+xml`, nhưng thân là <rss version="2.0">. Đây CHÍNH LÀ
+    # lý do slice 2 chọn nguồn này.
+    #
+    # Nguồn này phát `ETag` nhưng KHÔNG phát `Last-Modified` — tức lượt fetch
+    # đầu tiên của slice 4 rơi thẳng vào nhánh SET-etag + REMOVE-lastModified
+    # của `SourceRepository.updateFetchState`. Nhánh đó có test riêng
+    # (`record_fetch_set_va_remove_trong_cung_mot_luot`), không phải trường
+    # hợp giả định.
+    feedUrl: https://spring.io/blog.atom
+    enabled: true

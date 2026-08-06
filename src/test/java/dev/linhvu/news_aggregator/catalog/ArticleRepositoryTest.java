@@ -4,7 +4,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
-import dev.linhvu.seed.ArticleFixtures;
+import dev.linhvu.news_aggregator.ArticleFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,9 +21,14 @@ class ArticleRepositoryTest {
 	ArticleRepository repository;
 
 	/**
-	 * Nạp ĐÚNG fixture mà `SeedApplication` ghi vào dev/qa/prod — dữ liệu test
-	 * và dữ liệu đã seed không trôi khỏi nhau. Bảng do `FlociTestConfiguration`
+	 * Nạp fixture qua `ArticleFixtures` chứ không dựng `Article` tại chỗ, để
+	 * fixture hỏng làm đỏ test ngay tại máy. Bảng do `FlociTestConfiguration`
 	 * tạo, xem lý do ở đó.
+	 *
+	 * Phase 1 thì đây còn là fixture DÙNG CHUNG với `SeedApplication`, nên nó
+	 * cũng bảo đảm dữ liệu test khớp dữ liệu đã seed ở dev/qa/prod. Task 7 xoá
+	 * `SeedApplication` nên vế đó hết hiệu lực — bảng `articles` từ nay do
+	 * ingestion thật nạp.
 	 *
 	 * Chèn theo `publishedAt` TĂNG DẦN, tức NGƯỢC hẳn thứ tự mong đợi ở output.
 	 * Chèn theo đúng thứ tự trong file thì test vẫn xanh kể cả khi query trả về

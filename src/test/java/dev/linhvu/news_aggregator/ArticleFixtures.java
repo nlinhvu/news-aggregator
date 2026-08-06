@@ -1,4 +1,4 @@
-package dev.linhvu.seed;
+package dev.linhvu.news_aggregator;
 
 import java.io.InputStream;
 import java.util.List;
@@ -9,12 +9,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Fixture dùng chung giữa `SeedApplication` và test T2.
+ * Fixture article cho test T2.
  *
- * Tách ra để test không chỉ đọc cùng FILE mà còn đi qua cùng CODE PATH: một
- * fixture hỏng — sai cú pháp, hoặc mang field không còn tồn tại trên
- * {@link Article} — làm đỏ `./gradlew test` ngay tại máy, thay vì đợi tới lúc
- * chạy seed job trên môi trường thật.
+ * Phase 1 để file này ở source set `seed` vì nó dùng chung với
+ * `SeedApplication`. Task 7 xoá `SeedApplication` — bảng `articles` từ nay do
+ * ingestion thật nạp, không seed tay nữa — nên lý do "dùng chung" hết hiệu lực
+ * và nó về đúng chỗ của nó là `src/test`.
+ *
+ * Tính chất còn giữ nguyên: test đi qua {@link Article} và Jackson chứ không
+ * đọc JSON thô, nên một fixture hỏng — sai cú pháp, hoặc mang field không còn
+ * tồn tại trên {@link Article} — làm đỏ `./gradlew test` ngay tại máy.
  */
 public final class ArticleFixtures {
 

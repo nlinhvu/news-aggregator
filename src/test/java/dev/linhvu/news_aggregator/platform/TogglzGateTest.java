@@ -2,7 +2,7 @@ package dev.linhvu.news_aggregator.platform;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.catalog.Article;
-import dev.linhvu.seed.ArticleFixtures;
+import dev.linhvu.news_aggregator.ArticleFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

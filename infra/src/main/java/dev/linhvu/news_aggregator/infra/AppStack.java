@@ -74,8 +74,10 @@ public class AppStack extends Stack {
 		// là finding cdk-nag AwsSolutions-IAM5, và ở đây nó bắt đúng — cùng loại
 		// với `bucket.grantReadWrite()` đã bị thay ở CicdStack.
 		//
-		// Đường GHI duy nhất vào bảng là `SeedApplication`, một main riêng người
-		// vận hành chạy bằng credential của chính họ, không đi qua role này.
+		// Lambda CHỈ đọc bảng này. Phase 1 thì đường ghi duy nhất là
+		// `SeedApplication` (người vận hành chạy bằng credential của chính họ);
+		// Phase 2 Task 7 xoá nó, và đường ghi của ingestion thật được cấp quyền
+		// tường minh ở task riêng — KHÔNG phải ở dòng này.
 		// Thêm operation mới cho Lambda thì phải thêm action ở ĐÂY một cách có ý thức.
 		executionRole.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("dynamodb:Query"))
