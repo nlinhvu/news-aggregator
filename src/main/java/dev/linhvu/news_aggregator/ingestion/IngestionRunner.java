@@ -2,6 +2,11 @@ package dev.linhvu.news_aggregator.ingestion;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 import dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered;
 import dev.linhvu.news_aggregator.platform.IngestionRunMetrics;
@@ -10,6 +15,7 @@ import dev.linhvu.news_aggregator.sources.api.SourceView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -18,19 +24,25 @@ class IngestionRunner {
 
 	private static final Logger log = LoggerFactory.getLogger(IngestionRunner.class);
 
+	/** Nguồn thất bại. `ingestOne` chỉ trả về số đếm ≥ 0 nên không đụng nhau. */
+	private static final int THAT_BAI = -1;
+
 	private final SourceCatalog sources;
 	private final FeedFetcher fetcher;
 	private final FeedParser parser;
 	private final ApplicationEventPublisher events;
 	private final IngestionRunMetrics metrics;
+	private final int maxConcurrency;
 
 	IngestionRunner(SourceCatalog sources, FeedFetcher fetcher, FeedParser parser,
-			ApplicationEventPublisher events, IngestionRunMetrics metrics) {
+			ApplicationEventPublisher events, IngestionRunMetrics metrics,
+			@Value("${news.ingestion.max-concurrency}") int maxConcurrency) {
 		this.sources = sources;
 		this.fetcher = fetcher;
 		this.parser = parser;
 		this.events = events;
 		this.metrics = metrics;
+		this.maxConcurrency = maxConcurrency;
 	}
 
 	IngestResult run() {
@@ -44,19 +56,13 @@ class IngestionRunner {
 					"bảng sources rỗng — đã chạy ./gradlew sourcesSync chưa?");
 		}
 
-		int discovered = 0;
-		int failed = 0;
+		List<Integer> perSource = fetchAll(enabled);
 
-		// Slice 2: tuần tự. Song song thêm ở Task 17.
-		for (SourceView source : enabled) {
-			try {
-				discovered += ingestOne(source);
-			}
-			catch (Exception e) {
-				failed++;
-				log.warn("nguồn {} thất bại: {}", source.sourceId(), e.toString());
-			}
-		}
+		int discovered = perSource.stream()
+				.filter(n -> n != THAT_BAI)
+				.mapToInt(Integer::intValue)
+				.sum();
+		int failed = (int) perSource.stream().filter(n -> n == THAT_BAI).count();
 
 		// Ranh giới phải rõ, nếu không DLQ hoặc không bao giờ nhận gì, hoặc nhận
 		// mọi thứ: một nguồn hỏng là chuyện bình thường; KHÔNG nguồn nào chạy
@@ -70,6 +76,65 @@ class IngestionRunner {
 		log.info("ingestion run xong: discovered={} added={} failed={}",
 				result.discovered(), result.added(), result.failed());
 		return result;
+	}
+
+	/**
+	 * Virtual thread, KHÔNG `StructuredTaskScope` — cái sau vẫn là preview ở JDK
+	 * 25 (JEP 505) và cần `--enable-preview` trên image do buildpack dựng.
+	 *
+	 * Song song ở đây là LỊCH SỰ chứ không thô lỗ: etiquette cấm bắn nhiều
+	 * request vào CÙNG MỘT host, còn đây là 4 host khác nhau, mỗi host đúng một
+	 * request mỗi lượt. `Semaphore` giữ lời hứa đó khi danh sách nguồn lớn dần
+	 * tới trần ~30 của master §2 — `newVirtualThreadPerTaskExecutor` tự nó KHÔNG
+	 * chặn gì cả, nó vui vẻ dựng 30 thread cùng lúc.
+	 */
+	private List<Integer> fetchAll(List<SourceView> enabled) {
+		Semaphore permits = new Semaphore(maxConcurrency);
+		try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+			List<Future<Integer>> futures = enabled.stream()
+					.map(source -> executor.submit(() -> ingestOneIsolated(source, permits)))
+					.toList();
+			return futures.stream().map(IngestionRunner::join).toList();
+		}
+	}
+
+	/**
+	 * Cô lập mức NGUỒN. Bắt exception NGAY TẠI ĐÂY chứ không ở `Future.get()`:
+	 * chỉ ở đây mới còn `source` trong tay để nói rõ nguồn NÀO hỏng, và dòng log
+	 * đó là thứ duy nhất chỉ ra thủ phạm khi một nguồn im lặng chết.
+	 */
+	private int ingestOneIsolated(SourceView source, Semaphore permits)
+			throws InterruptedException {
+		permits.acquire();
+		try {
+			return ingestOne(source);
+		}
+		catch (Exception e) {
+			log.warn("nguồn {} thất bại: {}", source.sourceId(), e.toString());
+			return THAT_BAI;
+		}
+		finally {
+			// TRONG finally: một permit không trả sẽ treo lượt chạy tới khi
+			// Lambda hết giờ, và triệu chứng là timeout chứ không phải lỗi.
+			permits.release();
+		}
+	}
+
+	private static int join(Future<Integer> future) {
+		try {
+			return future.get();
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("lượt ingestion bị ngắt", e);
+		}
+		catch (ExecutionException e) {
+			// Lỗi của nguồn đã bị nuốt ở `ingestOneIsolated`, nên tới được đây
+			// nghĩa là chính task hỏng (acquire bị ngắt). Vẫn đếm là một nguồn
+			// thất bại chứ không để nó biến mất khỏi `failed`.
+			log.warn("task của một nguồn hỏng bất thường: {}", e.getCause().toString());
+			return THAT_BAI;
+		}
 	}
 
 	private int ingestOne(SourceView source) {
