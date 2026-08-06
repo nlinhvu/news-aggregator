@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:slash="http://purl.org/rss/1.0/modules/slash/" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/" xmlns:wfw="http://wellformedweb.org/CommentAPI/" version="2.0">
+
+<channel>
+	<title>AWS News Blog</title>
+	<atom:link href="https://aws.amazon.com/blogs/aws/feed/" rel="self" type="application/rss+xml"/>
+	<link>https://aws.amazon.com/blogs/aws/</link>
+	<description>Announcements, Updates, and Launches</description>
+	<lastBuildDate>Wed, 05 Aug 2026 14:45:10 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>
+	hourly	</sy:updatePeriod>
+	<sy:updateFrequency>
+	1	</sy:updateFrequency>
+	
+	<item>
+		<title>Amazon DynamoDB now supports real-time vector search at any scale</title>
+		<link>https://aws.amazon.com/blogs/aws/amazon-dynamodb-now-supports-real-time-vector-search-at-any-scale/</link>
+					
+		
+		<dc:creator><![CDATA[Esra Kayabali]]></dc:creator>
+		<pubDate>Wed, 05 Aug 2026 14:45:10 +0000</pubDate>
+				<category><![CDATA[Amazon DynamoDB]]></category>
+		<category><![CDATA[Announcements]]></category>
+		<category><![CDATA[Artificial Intelligence]]></category>
+		<category><![CDATA[Database]]></category>
+		<category><![CDATA[Generative AI]]></category>
+		<category><![CDATA[Launch]]></category>
+		<category><![CDATA[News]]></category>
+		<guid isPermaLink="false">13572f01241ca7108f49e50344decc868ddde5d7</guid>
+
+					<description>DynamoDB now supports native vector search with single-digit millisecond latency at 99%+ recall. It is designed for any scale, even trillions of vectors and requires zero infrastructure management.</description>
+										<content:encoded>&lt;p&gt;Nội dung đã cắt bớt cho fixture.&lt;/p&gt;</content:encoded>
+					
+					
+			
+		
+		
+			</item>
+	<item>
+		<title>AWS Weekly Roundup: Price reduction of GPT models in Bedrock, CloudWatch managed collectors for Prometheus metrics, and more (August 3, 2026)</title>
+		<link>https://aws.amazon.com/blogs/aws/aws-weekly-roundup-price-reduction-of-gpt-models-in-bedrock-cloudwatch-managed-collectors-for-prometheus-metrics-and-more-august-3-2026/</link>
+					
+		
+		<dc:creator><![CDATA[Micah Walter]]></dc:creator>
+		<pubDate>Mon, 03 Aug 2026 16:12:30 +0000</pubDate>
+				<category><![CDATA[Amazon Bedrock]]></category>
+		<category><![CDATA[Amazon CloudWatch]]></category>
+		<category><![CDATA[Amazon S3 Tables]]></category>
+		<category><![CDATA[AWS IAM Identity Center]]></category>
+		<category><![CDATA[Week in Review]]></category>
+		<guid isPermaLink="false">b0d8b064b69ed668c9ddbe686c1284b90aaefbe3</guid>
+
+					<description>Last week I had the joy of participating in Amazon’s “Bring Your Kids to Work Day” with my 7 year old son. We commuted together into the New York City office, his first real rush hour train ride, and spent the day exploring how Amazon uses AI, machine learning, and robotics to deliver packages to […]</description>
+										<content:encoded>&lt;p&gt;Nội dung đã cắt bớt cho fixture.&lt;/p&gt;</content:encoded>
+					
+					
+			
+		
+		
+			</item>
+	<item>
+		<title>AWS Weekly Roundup: Local Zone in Athens, Claude Opus 5 on AWS, Lambda durable execution for .NET, and more (July 27, 2026)</title>
+		<link>https://aws.amazon.com/blogs/aws/aws-weekly-roundup-july-27-2026/</link>
+					
+		
+		<dc:creator><![CDATA[Daniel Abib]]></dc:creator>
+		<pubDate>Mon, 27 Jul 2026 14:54:41 +0000</pubDate>
+				<category><![CDATA[Amazon Bedrock]]></category>
+		<category><![CDATA[Amazon Bedrock AgentCore]]></category>
+		<category><![CDATA[Amazon Connect]]></category>
+		<category><![CDATA[Amazon SageMaker AI]]></category>
+		<category><![CDATA[Announcements]]></category>
+		<category><![CDATA[AWS Lambda]]></category>
+		<category><![CDATA[AWS Local Zones]]></category>
+		<category><![CDATA[News]]></category>
+		<category><![CDATA[Week in Review]]></category>
+		<guid isPermaLink="false">77c18d2b47b8dea484a97205ea56792640d7b37a</guid>
+
+					<description>Last week I had the privilege of spending three days in São Paulo with technical builders from across Latin America, brought together for a regional tech event full of deep-dive sessions, hands-on workshops, and conversations with customers and partners. What struck me most wasn’t any single session, it was the energy of a technical community […]</description>
+										<content:encoded>&lt;p&gt;Nội dung đã cắt bớt cho fixture.&lt;/p&gt;</content:encoded>
+					
+					
+			
+		
+		
+			</item>
+	</channel>
+</rss>

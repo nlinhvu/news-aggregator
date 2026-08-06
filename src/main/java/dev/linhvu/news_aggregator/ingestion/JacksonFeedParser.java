@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import dev.linhvu.news_aggregator.ingestion.xml.AtomFeed;
 import dev.linhvu.news_aggregator.ingestion.xml.Rss2Feed;
 import tools.jackson.dataformat.xml.XmlMapper;
 
@@ -18,8 +19,6 @@ import org.springframework.stereotype.Component;
  * Blog phục vụ `<rss version="2.0">` dưới đuôi `.atom` VÀ header
  * `application/atom+xml`; Inside Java phục vụ Atom dưới `application/xml`. Ba
  * trên bốn nguồn khai sai hoặc mơ hồ.
- *
- * Atom được thêm ở Task 14 (slice 3).
  */
 @Component
 @Lazy
@@ -32,8 +31,10 @@ class JacksonFeedParser implements FeedParser {
 	 *
 	 * `:` PHẢI nằm trong lớp ký tự. Thiếu nó thì `<atom:feed>` không khớp được
 	 * gì cả và hàm ném "không tìm thấy root element" — vừa sai thông điệp, vừa
-	 * làm đoạn cắt tiền tố bên dưới thành code chết. Task 14 thêm Atom sẽ gãy
-	 * đúng ở đây với một nguồn khai namespace bằng tiền tố.
+	 * làm đoạn cắt tiền tố bên dưới thành code chết. Không nguồn nào trong
+	 * `sources.yaml` khai bằng tiền tố (Inside Java dùng xmlns mặc định), nên
+	 * nhánh này chỉ được giữ sống bằng test — xem
+	 * `bo_tien_to_namespace_o_root_element`.
 	 */
 	private static final Pattern ROOT_ELEMENT =
 			Pattern.compile("<([A-Za-z_][\\w.:-]*)(?:\\s|>|/)");
@@ -49,9 +50,31 @@ class JacksonFeedParser implements FeedParser {
 		String root = rootElement(body);
 		return switch (root) {
 			case "rss" -> parseRss(body);
+			case "feed" -> parseAtom(body);
 			default -> throw new IllegalArgumentException(
 					"root element không được hỗ trợ: " + root);
 		};
+	}
+
+	private List<ParsedItem> parseAtom(byte[] body) {
+		AtomFeed feed = xmlMapper.readValue(body, AtomFeed.class);
+		return feed.entries.stream()
+				.map(e -> new ParsedItem(e.title, alternateLink(e),
+						// `published` là ngày đăng; `updated` là ngày sửa cuối và
+						// LUÔN có mặt. Ưu tiên `published` để một lần sửa chính tả
+						// không đẩy bài cũ lên đầu danh sách.
+						e.published != null ? e.published : e.updated))
+				.toList();
+	}
+
+	private static String alternateLink(AtomFeed.Entry entry) {
+		return entry.links.stream()
+				.filter(l -> l.href != null)
+				// `rel` vắng mặt nghĩa là `alternate` theo RFC 4287 §4.2.7.2.
+				.filter(l -> l.rel == null || "alternate".equals(l.rel))
+				.map(l -> l.href)
+				.findFirst()
+				.orElse(entry.id);
 	}
 
 	private List<ParsedItem> parseRss(byte[] body) {

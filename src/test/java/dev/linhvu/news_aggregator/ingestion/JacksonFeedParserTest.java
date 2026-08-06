@@ -100,6 +100,115 @@ class JacksonFeedParserTest {
 				.isEqualTo("https://example.test/tu-guid");
 	}
 
+	/**
+	 * So GIÁ TRỊ CHÍNH XÁC vì lý do đã nêu ở test RSS: `isNotBlank()` xanh nguyên
+	 * khi hai trường đổi chỗ. Với Atom còn thêm một chỗ lệch nữa mà "không rỗng"
+	 * không bắt được — `published` và `updated` đều là ngày ISO hợp lệ, lấy nhầm
+	 * cái nào cũng qua.
+	 */
+	@Test
+	void parse_dung_gia_tri_cua_tung_entry_atom() throws IOException {
+		List<ParsedItem> items = parser.parse(fixture("feeds/inside-java.xml"));
+
+		assertThat(items).containsExactly(
+				new ParsedItem("Episode 65 “Embracing Virtual Threads with Helidon” [I/O]",
+						"https://inside.java/2026/08/06/podcast-065/",
+						"2026-08-06T00:00:00Z"),
+				new ParsedItem("Oracle Java Platform Extension for Visual Studio Code "
+						+ "- Version 26.0.1 Is Now Available",
+						"https://inside.java/2026/08/05/java-vscode-extension-update/",
+						"2026-08-05T00:00:00Z"),
+				new ParsedItem("Transitioning Java to More Frequent Security Updates",
+						"https://inside.java/2026/07/31/"
+								+ "transitioning-java-to-more-frequent-security-updates/",
+						"2026-07-31T00:00:00Z"));
+	}
+
+	/**
+	 * Atom để URL trong THUỘC TÍNH `href` của `<link>`, không phải trong nội
+	 * dung element như RSS. Một parser chép từ nhánh RSS sang sẽ lấy được chuỗi
+	 * rỗng — và chuỗi rỗng thì `CanonicalUrl.normalise` ném lỗi, nên triệu chứng
+	 * là "mọi item của nguồn Atom bị bỏ", không phải một exception rõ ràng.
+	 */
+	@Test
+	void atom_lay_link_tu_thuoc_tinh_href() throws IOException {
+		assertThat(parser.parse(fixture("feeds/inside-java.xml")))
+				.extracting(ParsedItem::link)
+				.allSatisfy(l -> assertThat(l).startsWith("http"));
+	}
+
+	/**
+	 * Atom cho phép NHIỀU `<link>` với `rel` khác nhau, và fixture Inside Java
+	 * chỉ có `alternate` — tức nhánh chọn lọc hoàn toàn không được kiểm nếu
+	 * không viết ra ở đây. Lấy nhầm sẽ dẫn người đọc tới trang bình luận thay vì
+	 * bài viết: URL vẫn hợp lệ, vẫn `http`, nên không có gì đỏ cả.
+	 */
+	@Test
+	void atom_chi_lay_link_alternate() {
+		byte[] atom = """
+				<?xml version="1.0"?>
+				<feed xmlns="http://www.w3.org/2005/Atom">
+				  <entry><title>Nhiều link</title>
+				    <link rel="replies" href="https://example.test/binh-luan"/>
+				    <link rel="alternate" href="https://example.test/bai-viet"/>
+				    <updated>2026-08-04T00:00:00Z</updated></entry>
+				</feed>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(atom)).singleElement()
+				.extracting(ParsedItem::link)
+				.isEqualTo("https://example.test/bai-viet");
+	}
+
+	/**
+	 * `published` là ngày đăng, `updated` là ngày sửa cuối và LUÔN có mặt. Ba
+	 * entry của fixture có hai giá trị trùng khít nhau, nên chỉ fixture thì lấy
+	 * nhầm trường vẫn xanh — hậu quả thật là một lần sửa chính tả đẩy bài cũ lên
+	 * đầu trang.
+	 *
+	 * Entry thứ hai giữ nhánh dự phòng: `published` vắng mặt thì phải rơi về
+	 * `updated`, không được ra `null` (`FeedDates` sẽ NPE ở tầng trên).
+	 */
+	@Test
+	void atom_uu_tien_published_hon_updated() {
+		byte[] atom = """
+				<?xml version="1.0"?>
+				<feed xmlns="http://www.w3.org/2005/Atom">
+				  <entry><title>Sửa chính tả hôm nay</title>
+				    <link rel="alternate" href="https://example.test/bai-cu"/>
+				    <updated>2026-08-06T00:00:00Z</updated>
+				    <published>2026-01-01T00:00:00Z</published></entry>
+				  <entry><title>Không có published</title>
+				    <link rel="alternate" href="https://example.test/chi-co-updated"/>
+				    <updated>2026-08-05T00:00:00Z</updated></entry>
+				</feed>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(atom))
+				.extracting(ParsedItem::publishedAt)
+				.containsExactly("2026-01-01T00:00:00Z", "2026-08-05T00:00:00Z");
+	}
+
+	/**
+	 * Nguồn RSS thứ hai, để nhánh RSS không bị ghim vào riêng cách Spring Blog
+	 * phát feed. AWS khác ở hai chỗ có thật: `guid` là chuỗi băm KHÔNG phải URL
+	 * (`isPermaLink="false"`), và `<atom:link>` nằm ngay trong `<channel>` —
+	 * cùng localName với `<link>` của RSS.
+	 */
+	@Test
+	void parse_dung_gia_tri_cua_rss_aws() throws IOException {
+		List<ParsedItem> items = parser.parse(fixture("feeds/aws-news.xml"));
+
+		assertThat(items).hasSize(3);
+		assertThat(items.getFirst()).isEqualTo(new ParsedItem(
+				"Amazon DynamoDB now supports real-time vector search at any scale",
+				"https://aws.amazon.com/blogs/aws/"
+						+ "amazon-dynamodb-now-supports-real-time-vector-search-at-any-scale/",
+				"Wed, 05 Aug 2026 14:45:10 +0000"));
+		assertThat(items).extracting(ParsedItem::link)
+				.allSatisfy(l -> assertThat(l).startsWith("https://aws.amazon.com/"));
+	}
+
 	@Test
 	void nem_loi_khi_root_element_khong_ho_tro() {
 		byte[] html = "<html><body>403 Forbidden</body></html>"
@@ -111,21 +220,25 @@ class JacksonFeedParserTest {
 	}
 
 	/**
-	 * Atom chưa được hỗ trợ (tới Task 14), và root element có TIỀN TỐ namespace
-	 * phải được nhận ra là `feed` chứ không phải `atom:feed` — nếu không, ngày
-	 * thêm Atom vào `switch` nó sẽ không bao giờ khớp.
+	 * Root element có TIỀN TỐ namespace phải được nhận ra là `feed` chứ không
+	 * phải `atom:feed`. Tới Task 13 test này còn khẳng định "ném lỗi kèm chữ
+	 * feed"; giờ `feed` đã vào `switch` nên nó khẳng định thứ nó luôn nhắm tới:
+	 * feed khai bằng tiền tố PHẢI đi qua nhánh Atom và ra item.
 	 */
 	@Test
 	void bo_tien_to_namespace_o_root_element() {
 		byte[] atom = """
 				<?xml version="1.0"?>
-				<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:title>x</atom:title></atom:feed>
+				<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+				  <atom:entry><atom:title>Khai bằng tiền tố</atom:title>
+				    <atom:link rel="alternate" href="https://example.test/tien-to"/>
+				    <atom:updated>2026-08-04T00:00:00Z</atom:updated></atom:entry>
+				</atom:feed>
 				""".getBytes(StandardCharsets.UTF_8);
 
-		assertThatThrownBy(() -> parser.parse(atom))
-				.isInstanceOf(IllegalArgumentException.class)
-				.hasMessageContaining("feed")
-				.hasMessageNotContaining("atom:");
+		assertThat(parser.parse(atom)).singleElement()
+				.isEqualTo(new ParsedItem("Khai bằng tiền tố",
+						"https://example.test/tien-to", "2026-08-04T00:00:00Z"));
 	}
 
 	private static byte[] fixture(String path) throws IOException {

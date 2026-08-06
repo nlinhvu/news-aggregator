@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <title>Inside Java</title>
+  <link rel="alternate" href="https://inside.java" />
+  <subtitle>News and views from members of the Java team at Oracle</subtitle>
+  <id>https://inside.java/feed.xml</id>
+  <updated>2026-08-06T10:32:42Z</updated>
+  <dc:date>2026-08-06T10:32:42Z</dc:date>
+  <entry>
+    <title>Episode 65 “Embracing Virtual Threads with Helidon” [I/O]</title>
+    <link rel="alternate" href="https://inside.java/2026/08/06/podcast-065/" />
+    <category term="Concurrency" />
+    <category term="Community" />
+    <author>
+      <name>Joe Di Pol</name>
+    </author>
+    <author>
+      <name>Nicolai Parlog</name>
+    </author>
+    <id>https://inside.java/2026/08/06/podcast-065/</id>
+    <updated>2026-08-06T00:00:00Z</updated>
+    <published>2026-08-06T00:00:00Z</published>
+    <summary type="html">&lt;p&gt;How Helidon 4.4 embraces virtual threads, ahoead-of-time computation, and OpenJDK&lt;/p&gt;</summary>
+    <dc:date>2026-08-06T00:00:00Z</dc:date>
+  </entry>
+  <entry>
+    <title>Oracle Java Platform Extension for Visual Studio Code - Version 26.0.1 Is Now Available</title>
+    <link rel="alternate" href="https://inside.java/2026/08/05/java-vscode-extension-update/" />
+    <category term="Oracle" />
+    <author>
+      <name>Arvind Aprameya</name>
+    </author>
+    <id>https://inside.java/2026/08/05/java-vscode-extension-update/</id>
+    <updated>2026-08-05T00:00:00Z</updated>
+    <published>2026-08-05T00:00:00Z</published>
+    <summary type="html">&lt;p&gt;New release of the Java Platform Extension for VS Code&lt;/p&gt;</summary>
+    <dc:date>2026-08-05T00:00:00Z</dc:date>
+  </entry>
+  <entry>
+    <title>Transitioning Java to More Frequent Security Updates</title>
+    <link rel="alternate" href="https://inside.java/2026/07/31/transitioning-java-to-more-frequent-security-updates/" />
+    <category term="Oracle" />
+    <category term="Security" />
+    <author>
+      <name>Donald Smith</name>
+    </author>
+    <id>https://inside.java/2026/07/31/transitioning-java-to-more-frequent-security-updates/</id>
+    <updated>2026-07-31T00:00:00Z</updated>
+    <published>2026-07-31T00:00:00Z</published>
+    <summary type="html">&lt;p&gt;Oracle intends to provide Java security updates more frequently than the current quarterly CPU cadence of January, April, July, and October.&lt;/p&gt;</summary>
+    <dc:date>2026-07-31T00:00:00Z</dc:date>
+  </entry>
+</feed>

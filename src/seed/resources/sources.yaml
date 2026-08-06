@@ -20,3 +20,51 @@ sources:
     # hợp giả định.
     feedUrl: https://spring.io/blog.atom
     enabled: true
+
+  - sourceId: aws-news
+    name: AWS News Blog
+    # Đo 2026-08-06: 200, root THẬT `<rss version="2.0">` (khai đúng
+    # `application/rss+xml` — nguồn duy nhất khai đúng).
+    #
+    # robots.txt của host CÓ `Disallow: /blogs/`, nhưng nó nằm trong nhóm
+    # `User-agent: AdsBot-Google`, KHÔNG phải nhóm `*`. Đừng đọc bằng mắt rồi
+    # kết luận là bị chặn: kiểm bằng parser thật (`urllib.robotparser`) với
+    # đúng UA của chương trình → ALLOW, còn UA `AdsBot-Google` → DENY.
+    #
+    # Chỉ phát `Last-Modified`, KHÔNG có `ETag` — đối xứng ngược với Spring
+    # Blog ở trên, nên slice 4 có cả hai nhánh của `updateFetchState` được một
+    # nguồn thật đi qua chứ không chỉ test.
+    feedUrl: https://aws.amazon.com/blogs/aws/feed/
+    enabled: true
+
+  - sourceId: infoq-java
+    name: InfoQ Java
+    # Đo 2026-08-06: 200, root THẬT `<rss>` dù khai `application/xml`.
+    #
+    # `feed.infoq.com/robots.txt` trả 406 — 4xx nghĩa là không có hạn chế
+    # (RFC 9309 §2.3.1.3). KHÔNG lấy `www.infoq.com/robots.txt` thay: đó là
+    # host khác, và nó đang nằm sau AWS WAF captcha nên cũng chẳng đọc được.
+    #
+    # Phát cả `ETag` lẫn `Last-Modified`.
+    #
+    # Nguồn THẬT đầu tiên gắn `?utm_campaign=…&utm_source=…&utm_medium=…` vào
+    # mọi link. Tới trước nó, `CanonicalUrl.stripTracking` chỉ được test gọi;
+    # từ đây nó nằm trên đường chạy thật, và nếu nó hỏng thì triệu chứng là
+    # bài InfoQ nhân bản mỗi lần feed đổi tham số.
+    feedUrl: https://feed.infoq.com/java/
+    enabled: true
+
+  - sourceId: inside-java
+    name: Inside Java
+    # Đo 2026-08-06: 200, root THẬT `<feed>` (Atom) dù khai `application/xml`
+    # — nguồn Atom đầu tiên, và là lý do Task 14 tồn tại.
+    #
+    # `inside.java/robots.txt` trả 404 (kèm trang HTML 404, đừng nhầm là nội
+    # dung robots) — 4xx nghĩa là không có hạn chế.
+    #
+    # Phát cả `ETag` lẫn `Last-Modified`.
+    feedUrl: https://inside.java/feed.xml
+    enabled: true
+
+# Baeldung ĐÃ BỊ LOẠI — trả 403 với `User-Agent` định danh của chương trình
+# (đo 2026-08-05). Không đổi UA để lách; xem TDD §17 #18.
