@@ -120,4 +120,69 @@ class DataStackTest {
 				Match.objectLike(Map.of("PointInTimeRecoverySpecification",
 						Map.of("PointInTimeRecoveryEnabled", false))));
 	}
+
+	/**
+	 * Bảng `sources` KHÔNG có GSI (TDD §17 #9). Bảng bị chặn trên ở ~30 dòng
+	 * bởi master §2, nên đọc bằng Scan tốn ~1 RCU; một GSI có partition key là
+	 * boolean sẽ tạo hot partition thật để đổi lấy con số không.
+	 *
+	 * `GlobalSecondaryIndexes` phải là `Match.absent()`, không chỉ là "tồn tại
+	 * một bảng khoá `sourceId`": khẳng định KeySchema + BillingMode vẫn xanh
+	 * nguyên vẹn sau khi ai đó thêm GSI vào đúng bảng này, tức là một test mang
+	 * tên "không có GSI" mà không kiểm gì về GSI cả.
+	 */
+	@Test
+	void bang_sources_khong_co_gsi() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"KeySchema", List.of(Map.of(
+								"AttributeName", "sourceId",
+								"KeyType", "HASH")),
+						"BillingMode", "PAY_PER_REQUEST",
+						"GlobalSecondaryIndexes", Match.absent())));
+	}
+
+	/**
+	 * Bảng `sources` RETAIN ở prod, DELETE ở dev.
+	 *
+	 * Ghim đích danh bằng `KeySchema` lồng trong `Properties`, đúng lý do đã ghi
+	 * ở `pitr_cua_bang_toggles_...`: `hasResource` xanh khi CÓ MỘT resource
+	 * khớp, nên một khẳng định chỉ nêu `DeletionPolicy` đã được `articlesTable`
+	 * làm cho xanh sẵn — bảng thứ ba cấu hình thế nào cũng không đổi kết quả.
+	 */
+	@Test
+	void prod_giu_lai_bang_sources_khi_xoa_stack() {
+		for (Map.Entry<EnvConfig, String> e
+				: Map.of(EnvConfig.PROD, "Retain", EnvConfig.DEV, "Delete").entrySet()) {
+			dataStack(e.getKey()).hasResource("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"DeletionPolicy", e.getValue(),
+							"Properties", Match.objectLike(Map.of(
+									"KeySchema", List.of(Map.of(
+											"AttributeName", "sourceId",
+											"KeyType", "HASH")))))));
+		}
+	}
+
+	/**
+	 * PITR của bảng `sources` cũng bật ở prod, tắt ở dev — khẳng định RIÊNG,
+	 * cùng lý do ghim đích danh như bảng toggles.
+	 *
+	 * Bảng này giữ TRẠNG THÁI VẬN HÀNH chứ không phải nội dung đọc được: mất
+	 * `etag` thì mọi nguồn tải full một lượt, mất `enabled` thì một nguồn đã tắt
+	 * bỗng chạy lại.
+	 */
+	@Test
+	void pitr_cua_bang_sources_bat_o_prod_tat_o_dev() {
+		for (Map.Entry<EnvConfig, Boolean> e
+				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
+			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"KeySchema", List.of(Map.of(
+									"AttributeName", "sourceId",
+									"KeyType", "HASH")),
+							"PointInTimeRecoverySpecification", Map.of(
+									"PointInTimeRecoveryEnabled", e.getValue()))));
+		}
+	}
 }

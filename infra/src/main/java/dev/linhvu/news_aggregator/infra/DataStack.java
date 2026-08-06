@@ -33,6 +33,7 @@ public class DataStack extends Stack {
 
 	private final Table articlesTable;
 	private final Table featureTogglesTable;
+	private final Table sourcesTable;
 
 	public DataStack(final Construct scope, final String id, final EnvConfig cfg) {
 		super(scope, id, StackProps.builder()
@@ -93,6 +94,27 @@ public class DataStack extends Stack {
 
 		CfnOutput.Builder.create(this, "FeatureTogglesTableName")
 				.value(featureTogglesTable.getTableName()).build();
+
+		// Không GSI: bảng bị chặn trên ~30 dòng bởi master §2, và AP5 (lấy mọi
+		// nguồn đang bật) đọc bằng Scan tốn ~1 RCU. GSI với partition key boolean
+		// là hot partition hai giá trị đổi lấy con số không.
+		//
+		// PITR soi gương hai bảng kia: bảng này giữ TRẠNG THÁI VẬN HÀNH — mất
+		// `etag` nghĩa là mọi nguồn tải full một lượt, mất `enabled` nghĩa là một
+		// nguồn đã tắt bỗng chạy lại.
+		this.sourcesTable = Table.Builder.create(this, "SourcesTable")
+				.partitionKey(Attribute.builder()
+						.name("sourceId").type(AttributeType.STRING).build())
+				.billingMode(BillingMode.PAY_PER_REQUEST)
+				.removalPolicy(cfg.removalPolicy())
+				.pointInTimeRecoverySpecification(
+						PointInTimeRecoverySpecification.builder()
+								.pointInTimeRecoveryEnabled(cfg.terminationProtection())
+								.build())
+				.build();
+
+		CfnOutput.Builder.create(this, "SourcesTableName")
+				.value(sourcesTable.getTableName()).build();
 	}
 
 	public Table getArticlesTable() {
@@ -101,5 +123,9 @@ public class DataStack extends Stack {
 
 	public Table getFeatureTogglesTable() {
 		return featureTogglesTable;
+	}
+
+	public Table getSourcesTable() {
+		return sourcesTable;
 	}
 }

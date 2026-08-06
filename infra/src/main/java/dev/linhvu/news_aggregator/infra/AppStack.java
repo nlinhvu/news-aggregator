@@ -41,7 +41,8 @@ public class AppStack extends Stack {
 	private final FunctionUrl functionUrl;
 
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
-			final ITable articlesTable, final ITable featureTogglesTable) {
+			final ITable articlesTable, final ITable featureTogglesTable,
+			final ITable sourcesTable) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -108,6 +109,7 @@ public class AppStack extends Stack {
 		env.put("NEWS_ENV", cfg.tagPrefix());
 		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
 		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
+		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
 		// Khai TƯỜNG MINH dù trùng mặc định của LWA — để nó grep được và test
 		// được. Phải khớp `IngestionController.PASS_THROUGH_PATH` bên repo app;
 		// hai bên không thấy nhau nên compiler không bắt được lệch.

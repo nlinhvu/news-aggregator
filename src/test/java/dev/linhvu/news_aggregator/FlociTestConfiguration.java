@@ -123,4 +123,36 @@ public class FlociTestConfiguration {
 			}
 		};
 	}
+
+	/**
+	 * Bảng `sources`, soi gương `DataStack.sourcesTable`.
+	 *
+	 * Cùng lý do như hai bảng kia: ứng dụng KHÔNG tự tạo bảng (master §4 nguyên
+	 * tắc 7), nên test phải nhận bảng từ bên ngoài. DynamoDB phân biệt "bảng
+	 * rỗng" với "không có bảng" — cái sau ném `ResourceNotFoundException` chứ
+	 * không trả về danh sách rỗng.
+	 *
+	 * KHÔNG có GSI, và đó là một khẳng định chứ không phải chỗ bỏ sót — xem
+	 * `DataStackTest#bang_sources_khong_co_gsi`. Thêm GSI ở một bên thì thêm cả
+	 * bên kia.
+	 */
+	@Bean
+	InitializingBean sourcesTableSchema(DynamoDbClient dynamoDbClient,
+			@Value("${news.sources.table-name}") String tableName) {
+		return () -> {
+			try {
+				dynamoDbClient.createTable(CreateTableRequest.builder()
+						.tableName(tableName)
+						.keySchema(KeySchemaElement.builder()
+								.attributeName("sourceId").keyType(KeyType.HASH).build())
+						.attributeDefinitions(
+								AttributeDefinition.builder().attributeName("sourceId")
+										.attributeType(ScalarAttributeType.S).build())
+						.billingMode(BillingMode.PAY_PER_REQUEST)
+						.build());
+			} catch (ResourceInUseException ignored) {
+				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
+	}
 }
