@@ -82,6 +82,21 @@ dependencies {
 	// low-level.
 	seedImplementation 'org.yaml:snakeyaml'
 	seedImplementation 'software.amazon.awssdk:dynamodb'
+	// KHÔNG có dòng code nào `import` gói này — nó được nạp bằng phản chiếu, nên
+	// thiếu nó thì compile vẫn xanh và chỉ chết lúc chạy thật.
+	//
+	// `sourcesSync` chạy bằng profile của người vận hành, mà cả ba profile
+	// `na-dev`/`na-qa`/`na-prod` đều là ROLE-ASSUMING (`role_arn` +
+	// `source_profile`). `ProfileCredentialsProvider` chỉ resolve được dạng đó khi
+	// module `sts` có mặt; không có thì nó lặng lẽ bỏ qua profile và chuỗi provider
+	// chạy tiếp tới hết, kết thúc bằng "Unable to load credentials from any of the
+	// providers in the chain" — một câu KHÔNG hề nhắc tới `sts` và trỏ sai hướng
+	// hoàn toàn (lý do thật nằm lẫn giữa sáu dòng con). Đã trả giá thật 2026-08-06.
+	//
+	// CHỈ ở `seed`, không thêm vào `implementation`: Lambda lấy credential từ
+	// container provider chứ không qua profile, nên `sts` ở đó là cân nặng thừa
+	// trong image.
+	seedImplementation 'software.amazon.awssdk:sts'
 
 //	runtimeOnly 'org.postgresql:postgresql'
 //	runtimeOnly 'org.springframework.modulith:spring-modulith-actuator'
