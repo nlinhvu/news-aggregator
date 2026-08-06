@@ -24,8 +24,6 @@ class FeedFetcher {
 	}
 
 	/**
-	 * Slice 2: luôn tải full. Conditional GET thêm ở Task 16.
-	 *
 	 * `RestClient` mặc định chỉ ném lỗi ở 4xx/5xx, nên 3xx đi qua bình thường —
 	 * phải đọc status TƯỜNG MINH chứ không giả định "không ném lỗi nghĩa là có
 	 * body".
@@ -36,12 +34,28 @@ class FeedFetcher {
 	 * dòng này như một giới hạn bộ nhớ.
 	 */
 	FetchOutcome fetch(SourceView source) {
-		ResponseEntity<byte[]> response = restClient.get()
-				.uri(source.feedUrl())
-				.retrieve()
-				.toEntity(byte[].class);
+		RestClient.RequestHeadersSpec<?> request = restClient.get().uri(source.feedUrl());
+
+		// Gửi CẢ HAI header, không chọn một. Đo 2026-08-06 (TDD §13): Spring chỉ
+		// có ETag, AWS chỉ có Last-Modified, InfoQ và Inside Java có cả hai —
+		// không header nào phủ được cả bốn nguồn.
+		//
+		// Chỉ gửi khi ĐÃ CÓ giá trị: `If-None-Match: null` khiến một số máy chủ
+		// trả 400, và triệu chứng là "nguồn mới không chạy được lần đầu".
+		if (source.etag() != null) {
+			request = request.header(HttpHeaders.IF_NONE_MATCH, source.etag());
+		}
+		if (source.lastModified() != null) {
+			request = request.header(HttpHeaders.IF_MODIFIED_SINCE, source.lastModified());
+		}
+
+		ResponseEntity<byte[]> response = request.retrieve().toEntity(byte[].class);
 
 		if (response.getStatusCode() == HttpStatus.NOT_MODIFIED) {
+			// Giữ nguyên giá trị cũ: máy chủ không gửi lại validator ở 304. Trả
+			// null ở đây sẽ khiến `updateFetchState` XOÁ validator đang lưu và
+			// lượt sau thành unconditional — conditional GET tự vô hiệu hoá mà
+			// không có lỗi nào để nhìn.
 			return new FetchOutcome.NotModified(source.etag(), source.lastModified());
 		}
 
