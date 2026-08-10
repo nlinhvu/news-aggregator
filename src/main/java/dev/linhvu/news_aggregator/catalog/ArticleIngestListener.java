@@ -40,6 +40,7 @@ class ArticleIngestListener {
 		article.setTitle(event.title());
 		article.setCanonicalUrl(event.canonicalUrl());
 		article.setSourceName(event.sourceName());
+		article.setExcerpt(event.excerpt());
 		// summary để null — Phase 3 mới điền.
 
 		if (!repository.saveIfAbsent(article)) {

@@ -24,6 +24,7 @@ public class Article {
 	private String title;
 	private String canonicalUrl;
 	private String sourceName;
+	private String excerpt;
 	private String summary;
 
 	@DynamoDbPartitionKey
@@ -46,6 +47,13 @@ public class Article {
 
 	public String getSourceName() { return sourceName; }
 	public void setSourceName(String sourceName) { this.sourceName = sourceName; }
+
+	// Attribute NGOÀI KEY nên thêm nó cần đúng KHÔNG migration (master §4
+	// nguyên tắc 7). Đây là lần đầu tính chất đó được dùng tới chứ không chỉ
+	// được tuyên bố. Bài của Phase 2 không có attribute này, và đó là lý do
+	// `findSummarizable` trả rỗng cho chúng (TDD §17 #6).
+	public String getExcerpt() { return excerpt; }
+	public void setExcerpt(String excerpt) { this.excerpt = excerpt; }
 
 	public String getSummary() { return summary; }
 	public void setSummary(String summary) { this.summary = summary; }

@@ -38,6 +38,30 @@ class DataStackTest {
 				)));
 	}
 
+	/**
+	 * `excerpt` PHẢI nằm trong projection, và điều đó chỉ được khẳng định ở đây.
+	 *
+	 * Danh sách attribute này được chép tay ở hai nơi — `DataStack` và
+	 * `FlociTestConfiguration` (master §9 ghi là rủi ro đã chấp nhận). Không có
+	 * test này thì quên một bên là hỏng HOÀN TOÀN im lặng: cả suite vẫn xanh vì
+	 * bảng Floci có `excerpt`, còn GSI trên prod thì không — và sweep của Task 13
+	 * query GSI, không thấy `excerpt`, nên không nhặt bài nào. Không exception,
+	 * không log, chỉ là không bài nào được tóm tắt.
+	 */
+	@Test
+	void gsi_project_ca_excerpt() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
+								Match.objectLike(Map.of(
+										"IndexName", "gsi-recent",
+										"Projection", Match.objectLike(Map.of(
+												"NonKeyAttributes",
+												Match.arrayWith(List.of("excerpt"))))))
+						))
+				)));
+	}
+
 	/** On-demand billing — master §6.3 cấm mọi thứ tính tiền theo giờ. */
 	@Test
 	void billing_la_on_demand() {

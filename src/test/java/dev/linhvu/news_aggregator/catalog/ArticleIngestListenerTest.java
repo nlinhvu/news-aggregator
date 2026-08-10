@@ -100,6 +100,10 @@ class ArticleIngestListenerTest {
 		assertThat(saved.getTitle()).isEqualTo("Tiêu đề");
 		assertThat(saved.getSourceName()).isEqualTo("Nguồn Test");
 		assertThat(saved.getPublishedAt()).isEqualTo("2026-08-04T10:00:00Z");
+		// `excerpt` đi từ event xuống bảng, và ĐÂY là chỗ duy nhất khẳng định
+		// điều đó. Quên `setExcerpt` thì không gì đỏ: bài vẫn vào bảng, chỉ là
+		// `findSummarizable` trả rỗng cho mọi bài và không ai được tóm tắt.
+		assertThat(saved.getExcerpt()).isEqualTo("Đoạn trích mẫu.");
 		// Phase 2 KHÔNG sinh summary — Phase 3 mới điền.
 		assertThat(saved.getSummary()).isNull();
 	}

@@ -85,7 +85,7 @@ public class FlociTestConfiguration {
 								.projection(Projection.builder()
 										.projectionType(ProjectionType.INCLUDE)
 										.nonKeyAttributes("title", "canonicalUrl",
-												"sourceName", "summary")
+												"sourceName", "summary", "excerpt")
 										.build())
 								.build())
 						.billingMode(BillingMode.PAY_PER_REQUEST)
