@@ -8,6 +8,10 @@ spring:
 
 news:
   commit-sha: ${NEWS_COMMIT_SHA:local}
+  platform:
+    # PHẢI khớp AWS_LWA_PASS_THROUGH_PATH trong AppStack. Không nằm dưới /api/*,
+    # nếu không CloudFront sẽ route tới và đường vào nội bộ thành public.
+    pass-through-path: /events
   catalog:
     table-name: ${NEWS_ARTICLES_TABLE:articles}
     default-limit: 20

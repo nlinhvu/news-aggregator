@@ -452,9 +452,9 @@ class SecurityBoundaryTest {
 	/**
 	 * Path pass-through khai TƯỜNG MINH trong CDK dù nó trùng mặc định của LWA.
 	 * Lý do: nó phải grep được và test được, thay vì là hằng số ngầm nằm trong
-	 * binary của extension. Giá trị này phải khớp
-	 * `IngestionController.PASS_THROUGH_PATH` — hai repo không thấy nhau nên
-	 * compiler không bắt được lệch.
+	 * binary của extension. Giá trị này phải khớp property
+	 * `news.platform.pass-through-path` bên repo app, chỗ `EventsController` lấy
+	 * path của nó — hai repo không thấy nhau nên compiler không bắt được lệch.
 	 *
 	 * Và nó phải KHÔNG nằm dưới `/api/*`: CloudFront chỉ route `/api/*` tới
 	 * Lambda origin, nên một path như `/api/events` biến đường ingestion thành

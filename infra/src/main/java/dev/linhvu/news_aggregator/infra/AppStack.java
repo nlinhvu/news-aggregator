@@ -137,8 +137,9 @@ public class AppStack extends Stack {
 		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
 		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
 		// Khai TƯỜNG MINH dù trùng mặc định của LWA — để nó grep được và test
-		// được. Phải khớp `IngestionController.PASS_THROUGH_PATH` bên repo app;
-		// hai bên không thấy nhau nên compiler không bắt được lệch.
+		// được. Phải khớp `news.platform.pass-through-path` bên repo app (chỗ
+		// `EventsController` lấy path của nó); hai bên không thấy nhau nên
+		// compiler không bắt được lệch.
 		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
 
 		this.function = Function.Builder.create(this, "Function")
