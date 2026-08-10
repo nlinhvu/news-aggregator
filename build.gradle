@@ -58,13 +58,27 @@ dependencies {
 //	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 //	implementation 'org.flywaydb:flyway-database-postgresql'
 //	implementation 'org.jobrunr:jobrunr-spring-boot-4-starter:8.7.0'
-//	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai'
+	// Hai module thay cho starter spring-ai-starter-model-google-genai. Lý do
+	// KHÔNG phải "ta không có property spring.ai.google.genai.api-key" — property
+	// đó điền được như mọi property khác. Lý do là AI ĐỌC nó và ĐỌC LÚC NÀO:
+	// GoogleGenAiChatAutoConfiguration.googleGenAiClient là @Bean thường, tức
+	// EAGER, nên key phải có sẵn lúc dựng context. Đường duy nhất đưa SSM vào
+	// property là spring.config.import=aws-parameterstore:, thứ chạy ở tầng
+	// ConfigData tại MỌI cold start kể cả invoke HTTP của người đọc (TDD §13);
+	// đường còn lại là nhét key vào env var Lambda, tức bỏ SecureString. Ta chọn
+	// đọc lười từ SSM nên tự dựng bean. Version do spring-ai-bom quản.
+	implementation 'org.springframework.ai:spring-ai-google-genai'
+	implementation 'org.springframework.ai:spring-ai-client-chat'
 //	implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
 //	implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
 //	implementation 'org.springframework.modulith:spring-modulith-observability-api'
 	implementation 'org.springframework.modulith:spring-modulith-starter-core'
 //	implementation 'org.springframework.modulith:spring-modulith-starter-jdbc'
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
+	// CHỈ để lấy bean SsmClient đã cấu hình region/credential/endpoint (endpoint
+	// là thứ khiến Floci hoạt động ở local mà không phải cấu hình gì thêm).
+	// TUYỆT ĐỐI KHÔNG đặt spring.config.import=aws-parameterstore: — xem TDD §13.
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-parameter-store'
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 	implementation "org.togglz:togglz-spring-boot-starter:${togglzVersion}"
 	implementation "org.togglz:togglz-dynamodb:${togglzVersion}"
