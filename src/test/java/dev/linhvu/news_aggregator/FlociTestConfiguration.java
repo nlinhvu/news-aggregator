@@ -1,5 +1,7 @@
 package dev.linhvu.news_aggregator;
 
+import java.util.concurrent.CompletionException;
+
 import dev.linhvu.news_aggregator.catalog.Article;
 import io.floci.testcontainers.FlociContainer;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -13,6 +15,9 @@ import software.amazon.awssdk.services.dynamodb.model.Projection;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ResourceInUseException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
+import software.amazon.awssdk.services.sqs.model.QueueNameExistsException;
 
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,7 +39,8 @@ public class FlociTestConfiguration {
 		// lúc dựng bean thành lỗi pull tối nghĩa ở tận trong Docker.
 		return new FlociContainer("floci/floci:latest")
 				.disableAllServices()
-				.withDynamoDbConfig(b -> b.enabled(true));
+				.withDynamoDbConfig(b -> b.enabled(true))
+				.withSqsConfig(b -> b.enabled(true));
 	}
 
 	/**
@@ -152,6 +158,41 @@ public class FlociTestConfiguration {
 						.build());
 			} catch (ResourceInUseException ignored) {
 				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
+	}
+
+	/**
+	 * Queue `summarize-queue` cho test T2, soi gương `AppStack.summarizeQueue`.
+	 *
+	 * Cùng lý do như ba bảng DynamoDB ở trên: ứng dụng KHÔNG tự tạo hạ tầng, nên
+	 * test phải nhận queue từ bên ngoài. SQS phân biệt "queue rỗng" với "không có
+	 * queue" — cái sau ném `QueueDoesNotExistException`.
+	 *
+	 * `SqsAsyncClient` chứ KHÔNG phải `SqsClient`: `SqsAutoConfiguration` của
+	 * spring-cloud-aws 4.1.0 chỉ dựng bean async (cộng `SqsTemplate` và listener
+	 * container factory). KHÔNG có bean `SqsClient` sync nào trên classpath, nên
+	 * inject nó là `NoSuchBeanDefinitionException` và MỌI test có Spring context
+	 * chết theo, không riêng test SQS.
+	 *
+	 * KHÔNG mô phỏng DLQ hay redrive policy ở đây: `maxReceiveCount` là hành vi
+	 * của ESM, và ESM không có bản local nào (TDD §11). Test T2 chỉ chứng minh
+	 * message được GỬI đúng; phần giao lại là việc của smoke test trên prod.
+	 */
+	@Bean
+	InitializingBean summarizeQueueFixture(SqsAsyncClient sqsAsyncClient) {
+		return () -> {
+			try {
+				sqsAsyncClient.createQueue(CreateQueueRequest.builder()
+						.queueName("summarize-queue").build()).join();
+			} catch (QueueNameExistsException ignored) {
+				// container dùng lại giữa các context — queue đã có sẵn
+			} catch (CompletionException e) {
+				// `join()` gói mọi lỗi vào CompletionException, nên nhánh catch
+				// phía trên một mình KHÔNG bao giờ bắt được gì.
+				if (!(e.getCause() instanceof QueueNameExistsException)) {
+					throw e;
+				}
 			}
 		};
 	}

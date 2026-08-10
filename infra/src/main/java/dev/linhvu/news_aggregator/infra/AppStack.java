@@ -25,12 +25,14 @@ import software.amazon.awscdk.services.lambda.FunctionUrlAuthType;
 import software.amazon.awscdk.services.lambda.FunctionUrlOptions;
 import software.amazon.awscdk.services.lambda.Handler;
 import software.amazon.awscdk.services.lambda.Runtime;
+import software.amazon.awscdk.services.lambda.eventsources.SqsEventSource;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.amazon.awscdk.services.logs.RetentionDays;
 import software.amazon.awscdk.services.scheduler.Schedule;
 import software.amazon.awscdk.services.scheduler.ScheduleExpression;
 import software.amazon.awscdk.services.scheduler.ScheduleTargetInput;
 import software.amazon.awscdk.services.scheduler.targets.LambdaInvoke;
+import software.amazon.awscdk.services.sqs.DeadLetterQueue;
 import software.amazon.awscdk.services.sqs.Queue;
 import software.amazon.awscdk.services.ssm.StringParameter;
 import software.constructs.Construct;
@@ -130,6 +132,34 @@ public class AppStack extends Stack {
 				.resources(List.of(sourcesTable.getTableArn()))
 				.build());
 
+		// Queue summarize + DLQ. Đặt trong AppStack cùng lý do Schedule của Phase 2
+		// (TDD §17 #2): đây là TRIGGER CỦA FUNCTION, tách ra thành stack riêng chỉ
+		// tạo một stack chứa một trigger trỏ ngược về stack bên cạnh.
+		Queue summarizeDlq = Queue.Builder.create(this, "SummarizeDlq")
+				.retentionPeriod(Duration.days(14))
+				.enforceSsl(true)
+				.build();
+
+		Queue summarizeQueue = Queue.Builder.create(this, "SummarizeQueue")
+				// 6 × 120s function timeout + 60s batch window. Nhỏ hơn function
+				// timeout thì Lambda TỪ CHỐI tạo ESM; nhỏ hơn 6× thì message tái
+				// hiện trong lúc đang xử lý và article bị gọi model hai lần.
+				.visibilityTimeout(Duration.seconds(780))
+				.enforceSsl(true)
+				.deadLetterQueue(DeadLetterQueue.builder()
+						.queue(summarizeDlq)
+						.maxReceiveCount(3)
+						.build())
+				.build();
+
+		// Producer. `SendMessage` trên ĐÚNG queue summarize — không wildcard,
+		// và KHÔNG có quyền nào trên DLQ: chỉ dịch vụ SQS ghi vào đó, và một bug
+		// có quyền xoá DLQ là một bug dọn được bằng chứng của chính nó.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("sqs:SendMessage"))
+				.resources(List.of(summarizeQueue.getQueueArn()))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
@@ -141,6 +171,7 @@ public class AppStack extends Stack {
 		// `EventsController` lấy path của nó); hai bên không thấy nhau nên
 		// compiler không bắt được lệch.
 		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
+		env.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)
@@ -179,6 +210,22 @@ public class AppStack extends Stack {
 
 		CfnOutput.Builder.create(this, "FunctionUrl")
 				.value(this.functionUrl.getUrl()).build();
+
+		// Consumer. `addEventSource` tự cấp ReceiveMessage/DeleteMessage/
+		// GetQueueAttributes cho execution role — KHÔNG viết tay lại, làm thế sẽ
+		// có hai policy chồng nhau và cdk-nag báo trùng.
+		//
+		// KHÔNG đặt maxConcurrency: nó tắt mất tối ưu hoá poll-khi-rỗng của
+		// Lambda và làm ESM gọi SQS nhiều hơn 24/7 (TDD §17 #9).
+		this.function.addEventSource(SqsEventSource.Builder.create(summarizeQueue)
+				.batchSize(10)
+				// Gom batch để né cold start: 45 bài mà mỗi bài một invoke thì
+				// riêng tiền boot Spring đã gấp mấy lần tiền model.
+				.maxBatchingWindow(Duration.seconds(60))
+				// BẮT BUỘC. Thiếu nó thì Lambda BỎ QUA response batchItemFailures
+				// và coi cả batch là thành công — message hỏng biến mất im lặng.
+				.reportBatchItemFailures(true)
+				.build());
 
 		// Schedule và DLQ nằm trong AppStack chứ không tách stack riêng (TDD §17 #2):
 		// schedule là TRIGGER CỦA FUNCTION, tách ra sẽ thành một stack chỉ chứa

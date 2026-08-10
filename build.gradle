@@ -65,6 +65,7 @@ dependencies {
 	implementation 'org.springframework.modulith:spring-modulith-starter-core'
 //	implementation 'org.springframework.modulith:spring-modulith-starter-jdbc'
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-dynamodb'
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 	implementation "org.togglz:togglz-spring-boot-starter:${togglzVersion}"
 	implementation "org.togglz:togglz-dynamodb:${togglzVersion}"
 	// KHÔNG ghim version: BOM của Boot quản. Kéo theo woodstox-core + stax2-api.

@@ -756,4 +756,87 @@ class SecurityBoundaryTest {
 				json.contains("cloudformation:"),
 				"CicdStack không được cấp bất kỳ action cloudformation:* nào");
 	}
+
+	/**
+	 * `visibilityTimeout` phải ≥ 6 × function timeout + batch window.
+	 *
+	 * Nhỏ hơn function timeout thì Lambda TỪ CHỐI tạo event source mapping —
+	 * lỗi lộ ngay lúc deploy, dễ. Nguy hiểm là khoảng ở giữa: đủ để tạo ESM
+	 * nhưng không đủ 6×, khi đó message tái hiện TRONG LÚC invoke vẫn đang xử lý
+	 * nó, một invoke thứ hai nhận cùng message, và cùng một article bị gọi model
+	 * hai lần. Triệu chứng duy nhất là hoá đơn.
+	 */
+	@Test
+	void queue_summarize_co_visibility_timeout_du_lon() {
+		appStack().hasResourceProperties("AWS::SQS::Queue", Match.objectLike(Map.of(
+				"VisibilityTimeout", 780)));
+	}
+
+	/**
+	 * `maxReceiveCount = 3`. Không có redrive policy thì message hỏng quay lại
+	 * queue vô hạn — và với sweep đẩy lại mỗi 6 giờ, đó là một vòng lặp không
+	 * có điểm dừng nào ngoài cửa sổ 48h.
+	 */
+	@Test
+	void queue_summarize_co_dlq_voi_max_receive_count_3() {
+		appStack().hasResourceProperties("AWS::SQS::Queue", Match.objectLike(Map.of(
+				"RedrivePolicy", Match.objectLike(Map.of("maxReceiveCount", 3)))));
+	}
+
+	/**
+	 * `FunctionResponseTypes: [ReportBatchItemFailures]`.
+	 *
+	 * Đây là mục quan trọng nhất trong ba mục SQS. Thiếu nó thì Lambda BỎ QUA
+	 * response `batchItemFailures` mà `SummarizeHandler` trả về — không lỗi,
+	 * không cảnh báo — và coi cả batch là thành công. Message hỏng bị xoá khỏi
+	 * queue, DLQ không bao giờ nhận gì, và một article hỏng biến mất im lặng.
+	 */
+	@Test
+	void esm_bat_report_batch_item_failures() {
+		appStack().hasResourceProperties("AWS::Lambda::EventSourceMapping",
+				Match.objectLike(Map.of(
+						"BatchSize", 10,
+						"MaximumBatchingWindowInSeconds", 60,
+						"FunctionResponseTypes", List.of("ReportBatchItemFailures"))));
+	}
+
+	/**
+	 * KHÔNG có `ScalingConfig`. Ngược trực giác và có tài liệu: đặt
+	 * `MaximumConcurrency` tắt mất tối ưu hoá của Lambda khi queue rỗng
+	 * ("can optimize to as few as 2 concurrent invokes to reduce the Amazon SQS
+	 * calls… this optimization is not available when you enable the maximum
+	 * concurrency setting"), tức làm ESM gọi SQS nhiều hơn 24/7 — chi phí CỐ
+	 * ĐỊNH, thứ master §4 nguyên tắc 3 loại theo nguyên tắc. Van thật là hạn
+	 * mức ở `SummarizationQueue.enqueue()`.
+	 */
+	@Test
+	void esm_khong_dat_max_concurrency() {
+		appStack().hasResourceProperties("AWS::Lambda::EventSourceMapping",
+				Match.objectLike(Map.of("ScalingConfig", Match.absent())));
+	}
+
+	/**
+	 * Execution role được gửi và nhận trên queue summarize, nhưng KHÔNG có
+	 * quyền nào trên DLQ — chỉ dịch vụ SQS ghi vào đó. Cấp quyền thừa lên DLQ
+	 * nghĩa là một bug trong code có thể dọn sạch bằng chứng của chính nó.
+	 *
+	 * Chỉ soi resource IAM, KHÔNG soi cả stack: `RedrivePolicy` của queue
+	 * summarize trỏ tới DLQ một cách hoàn toàn hợp lệ, nên tìm trên `toJSON()`
+	 * của cả stack thì luôn dương tính giả.
+	 *
+	 * So bằng TIỀN TỐ logical ID. CDK nối hash 8 ký tự vào sau construct id
+	 * ("SummarizeDlq" → "SummarizeDlq3F7A21C9"), nên bất kỳ chuỗi nào gõ tay kèm
+	 * ký tự ĐỨNG SAU tên — `SummarizeDlq","Arn"` chẳng hạn — sẽ không bao giờ
+	 * khớp, và một `assertFalse` dựa trên nó thành xanh vĩnh viễn mà không kiểm
+	 * gì cả.
+	 */
+	@Test
+	void lambda_khong_co_quyen_nao_tren_dlq() {
+		Template template = appStack();
+		String iam = template.findResources("AWS::IAM::Policy")
+				+ template.findResources("AWS::IAM::Role").toString();
+
+		assertFalse(iam.contains("SummarizeDlq"),
+				"execution role không được có quyền nào trên DLQ");
+	}
 }
