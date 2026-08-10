@@ -146,7 +146,7 @@ class ArticleIngestListenerTest {
 
 	private static ArticleDiscovered discovered(String url) {
 		return new ArticleDiscovered("src-1", "Nguồn Test", url, "Tiêu đề",
-				"2026-08-04T10:00:00Z");
+				"2026-08-04T10:00:00Z", "Đoạn trích mẫu.");
 	}
 
 	/**

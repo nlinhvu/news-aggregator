@@ -28,6 +28,15 @@ public class AtomFeed {
 
 		public String published;
 		public String updated;
+
+		/**
+		 * Atom có HAI element mang nội dung. `content` dài hơn nên được ưu tiên;
+		 * `summary` là bản lùi. Ưu tiên ngược lại là một lỗi KHÔNG có exception —
+		 * xem `atom_uu_tien_content_hon_summary`.
+		 */
+		public String summary;
+
+		public String content;
 	}
 
 	public static class Link {

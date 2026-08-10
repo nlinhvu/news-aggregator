@@ -22,7 +22,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class JacksonFeedParserTest {
 
-	private final FeedParser parser = new JacksonFeedParser(new XmlConfig().feedXmlMapper());
+	private final FeedParser parser =
+			new JacksonFeedParser(new XmlConfig().feedXmlMapper(), 2000);
 
 	/**
 	 * So GIÁ TRỊ CHÍNH XÁC, không chỉ `isNotBlank()`. Ánh xạ XML→bean là chỗ
@@ -41,7 +42,8 @@ class JacksonFeedParserTest {
 		assertThat(items.getFirst()).isEqualTo(new ParsedItem(
 				"This Week in Spring - August 4th, 2026",
 				"https://spring.io/blog/2026/08/04/this-week-in-spring-august-4-2026",
-				"Tue, 04 Aug 2026 00:00:00 GMT"));
+				"Tue, 04 Aug 2026 00:00:00 GMT",
+				"Nội dung đã cắt bớt cho fixture."));
 	}
 
 	/**
@@ -59,7 +61,11 @@ class JacksonFeedParserTest {
 						"This Week in Spring - July 28th, 2026");
 	}
 
-	/** `dc:creator` và `content:encoded` trong fixture không được làm chết parse. */
+	/**
+	 * `dc:creator` và `category` trong fixture không được làm chết parse.
+	 * (`content:encoded` từng nằm trong danh sách này; từ Task 6 nó được KHAI
+	 * BÁO và mang excerpt, nên nó không còn là element lạ nữa.)
+	 */
 	@Test
 	void bo_qua_element_khong_khai_bao() throws IOException {
 		assertThat(parser.parse(fixture("feeds/spring-blog.xml"))).hasSize(3);
@@ -113,15 +119,21 @@ class JacksonFeedParserTest {
 		assertThat(items).containsExactly(
 				new ParsedItem("Episode 65 “Embracing Virtual Threads with Helidon” [I/O]",
 						"https://inside.java/2026/08/06/podcast-065/",
-						"2026-08-06T00:00:00Z"),
+						"2026-08-06T00:00:00Z",
+						"How Helidon 4.4 embraces virtual threads, ahoead-of-time "
+								+ "computation, and OpenJDK"),
 				new ParsedItem("Oracle Java Platform Extension for Visual Studio Code "
 						+ "- Version 26.0.1 Is Now Available",
 						"https://inside.java/2026/08/05/java-vscode-extension-update/",
-						"2026-08-05T00:00:00Z"),
+						"2026-08-05T00:00:00Z",
+						"New release of the Java Platform Extension for VS Code"),
 				new ParsedItem("Transitioning Java to More Frequent Security Updates",
 						"https://inside.java/2026/07/31/"
 								+ "transitioning-java-to-more-frequent-security-updates/",
-						"2026-07-31T00:00:00Z"));
+						"2026-07-31T00:00:00Z",
+						"Oracle intends to provide Java security updates more frequently "
+								+ "than the current quarterly CPU cadence of January, "
+								+ "April, July, and October."));
 	}
 
 	/**
@@ -190,10 +202,176 @@ class JacksonFeedParserTest {
 	}
 
 	/**
+	 * RSS 2.0 mang nội dung trong `<description>`.
+	 */
+	@Test
+	void rss_lay_excerpt_tu_description() {
+		byte[] body = """
+				<?xml version="1.0"?>
+				<rss version="2.0"><channel>
+				  <item>
+				    <title>Bài một</title>
+				    <link>https://a.test/1</link>
+				    <pubDate>Tue, 05 Aug 2026 10:00:00 GMT</pubDate>
+				    <description><![CDATA[<p>Nội dung <b>một</b>.</p>]]></description>
+				  </item>
+				</channel></rss>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(body))
+				.extracting(ParsedItem::excerpt)
+				.containsExactly("Nội dung một.");
+	}
+
+	/**
+	 * RSS cũng có HAI element mang nội dung, y như Atom: `<description>` (tóm
+	 * tắt ngắn) và `<content:encoded>` (thân bài đầy đủ). Ưu tiên
+	 * `content:encoded` vì cùng lý do với Atom — dài hơn, cho model nhiều thứ
+	 * để làm việc hơn.
+	 */
+	@Test
+	void rss_uu_tien_content_encoded_hon_description() {
+		byte[] body = """
+				<?xml version="1.0"?>
+				<rss version="2.0"
+				     xmlns:content="http://purl.org/rss/1.0/modules/content/">
+				<channel>
+				  <item>
+				    <title>Có cả hai</title>
+				    <link>https://a.test/3</link>
+				    <pubDate>Tue, 05 Aug 2026 10:00:00 GMT</pubDate>
+				    <description>Tóm tắt ngắn.</description>
+				    <content:encoded><![CDATA[<p>Thân bài đầy đủ.</p>]]></content:encoded>
+				  </item>
+				</channel></rss>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(body))
+				.extracting(ParsedItem::excerpt)
+				.containsExactly("Thân bài đầy đủ.");
+	}
+
+	/**
+	 * Spring Blog — nguồn RSS THẬT — không phát `<description>` ở cấp item; nội
+	 * dung nằm trong `<content:encoded>`. Chỉ ánh xạ `description` là mọi bài
+	 * của nguồn này ra `excerpt == null` và không bài nào có tóm tắt: hỏng im
+	 * lặng, không exception, nhìn y hệt "Spring không đăng bài mới".
+	 */
+	@Test
+	void spring_blog_lay_excerpt_tu_content_encoded() throws IOException {
+		assertThat(parser.parse(fixture("feeds/spring-blog.xml")))
+				.extracting(ParsedItem::excerpt)
+				.allSatisfy(e -> assertThat(e).isNotNull())
+				.containsExactly("Nội dung đã cắt bớt cho fixture.",
+						"Nội dung đã cắt bớt cho fixture.",
+						"Nội dung đã cắt bớt cho fixture.");
+	}
+
+	/**
+	 * Atom có HAI element mang nội dung. `<content>` được ưu tiên vì nó dài hơn
+	 * và cho model nhiều thứ để làm việc hơn; `<summary>` là bản lùi.
+	 *
+	 * Làm ngược lại là một lỗi KHÔNG có exception: bài sẽ luôn cho excerpt dưới
+	 * ngưỡng 200 ký tự, và không bài nào của nguồn đó có tóm tắt — nhìn y hệt
+	 * "nguồn đó không đăng bài mới".
+	 */
+	@Test
+	void atom_uu_tien_content_hon_summary() {
+		byte[] body = """
+				<?xml version="1.0"?>
+				<feed xmlns="http://www.w3.org/2005/Atom">
+				  <entry>
+				    <title>Bài Atom</title>
+				    <link href="https://b.test/1"/>
+				    <published>2026-08-05T10:00:00Z</published>
+				    <summary>Tóm tắt ngắn.</summary>
+				    <content type="html">&lt;p&gt;Nội dung dài hơn nhiều.&lt;/p&gt;</content>
+				  </entry>
+				</feed>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(body))
+				.extracting(ParsedItem::excerpt)
+				.containsExactly("Nội dung dài hơn nhiều.");
+	}
+
+	@Test
+	void atom_lui_ve_summary_khi_khong_co_content() {
+		byte[] body = """
+				<?xml version="1.0"?>
+				<feed xmlns="http://www.w3.org/2005/Atom">
+				  <entry>
+				    <title>Bài Atom</title>
+				    <link href="https://b.test/2"/>
+				    <published>2026-08-05T10:00:00Z</published>
+				    <summary>Chỉ có summary.</summary>
+				  </entry>
+				</feed>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(body))
+				.extracting(ParsedItem::excerpt)
+				.containsExactly("Chỉ có summary.");
+	}
+
+	/**
+	 * Item không có element nội dung nào ⇒ `excerpt` là `null`, và item VẪN
+	 * được trả về. Bài đó vào bảng bình thường, chỉ là không bao giờ có tóm tắt
+	 * (TDD §17 #6). Bỏ hẳn item ở đây sẽ làm trang mất bài — đắt hơn nhiều so
+	 * với việc thiếu một đoạn tóm tắt.
+	 */
+	@Test
+	void item_khong_co_noi_dung_van_duoc_giu_voi_excerpt_null() {
+		byte[] body = """
+				<?xml version="1.0"?>
+				<rss version="2.0"><channel>
+				  <item>
+				    <title>Không mô tả</title>
+				    <link>https://a.test/2</link>
+				    <pubDate>Tue, 05 Aug 2026 10:00:00 GMT</pubDate>
+				  </item>
+				</channel></rss>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(parser.parse(body)).singleElement()
+				.extracting(ParsedItem::excerpt).isNull();
+	}
+
+	/**
+	 * Trần `maxExcerptChars` phải được ÁP DỤNG, không chỉ truyền vào cho có.
+	 * Không có test này thì một parser bỏ quên tham số vẫn xanh hết, và thứ lộ
+	 * ra là hoá đơn Bedrock chứ không phải một dòng đỏ.
+	 */
+	@Test
+	void ap_dung_tran_do_dai_khi_parse() {
+		FeedParser hepHoi = new JacksonFeedParser(new XmlConfig().feedXmlMapper(), 12);
+		byte[] body = """
+				<?xml version="1.0"?>
+				<rss version="2.0"><channel>
+				  <item>
+				    <title>Dài</title>
+				    <link>https://a.test/4</link>
+				    <description>một hai ba bốn năm sáu bảy tám chín mười</description>
+				  </item>
+				</channel></rss>
+				""".getBytes(StandardCharsets.UTF_8);
+
+		assertThat(hepHoi.parse(body))
+				.extracting(ParsedItem::excerpt)
+				.containsExactly("một hai ba");
+	}
+
+	/**
 	 * Nguồn RSS thứ hai, để nhánh RSS không bị ghim vào riêng cách Spring Blog
 	 * phát feed. AWS khác ở hai chỗ có thật: `guid` là chuỗi băm KHÔNG phải URL
 	 * (`isPermaLink="false"`), và `<atom:link>` nằm ngay trong `<channel>` —
 	 * cùng localName với `<link>` của RSS.
+	 *
+	 * Đây cũng là fixture THẬT duy nhất có CẢ `<description>` lẫn
+	 * `<content:encoded>`, nên nó ghim luôn thứ tự ưu tiên. `excerpt` ra đúng
+	 * chuỗi giữ chỗ vì `content:encoded` của fixture đã bị cắt bớt khi tạo
+	 * fixture — `<description>` thật dài 197 ký tự, và nếu ưu tiên ngược lại thì
+	 * chính chuỗi 197 ký tự đó hiện ra ở đây.
 	 */
 	@Test
 	void parse_dung_gia_tri_cua_rss_aws() throws IOException {
@@ -204,7 +382,8 @@ class JacksonFeedParserTest {
 				"Amazon DynamoDB now supports real-time vector search at any scale",
 				"https://aws.amazon.com/blogs/aws/"
 						+ "amazon-dynamodb-now-supports-real-time-vector-search-at-any-scale/",
-				"Wed, 05 Aug 2026 14:45:10 +0000"));
+				"Wed, 05 Aug 2026 14:45:10 +0000",
+				"Nội dung đã cắt bớt cho fixture."));
 		assertThat(items).extracting(ParsedItem::link)
 				.allSatisfy(l -> assertThat(l).startsWith("https://aws.amazon.com/"));
 	}
@@ -238,7 +417,7 @@ class JacksonFeedParserTest {
 
 		assertThat(parser.parse(atom)).singleElement()
 				.isEqualTo(new ParsedItem("Khai bằng tiền tố",
-						"https://example.test/tien-to", "2026-08-04T00:00:00Z"));
+						"https://example.test/tien-to", "2026-08-04T00:00:00Z", null));
 	}
 
 	private static byte[] fixture(String path) throws IOException {

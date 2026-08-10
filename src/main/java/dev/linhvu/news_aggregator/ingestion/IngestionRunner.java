@@ -181,6 +181,6 @@ class IngestionRunner {
 		String canonical = CanonicalUrl.normalise(item.link());
 
 		events.publishEvent(new ArticleDiscovered(source.sourceId(), source.name(),
-				canonical, item.title(), publishedAt));
+				canonical, item.title(), publishedAt, item.excerpt()));
 	}
 }

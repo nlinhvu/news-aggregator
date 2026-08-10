@@ -8,5 +8,5 @@ package dev.linhvu.news_aggregator.ingestion.events;
  * tắc 5). Việc đó thuộc về `ArticleAdded`.
  */
 public record ArticleDiscovered(String sourceId, String sourceName,
-		String canonicalUrl, String title, String publishedAt) {
+		String canonicalUrl, String title, String publishedAt, String excerpt) {
 }

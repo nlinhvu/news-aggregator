@@ -6,10 +6,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered;
 import dev.linhvu.news_aggregator.platform.IngestionRunMetrics;
 import dev.linhvu.news_aggregator.sources.SourceCatalog;
 import dev.linhvu.news_aggregator.sources.api.SourceView;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -19,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class IngestionRunnerTest {
 
@@ -37,7 +40,8 @@ class IngestionRunnerTest {
 		given(fetcher.fetch(source("a"))).willThrow(new RuntimeException("hỏng"));
 		given(fetcher.fetch(source("b"))).willReturn(body());
 		given(parser.parse(any())).willReturn(List.of(
-				new ParsedItem("T", "https://b.test/1", "Tue, 04 Aug 2026 10:00:00 GMT")));
+				new ParsedItem("T", "https://b.test/1", "Tue, 04 Aug 2026 10:00:00 GMT",
+						"Đoạn trích.")));
 
 		IngestResult result = runner.run();
 
@@ -81,6 +85,27 @@ class IngestionRunnerTest {
 		given(parser.parse(any())).willReturn(List.of());
 
 		assertThat(runner.run().added()).isZero();
+	}
+
+	/**
+	 * `excerpt` phải đi HẾT đường từ item đã parse tới event. `publish` là chỗ
+	 * duy nhất nối hai đầu, và không có test nào khác nhìn vào thứ được publish
+	 * — truyền nhầm `null` ở đó thì mọi test còn lại vẫn xanh, còn triệu chứng
+	 * thật là không bài nào có tóm tắt.
+	 */
+	@Test
+	void excerpt_di_tu_item_toi_event() {
+		given(catalog.enabledSources()).willReturn(List.of(source("a")));
+		given(fetcher.fetch(any())).willReturn(body());
+		given(parser.parse(any())).willReturn(List.of(new ParsedItem("T",
+				"https://b.test/1", "Tue, 04 Aug 2026 10:00:00 GMT", "Đoạn trích thật.")));
+
+		runner.run();
+
+		ArgumentCaptor<ArticleDiscovered> captor =
+				ArgumentCaptor.forClass(ArticleDiscovered.class);
+		verify(events).publishEvent(captor.capture());
+		assertThat(captor.getValue().excerpt()).isEqualTo("Đoạn trích thật.");
 	}
 
 	/**

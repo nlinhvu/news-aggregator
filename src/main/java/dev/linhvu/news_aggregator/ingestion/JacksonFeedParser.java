@@ -9,6 +9,7 @@ import dev.linhvu.news_aggregator.ingestion.xml.AtomFeed;
 import dev.linhvu.news_aggregator.ingestion.xml.Rss2Feed;
 import tools.jackson.dataformat.xml.XmlMapper;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
@@ -41,8 +42,12 @@ class JacksonFeedParser implements FeedParser {
 
 	private final XmlMapper xmlMapper;
 
-	JacksonFeedParser(XmlMapper xmlMapper) {
+	private final int maxExcerptChars;
+
+	JacksonFeedParser(XmlMapper xmlMapper,
+			@Value("${news.summarization.max-excerpt-chars}") int maxExcerptChars) {
 		this.xmlMapper = xmlMapper;
+		this.maxExcerptChars = maxExcerptChars;
 	}
 
 	@Override
@@ -63,7 +68,13 @@ class JacksonFeedParser implements FeedParser {
 						// `published` là ngày đăng; `updated` là ngày sửa cuối và
 						// LUÔN có mặt. Ưu tiên `published` để một lần sửa chính tả
 						// không đẩy bài cũ lên đầu danh sách.
-						e.published != null ? e.published : e.updated))
+						e.published != null ? e.published : e.updated,
+						// `content` trước `summary`: dài hơn, cho model nhiều thứ
+						// để làm việc hơn. Ngược lại là lỗi im lặng — excerpt sẽ
+						// luôn dưới ngưỡng 200 ký tự và không bao giờ có tóm tắt.
+						FeedExcerpt.clean(
+								e.content != null ? e.content : e.summary,
+								maxExcerptChars)))
 				.toList();
 	}
 
@@ -88,7 +99,12 @@ class JacksonFeedParser implements FeedParser {
 						// master §8.4 buộc phải hiển thị, nên suy id từ chính nó
 						// khiến id và link không bao giờ lệch nhau được.
 						i.link != null ? i.link : i.guid,
-						i.pubDate))
+						i.pubDate,
+						// `content:encoded` trước `description` — cùng lý do với
+						// Atom, và với Spring Blog nó là nơi DUY NHẤT có nội dung.
+						FeedExcerpt.clean(
+								i.contentEncoded != null ? i.contentEncoded : i.description,
+								maxExcerptChars)))
 				.toList();
 	}
 

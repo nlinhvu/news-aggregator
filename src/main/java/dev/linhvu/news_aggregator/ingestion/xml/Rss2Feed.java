@@ -23,5 +23,22 @@ public class Rss2Feed {
 		public String link;
 		public String guid;
 		public String pubDate;
+
+		/**
+		 * Nội dung để tóm tắt. Thường là HTML trong CDATA — `FeedExcerpt` lo
+		 * phần strip. Có thể vắng mặt; khi đó bài vẫn vào bảng, chỉ không có
+		 * tóm tắt (TDD §17 #6).
+		 */
+		public String description;
+
+		/**
+		 * `<content:encoded>` của module content — thân bài đầy đủ, và với một
+		 * số nguồn là nơi DUY NHẤT có nội dung: Spring Blog không phát
+		 * `<description>` ở cấp item. Bỏ element này thì mọi bài của nguồn đó ra
+		 * `excerpt == null` mà không có gì đỏ — xem
+		 * `spring_blog_lay_excerpt_tu_content_encoded`.
+		 */
+		@JacksonXmlProperty(localName = "encoded")
+		public String contentEncoded;
 	}
 }
