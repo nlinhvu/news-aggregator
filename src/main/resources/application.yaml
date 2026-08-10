@@ -41,6 +41,8 @@ news:
     model: ${NEWS_SUMMARIZATION_MODEL:gemini-3.5-flash-lite}
     # Tóm tắt cần ổn định, không cần sáng tạo.
     temperature: 0.2
+    call-timeout: 25s
+    max-summary-chars: 400
 
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
