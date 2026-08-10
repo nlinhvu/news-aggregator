@@ -63,7 +63,7 @@ public class DataStack extends Stack {
 						.name("publishedAt").type(AttributeType.STRING).build())
 				.projectionType(ProjectionType.INCLUDE)
 				.nonKeyAttributes(List.of(
-						"title", "canonicalUrl", "sourceName", "summary", "excerpt"))
+						"title", "canonicalUrl", "sourceName", "summary"))
 				.build());
 
 		CfnOutput.Builder.create(this, "ArticlesTableName")

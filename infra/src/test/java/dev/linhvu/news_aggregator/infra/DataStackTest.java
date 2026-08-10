@@ -39,25 +39,35 @@ class DataStackTest {
 	}
 
 	/**
-	 * `excerpt` PHẢI nằm trong projection, và điều đó chỉ được khẳng định ở đây.
+	 * Projection của `gsi-recent` là BẤT BIẾN sau lần deploy đầu tiên.
 	 *
-	 * Danh sách attribute này được chép tay ở hai nơi — `DataStack` và
-	 * `FlociTestConfiguration` (master §9 ghi là rủi ro đã chấp nhận). Không có
-	 * test này thì quên một bên là hỏng HOÀN TOÀN im lặng: cả suite vẫn xanh vì
-	 * bảng Floci có `excerpt`, còn GSI trên prod thì không — và sweep của Task 13
-	 * query GSI, không thấy `excerpt`, nên không nhặt bài nào. Không exception,
-	 * không log, chỉ là không bài nào được tóm tắt.
+	 * DynamoDB từ chối mọi thay đổi projection trên một GSI đã tồn tại:
+	 * *"Cannot update GSI's properties other than Provisioned Throughput and
+	 * Contributor Insights Specification. You can create a new GSI with a
+	 * different name."* Đây không phải cảnh báo lý thuyết — thêm `"excerpt"` vào
+	 * danh sách này đã làm `Dev-DataStack` UPDATE_FAILED và cả pipeline Infra đỏ
+	 * (2026-08-10), rollback về đúng bốn attribute dưới đây.
+	 *
+	 * Nên test này ghim ĐÚNG danh sách, không phải "có chứa". Muốn thêm attribute
+	 * vào index thì phải tạo GSI TÊN MỚI và migrate — sửa dòng dưới đây rồi
+	 * `cdk deploy` là làm gãy môi trường, không phải làm đỏ một test.
+	 *
+	 * Danh sách này cũng phải soi gương `FlociTestConfiguration.articlesTableSchema`
+	 * (master §9: schema chép tay, rủi ro đã chấp nhận). Lệch nhau thì test xanh
+	 * mà prod thiếu attribute trong kết quả query — đã đo: cùng một đoạn code,
+	 * `getExcerpt()` trả về giá trị khi có projection và trả `null` khi không.
 	 */
 	@Test
-	void gsi_project_ca_excerpt() {
+	void projection_cua_gsi_la_bat_bien() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
 								Match.objectLike(Map.of(
 										"IndexName", "gsi-recent",
 										"Projection", Match.objectLike(Map.of(
-												"NonKeyAttributes",
-												Match.arrayWith(List.of("excerpt"))))))
+												"NonKeyAttributes", List.of("title",
+														"canonicalUrl", "sourceName",
+														"summary")))))
 						))
 				)));
 	}
