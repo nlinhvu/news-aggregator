@@ -26,6 +26,11 @@ news:
     read-timeout: 10s
     max-concurrency: 8
     max-body-bytes: 5242880
+  summarization:
+    # Dưới ngưỡng này thì excerpt không đủ cho model làm việc — bài vẫn vào bảng,
+    # chỉ là không có tóm tắt.
+    min-excerpt-chars: 200
+    max-excerpt-chars: 2000
 
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
