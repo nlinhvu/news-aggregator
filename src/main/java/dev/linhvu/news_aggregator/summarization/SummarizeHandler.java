@@ -27,15 +27,10 @@ class SummarizeHandler implements EventJobHandler {
 
 	@Override
 	public Object handle(Map<String, Object> payload) {
-		// TẠM THỜI — chỉ phục vụ phép đo rủi ro #1 ở Task 4 Step 4. HOÀN NGUYÊN
-		// về bản slice 1 (Task 2 Step 7) ngay sau khi đo xong.
+		// SLICE 1: chỉ đếm và ACK. Task 10 thay bằng đường gọi model thật.
 		List<SqsBatch.Message> messages = SqsBatch.parse(payload);
-		List<String> failed = messages.stream()
-				.filter(m -> m.articleId().startsWith("fail-"))
-				.map(SqsBatch.Message::messageId)
-				.toList();
-		log.info("summarize batch: nhận {} message, báo hỏng {}",
-				messages.size(), failed.size());
-		return SqsBatch.failures(failed);
+		log.info("summarize batch: nhận {} message (slice 1 — chưa gọi model)",
+				messages.size());
+		return SqsBatch.failures(List.of());
 	}
 }
