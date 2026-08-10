@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator;
 import java.lang.reflect.RecordComponent;
 import java.util.List;
 
+import com.tngtech.archunit.base.DescribedPredicate;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.modulith.core.ApplicationModules;
@@ -11,8 +12,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ModuleBoundaryTest {
 
-	static final ApplicationModules MODULES =
-			ApplicationModules.of(NewsAggregatorApplication.class);
+	/**
+	 * Món nợ mà ADR-0012 §7 hẹn từ Phase 2, tới hạn ở Phase 3.
+	 *
+	 * Cycle `catalog ↔ summarization` là CÓ THẬT và được chấp nhận có ý thức:
+	 * `summarization` nghe `ArticleAdded` (catalog phát), `catalog` nghe
+	 * `ArticleSummarized` (summarization phát). Đó là cycle đúng nghĩa EDA và
+	 * Modulith cho phép nó LÚC RUNTIME; chỉ `verify()` mới từ chối nó, vì ở tầng
+	 * biên dịch một tham chiếu tới type là một dependency.
+	 *
+	 * Predicate này loại event type khỏi phạm vi phân tích. Cạnh do tham chiếu
+	 * event tạo ra biến mất; mọi vi phạm ranh giới THẬT — một module import class
+	 * `internal` của module khác — vẫn bị bắt.
+	 *
+	 * CÁI MẤT, nói đúng kích thước: `verify()` không còn bắt được một event
+	 * record lén mang theo type nội bộ của publisher. Khoảng trống đó có biên rõ
+	 * và được bịt bằng `event_record_chi_chua_string` — test đó từ nay là thứ
+	 * DUY NHẤT canh chỗ này, nên không được nới nó.
+	 */
+	static final ApplicationModules MODULES = ApplicationModules.of(
+			NewsAggregatorApplication.class,
+			DescribedPredicate.describe("event type",
+					type -> type.getPackageName().endsWith(".events")));
 
 	/**
 	 * Ranh giới module được kiểm chứng bằng máy, không bằng code review
@@ -34,7 +55,8 @@ class ModuleBoundaryTest {
 	void event_record_chi_chua_string() {
 		List<Class<?>> eventTypes = List.of(
 				dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered.class,
-				dev.linhvu.news_aggregator.catalog.events.ArticleAdded.class);
+				dev.linhvu.news_aggregator.catalog.events.ArticleAdded.class,
+				dev.linhvu.news_aggregator.summarization.events.ArticleSummarized.class);
 
 		for (Class<?> type : eventTypes) {
 			assertThat(type.isRecord())

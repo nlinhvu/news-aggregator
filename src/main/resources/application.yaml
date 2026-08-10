@@ -31,6 +31,8 @@ news:
     # chỉ là không có tóm tắt.
     min-excerpt-chars: 200
     max-excerpt-chars: 2000
+    max-per-run: 25
+    queue-url: ${NEWS_SUMMARIZE_QUEUE_URL:http://localhost:4566/000000000000/summarize-queue}
 
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
