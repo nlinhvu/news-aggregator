@@ -435,6 +435,9 @@ class SecurityBoundaryTest {
 	void schedule_gioi_han_retry_va_co_dlq() {
 		appStack().hasResourceProperties("AWS::Scheduler::Schedule", Match.objectLike(Map.of(
 				"Target", Match.objectLike(Map.of(
+						// Ghim đúng schedule ingest — xem `prod_chay_moi_gio_dev_moi_sau_gio`
+						// về lý do payload phải đi kèm từ khi có schedule thứ hai.
+						"Input", "{\"job\":\"ingest-feeds\"}",
 						"RetryPolicy", Match.objectLike(Map.of(
 								"MaximumRetryAttempts", 2)),
 						"DeadLetterConfig", Match.anyValue())))));
@@ -450,14 +453,94 @@ class SecurityBoundaryTest {
 		appStack(EnvConfig.QA).resourceCountIs("AWS::Scheduler::Schedule", 0);
 	}
 
+	/**
+	 * `Input` khai cùng `ScheduleExpression` chứ không tách ra: từ Phase 3 có HAI
+	 * schedule trỏ vào cùng function, và `hasResourceProperties` chỉ đòi CÓ MỘT
+	 * resource khớp. Chỉ khớp nhịp thì "prod chạy mỗi giờ" xanh kể cả khi nhịp
+	 * đó thuộc về sweep còn ingest đã bị đổi — ghép nhịp với payload là thứ ghim
+	 * lại đúng schedule đang nói tới.
+	 */
 	@Test
 	void prod_chay_moi_gio_dev_moi_sau_gio() {
 		appStack(EnvConfig.PROD).hasResourceProperties(
 				"AWS::Scheduler::Schedule",
-				Match.objectLike(Map.of("ScheduleExpression", "rate(1 hour)")));
+				Match.objectLike(Map.of("ScheduleExpression", "rate(1 hour)",
+						"Target", Match.objectLike(Map.of(
+								"Input", "{\"job\":\"ingest-feeds\"}")))));
 		appStack(EnvConfig.DEV).hasResourceProperties(
 				"AWS::Scheduler::Schedule",
-				Match.objectLike(Map.of("ScheduleExpression", "rate(6 hours)")));
+				Match.objectLike(Map.of("ScheduleExpression", "rate(6 hours)",
+						"Target", Match.objectLike(Map.of(
+								"Input", "{\"job\":\"ingest-feeds\"}")))));
+	}
+
+	/**
+	 * prod và dev có HAI schedule (ingest + sweep); qa có KHÔNG.
+	 *
+	 * `qa` là chỗ dễ hồi quy nhất: thêm resource mới rất dễ quên nhánh
+	 * `if (cfg.sweepRate() != null)`, và hậu quả là qa bắt đầu poll blog gốc và
+	 * gọi model — đúng thứ mà quyết định "qa không có Schedule" của Phase 2 loại
+	 * bỏ (master §8.4 coi lịch sự với nguồn là ràng buộc).
+	 */
+	@Test
+	void so_luong_schedule_dung_theo_moi_truong() {
+		appStack(EnvConfig.PROD).resourceCountIs("AWS::Scheduler::Schedule", 2);
+		appStack(EnvConfig.DEV).resourceCountIs("AWS::Scheduler::Schedule", 2);
+		appStack(EnvConfig.QA).resourceCountIs("AWS::Scheduler::Schedule", 0);
+	}
+
+	/**
+	 * Sweep thưa hơn ingest. Bằng nhau nghĩa là ai đó đã sao chép nhịp — và
+	 * hậu quả là DLQ ngập message trùng lặp cho cùng một bài hỏng.
+	 *
+	 * `rate(1 day)` chứ KHÔNG phải `rate(24 hours)`: CDK tự đổi `Duration.hours(24)`
+	 * sang đơn vị lớn nhất chia hết. Giá trị ở đây phải là thứ template synth ra
+	 * thật, không phải thứ đọc xuôi tai từ `EnvConfig`.
+	 */
+	@Test
+	void sweep_thua_hon_ingest() {
+		appStack(EnvConfig.PROD).hasResourceProperties("AWS::Scheduler::Schedule",
+				Match.objectLike(Map.of("ScheduleExpression", "rate(6 hours)",
+						"Target", Match.objectLike(Map.of(
+								"Input", "{\"job\":\"summarize-sweep\"}")))));
+		appStack(EnvConfig.DEV).hasResourceProperties("AWS::Scheduler::Schedule",
+				Match.objectLike(Map.of("ScheduleExpression", "rate(1 day)",
+						"Target", Match.objectLike(Map.of(
+								"Input", "{\"job\":\"summarize-sweep\"}")))));
+	}
+
+	/**
+	 * MỘT DLQ cho cả hai schedule, không phải hai.
+	 *
+	 * Ba queue ở dev/prod là `SummarizeQueue`, `SummarizeDlq` và `IngestDlq` dùng
+	 * chung. Con số 4 nghĩa là ai đó đã thêm `SweepDlq` riêng — không lỗi, không
+	 * cảnh báo, chỉ là từ đó người vận hành phải nhớ kiểm hai chỗ cho cùng một
+	 * loại sự cố, và cái bị quên luôn là cái mới.
+	 *
+	 * `qa` có ĐÚNG hai: không schedule nào thì cũng không có DLQ nào để nuôi.
+	 * Dựng nó vô điều kiện là để lại một hàng đợi không ai đọc trong một môi
+	 * trường vốn dĩ không sinh ra được message nào cho nó.
+	 */
+	@Test
+	void hai_schedule_dung_chung_mot_dlq() {
+		appStack(EnvConfig.PROD).resourceCountIs("AWS::SQS::Queue", 3);
+		appStack(EnvConfig.DEV).resourceCountIs("AWS::SQS::Queue", 3);
+		appStack(EnvConfig.QA).resourceCountIs("AWS::SQS::Queue", 2);
+	}
+
+	/**
+	 * `maximumRetryAttempts` mặc định là 185. Không set tường minh thì một lỗi
+	 * kéo dài thành 185 lần invoke — và với sweep, mỗi invoke là một lượt query
+	 * cộng tối đa 25 message. Bài học Phase 2, áp lại cho schedule thứ hai.
+	 */
+	@Test
+	void sweep_schedule_co_retry_va_dlq() {
+		appStack(EnvConfig.PROD).hasResourceProperties("AWS::Scheduler::Schedule",
+				Match.objectLike(Map.of("Target", Match.objectLike(Map.of(
+						"Input", "{\"job\":\"summarize-sweep\"}",
+						"RetryPolicy", Match.objectLike(Map.of(
+								"MaximumRetryAttempts", 2)),
+						"DeadLetterConfig", Match.anyValue())))));
 	}
 
 	/**

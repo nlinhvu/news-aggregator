@@ -276,12 +276,22 @@ public class AppStack extends Stack {
 		// Schedule và DLQ nằm trong AppStack chứ không tách stack riêng (TDD §17 #2):
 		// schedule là TRIGGER CỦA FUNCTION, tách ra sẽ thành một stack chỉ chứa
 		// một trigger trỏ ngược về stack bên cạnh.
-		if (cfg.ingestionRate() != null) {
-			Queue dlq = Queue.Builder.create(this, "IngestDlq")
+		// MỘT DLQ cho cả hai schedule. Tách ra hai hàng đợi chỉ làm người vận hành
+		// phải nhớ kiểm hai chỗ cho cùng một loại sự cố — "một lượt chạy theo lịch
+		// hỏng hết retry" — trong khi payload trong message đã phân biệt được nguồn.
+		//
+		// Construct id giữ nguyên `IngestDlq` dù nay nó phục vụ cả sweep: đổi id là
+		// đổi logical ID, tức CloudFormation xoá queue cũ và tạo queue mới, vứt luôn
+		// message hỏng đang nằm trong đó — đúng thứ ta cần đọc nhất.
+		Queue scheduleDlq = null;
+		if (cfg.ingestionRate() != null || cfg.sweepRate() != null) {
+			scheduleDlq = Queue.Builder.create(this, "IngestDlq")
 					.retentionPeriod(Duration.days(14))
 					.enforceSsl(true)
 					.build();
+		}
 
+		if (cfg.ingestionRate() != null) {
 			Schedule.Builder.create(this, "IngestSchedule")
 					.schedule(ScheduleExpression.rate(cfg.ingestionRate()))
 					.description("Kích hoạt một lượt ingestion RSS/Atom")
@@ -295,7 +305,24 @@ public class AppStack extends Stack {
 							// lần invoke.
 							.retryAttempts(2)
 							.maxEventAge(Duration.minutes(15))
-							.deadLetterQueue(dlq)
+							.deadLetterQueue(scheduleDlq)
+							.build())
+					.build();
+		}
+
+		// Schedule thứ hai — sweep (ADR-0014). Thưa hơn ingest có chủ đích: đây là
+		// LƯỚI AN TOÀN, không phải đường chính. `ArticleAddedListener` đã lo bài mới
+		// trong vòng vài phút; xem `EnvConfig.sweepRate` về cái giá của nhịp dày.
+		if (cfg.sweepRate() != null) {
+			Schedule.Builder.create(this, "SummarizeSweepSchedule")
+					.schedule(ScheduleExpression.rate(cfg.sweepRate()))
+					.description("Quét article còn thiếu tóm tắt trong cửa sổ 48h")
+					.target(LambdaInvoke.Builder.create(this.function)
+							.input(ScheduleTargetInput.fromObject(
+									Map.of("job", "summarize-sweep")))
+							.retryAttempts(2)
+							.maxEventAge(Duration.minutes(15))
+							.deadLetterQueue(scheduleDlq)
 							.build())
 					.build();
 		}

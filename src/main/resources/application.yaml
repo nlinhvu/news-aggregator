@@ -32,6 +32,10 @@ news:
     min-excerpt-chars: 200
     max-excerpt-chars: 2000
     max-per-run: 25
+    # Cửa sổ sweep. Bài rơi ra ngoài không bao giờ được nhặt lại — đó là cơ chế
+    # chặn rò rỉ chi phí của ADR-0014, không phải thiếu sót. Mở rộng cho MỘT lượt
+    # bằng payload `sinceHours`, không phải bằng deploy.
+    sweep-window: 48h
     queue-url: ${NEWS_SUMMARIZE_QUEUE_URL:http://localhost:4566/000000000000/summarize-queue}
     # Escape hatch local: có giá trị thì THẮNG và SSM không bị chạm.
     api-key: ${GOOGLE_API_KEY:}
