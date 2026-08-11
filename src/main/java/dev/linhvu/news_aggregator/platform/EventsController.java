@@ -42,10 +42,25 @@ class EventsController {
 		return payload.isEmpty() ? "(rỗng)" : String.join(",", payload.keySet());
 	}
 
+	/**
+	 * 500 chứ KHÔNG 400, và đó là quyết định của ADR-0015 chứ không phải sơ suất.
+	 *
+	 * `/events` là endpoint NỘI BỘ: người gọi duy nhất là EventBridge Scheduler và
+	 * SQS ESM, cả hai gửi payload do chính `AppStack` sinh ra. Một `job` không
+	 * routed được ở đây nghĩa là IaC và code đã lệch nhau — bug của deploy.
+	 *
+	 * `AWS_LWA_ERROR_STATUS_CODES=500-599` biến response này thành một lượt invoke
+	 * THẤT BẠI thật, kéo theo async retry, `onFailure` destination và metric
+	 * `Errors`. Dải đó cố ý không lấy 4xx (bot quét sinh 404 sẽ đầu độc alarm),
+	 * nên nếu đổi dòng này về `BAD_REQUEST` thì toàn bộ lưới an toàn của Phase 4
+	 * câm với chính chế độ hỏng nó sinh ra để bắt — và không test nào ở tầng infra
+	 * đỏ. `payload_khong_ai_nhan_tra_500` là chốt chặn duy nhất.
+	 */
 	@ExceptionHandler(UnknownEventException.class)
 	ProblemDetail handleUnknown(UnknownEventException e) {
-		log.warn("payload không handler nào nhận: {}", e.getMessage());
-		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+		log.error("payload không handler nào nhận: {}", e.getMessage());
+		return ProblemDetail.forStatusAndDetail(
+				HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
 	}
 
 	static class UnknownEventException extends RuntimeException {
