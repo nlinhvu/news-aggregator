@@ -93,7 +93,27 @@ class Summarizer {
 		}
 		catch (Exception e) {
 			// KHÔNG log nội dung prompt hay excerpt (TDD §14.2).
-			log.warn("model hỏng cho article {}: {}", article.articleId(), e.toString());
+			//
+			// 429 tách riêng vì HÀNH ĐỘNG khác hẳn: "hết quota, đợi hoặc hạ
+			// max-per-run" so với "Google hỏng, chờ nó tự khỏi". Bốn môi trường
+			// dùng chung một Google Cloud project nên chia chung 15 RPM / 1.000
+			// RPD — quota tính theo project, không theo API key — và một lượt sweep
+			// lớn chạm trần RPM là chuyện có thật.
+			//
+			// Nhận diện bằng chuỗi vì Spring AI bọc lỗi provider vào nhiều lớp
+			// exception khác nhau và không expose status code ổn định; ở đây còn
+			// thêm một lớp `ExecutionException` của `CompletableFuture`. Thô, nhưng
+			// nó có test canh cả hai chiều — và chiều PHỦ ĐỊNH mới là chiều quan
+			// trọng: gán nhãn quota cho một lỗi không phải quota sẽ dẫn người vận
+			// hành đi hạ max-per-run trong khi thứ hỏng nằm ở chỗ khác.
+			String detail = e.toString();
+			if (detail.contains("429") || detail.contains("RESOURCE_EXHAUSTED")) {
+				log.warn("model từ chối vì quota cho article {}: {}",
+						article.articleId(), detail);
+			}
+			else {
+				log.warn("model hỏng cho article {}: {}", article.articleId(), detail);
+			}
 			return Optional.empty();
 		}
 

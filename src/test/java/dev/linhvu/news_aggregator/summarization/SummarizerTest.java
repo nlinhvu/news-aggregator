@@ -1,14 +1,32 @@
 package dev.linhvu.news_aggregator.summarization;
 
 import java.time.Duration;
+import java.util.List;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SummarizerTest {
+
+	/**
+	 * Bằng đúng `news.summarization.max-summary-chars` của production. Chôn con số
+	 * ở từng chỗ gọi — như bản trước làm với `400` ở ba nơi — thì đổi trần là sửa
+	 * ba dòng, và cái bị quên luôn là dòng của test biên.
+	 *
+	 * Hằng số này KHÔNG đọc từ `application.yaml`: `SummarizerTest` gọi thẳng
+	 * constructor nên nó không đi qua Spring. Chốt chặn cho giá trị cấu hình nằm ở
+	 * `SummarizerWiringTest#tran_do_dai_cau_hinh_la_500`; ở đây chỉ kiểm HÀNH VI
+	 * quanh một trần cho trước.
+	 */
+	private static final int TRAN = 500;
 
 	private static final SummarizableArticle ARTICLE = new SummarizableArticle(
 			"a1", "Spring Boot 4.1 released",
@@ -24,10 +42,30 @@ class SummarizerTest {
 	 * thật sẽ đỏ vào ngày Google đổi model, tốn tiền mỗi lần chạy CI, và không
 	 * chứng minh được gì ổn định.
 	 */
+	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
+
+	@BeforeEach
+	void batLog() {
+		logs.start();
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Summarizer.class))
+				.addAppender(logs);
+	}
+
+	@AfterEach
+	void thaLog() {
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Summarizer.class))
+				.detachAppender(logs);
+		logs.stop();
+	}
+
+	private List<String> logEvents() {
+		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+	}
+
 	private Summarizer summarizerTraVe(String modelOutput) {
 		ChatClient client = ChatClient.builder(
 				new FakeChatModel(modelOutput)).build();
-		return new Summarizer(client, Duration.ofSeconds(25), 400);
+		return new Summarizer(client, Duration.ofSeconds(25), TRAN);
 	}
 
 	@Test
@@ -61,7 +99,32 @@ class SummarizerTest {
 	 */
 	@Test
 	void tra_ve_rong_khi_model_tra_qua_dai() {
-		assertThat(summarizerTraVe("x".repeat(401)).summarize(ARTICLE)).isEmpty();
+		assertThat(summarizerTraVe("x".repeat(TRAN + 1)).summarize(ARTICLE)).isEmpty();
+	}
+
+	/**
+	 * Chiều ngược lại của test trên, và là chiều đã HỎNG THẬT.
+	 *
+	 * Nợ Phase 3 §20B #6, đo trên `dev` 2026-08-11: model trả **410** ký tự trên
+	 * trần **400**, `Summarizer` vứt cả lời gọi, lần retry cho ra bản 337 ký tự và
+	 * được nhận — trả tiền hai lần cho một bản hợp lệ vì lố 2,5%.
+	 *
+	 * Cơ chế `consecutive-failure-limit` của Phase 3 §17 #8 chặn hỏng HÀNG LOẠT;
+	 * nó không chạm chế độ này chút nào.
+	 *
+	 * Núm vặn rẻ nhất là NỚI TRẦN, không phải cắt chuỗi: cắt ở giữa câu cho ra một
+	 * đoạn cụt hiển thị cho người đọc, tệ hơn hẳn một đoạn dài hơn 10 ký tự.
+	 *
+	 * 410 là con số ĐO ĐƯỢC, không phải con số tròn cho đẹp — giữ nguyên nó để test
+	 * còn chỉ về đúng sự cố đã xảy ra.
+	 */
+	@Test
+	void ban_tom_tat_lo_tran_cu_khong_con_bi_vut() {
+		String bon_tram_muoi = "x".repeat(410);
+
+		assertThat(summarizerTraVe(bon_tram_muoi).summarize(ARTICLE))
+				.as("410 ký tự từng bị vứt khi trần là 400 — xem nợ §20B #6")
+				.contains(bon_tram_muoi);
 	}
 
 	/**
@@ -72,7 +135,7 @@ class SummarizerTest {
 	@Test
 	void title_va_excerpt_vao_dung_cho_trong_prompt() {
 		FakeChatModel model = new FakeChatModel("Tóm tắt.");
-		new Summarizer(ChatClient.builder(model).build(), Duration.ofSeconds(25), 400)
+		new Summarizer(ChatClient.builder(model).build(), Duration.ofSeconds(25), TRAN)
 				.summarize(ARTICLE);
 
 		assertThat(model.lastPrompt)
@@ -94,9 +157,55 @@ class SummarizerTest {
 		FakeChatModel model = new FakeChatModel("",
 				new IllegalStateException("429 rate limit"));
 		Summarizer summarizer = new Summarizer(
-				ChatClient.builder(model).build(), Duration.ofSeconds(25), 400);
+				ChatClient.builder(model).build(), Duration.ofSeconds(25), TRAN);
 
 		assertThat(summarizer.summarize(ARTICLE)).isEmpty();
 		assertThat(model.calls).isEqualTo(1);
+	}
+
+	/**
+	 * 429 phải phân biệt được với mọi lỗi model khác TRONG LOG. Đây không phải
+	 * chuyện chi phí — chi phí model nằm ngoài phạm vi Phase 4 (TDD §17 #13) — mà
+	 * là chuyện đúng/sai: hết quota làm bài LẶNG LẼ không có tóm tắt, và triệu
+	 * chứng nhìn giống hệt "Gemini hay hỏng".
+	 *
+	 * Bốn môi trường dùng CHUNG một Google Cloud project nên chia chung 15 RPM /
+	 * 1.000 RPD — quota tính theo project, không theo API key. Chiều siết là RPM:
+	 * một lượt sweep `max-per-run: 25` chia thành 3 invoke song song có thể vượt 15
+	 * lời gọi trong một phút. Chưa ai thấy vì lượt sweep thật lớn nhất từng chạy là
+	 * `enqueued=2`.
+	 *
+	 * KHÔNG thêm metric, KHÔNG thêm alarm — chỉ một chữ trong dòng log đã có. Hành
+	 * động khác hẳn nhau ("hết quota, đợi hoặc hạ `max-per-run`" so với "Google
+	 * hỏng, chờ nó tự khỏi") nên người vận hành phải đọc ra được là loại nào.
+	 */
+	@Test
+	void loi_429_ghi_log_khac_loi_model_khac() {
+		FakeChatModel model = new FakeChatModel("",
+				new IllegalStateException("429 RESOURCE_EXHAUSTED"));
+
+		assertThat(new Summarizer(ChatClient.builder(model).build(),
+				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+		assertThat(logEvents()).anyMatch(m -> m.contains("quota"));
+	}
+
+	/**
+	 * Chiều PHỦ ĐỊNH, và nó mới là chiều quan trọng.
+	 *
+	 * Nhận diện 429 làm bằng khớp chuỗi, vì Spring AI bọc lỗi provider qua nhiều
+	 * lớp exception và không expose status code ổn định. Cách đó thô, nên rủi ro
+	 * thật không phải "bỏ sót một 429" — sót thì người vận hành vẫn thấy một lỗi
+	 * model bình thường và đi điều tra. Rủi ro thật là **gán nhãn quota cho một lỗi
+	 * KHÔNG phải quota**: khi đó người vận hành đi hạ `max-per-run` và chờ quota
+	 * hồi, trong khi thứ hỏng là chỗ khác hoàn toàn.
+	 */
+	@Test
+	void loi_model_khac_khong_bi_gan_nhan_quota() {
+		FakeChatModel model = new FakeChatModel("",
+				new IllegalStateException("500 INTERNAL"));
+
+		assertThat(new Summarizer(ChatClient.builder(model).build(),
+				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+		assertThat(logEvents()).noneMatch(m -> m.contains("quota"));
 	}
 }

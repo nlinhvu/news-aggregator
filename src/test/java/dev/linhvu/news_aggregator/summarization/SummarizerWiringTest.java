@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.Environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,8 +26,37 @@ class SummarizerWiringTest {
 	@Autowired
 	ApplicationContext context;
 
+	@Autowired
+	Environment env;
+
 	@Test
 	void dung_duoc_summarizer_tu_context() {
 		assertThat(context.getBean(Summarizer.class)).isNotNull();
+	}
+
+	/**
+	 * Trần độ dài CẤU HÌNH phải là 500, và test này là chốt chặn DUY NHẤT của nó.
+	 *
+	 * Nợ Phase 3 §20B #6, đo thật trên `dev` 2026-08-11: model trả **410** ký tự
+	 * trên trần **400**, `Summarizer` vứt cả lời gọi, lần retry cho ra bản 337 ký
+	 * tự và được nhận — trả tiền hai lần cho một bản hợp lệ vì lố 2,5%. Prompt xin
+	 * "tối đa 60 từ", mà 60 từ tiếng Việt vượt 400 ký tự một cách bình thường, nên
+	 * 400 không phải trần an toàn — nó nằm ngay giữa vùng đầu ra hợp lệ.
+	 *
+	 * VÌ SAO Ở ĐÂY CHỨ KHÔNG Ở `SummarizerTest`: mọi test bên đó truyền trần
+	 * THẲNG vào constructor, nên không test nào trong số chúng đọc `application.yaml`.
+	 * Đổi dòng yaml về 400 và cả suite vẫn xanh — chuỗi `max-summary-chars` xuất
+	 * hiện ở đúng MỘT chỗ trong toàn repo, chính dòng yaml đó. Không có test này
+	 * thì món nợ được trả rồi lặng lẽ phát sinh lại.
+	 *
+	 * Ghim CHÍNH XÁC 500 chứ không `>= 500`: chỉnh trần là quyết định có hệ quả về
+	 * chi phí và về layout trang, nên nó phải là một hành vi có ý thức kèm đọc lại
+	 * lý do trên, không phải một con số ai đó vặn nhẹ.
+	 */
+	@Test
+	void tran_do_dai_cau_hinh_la_500() {
+		assertThat(env.getProperty("news.summarization.max-summary-chars", Integer.class))
+				.as("nợ Phase 3 §20B #6 — 400 vứt mất bản tóm tắt 410 ký tự hợp lệ")
+				.isEqualTo(500);
 	}
 }

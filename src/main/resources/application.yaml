@@ -46,7 +46,15 @@ news:
     # Tóm tắt cần ổn định, không cần sáng tạo.
     temperature: 0.2
     call-timeout: 25s
-    max-summary-chars: 400
+    # Nới 400 → 500 để trả nợ Phase 3 §20B #6: model trả 410 ký tự bị vứt cả lời
+    # gọi, retry cho ra 337 và được nhận — trả tiền hai lần vì lố 2,5%. Prompt xin
+    # "tối đa 60 từ", mà 60 từ tiếng Việt vượt 400 ký tự một cách bình thường, nên
+    # 400 nằm ngay giữa vùng đầu ra HỢP LỆ chứ không phải ngoài rìa nó. Trần vẫn
+    # tồn tại để chặn chế độ hỏng THẬT mà nó sinh ra để chặn: model phớt lờ prompt
+    # và chép lại gần trọn bài. Chốt chặn của dòng này là
+    # `SummarizerWiringTest#tran_do_dai_cau_hinh_la_500` — không test nào khác đọc
+    # tới nó.
+    max-summary-chars: 500
     # Thứ thay thế circuit breaker (TDD §17 #8). Gemini hỏng hàng loạt thì 10 bài
     # × 25s timeout vượt 120s function timeout, invoke chết trước khi kịp trả
     # `batchItemFailures`, và CẢ batch quay lại — kể cả bài đã tóm tắt xong.
