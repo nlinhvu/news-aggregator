@@ -1,5 +1,8 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
@@ -30,6 +33,21 @@ class ArticleCatalogService implements ArticleCatalog {
 				.filter(this::excerptDuDai)
 				.map(a -> new SummarizableArticle(
 						a.getArticleId(), a.getTitle(), a.getExcerpt()));
+	}
+
+	@Override
+	public List<SummarizableArticle> findSummarizable(Duration window, int limit) {
+		// `publishedAt` là chuỗi ISO-8601 UTC nên so sánh chuỗi trùng so sánh
+		// thời gian — cùng tính chất mà `gsi-recent` đã dựa vào từ Phase 1.
+		String after = Instant.now().minus(window).toString();
+		return repository.findPendingSummary(after, limit).stream()
+				// Ngưỡng độ dài lọc ở tầng ứng dụng, KHÔNG ở FilterExpression:
+				// DynamoDB tính tiền theo item ĐỌC chứ không theo item trả về,
+				// nên đẩy nó xuống không tiết kiệm gì mà làm expression khó đọc.
+				.filter(this::excerptDuDai)
+				.map(a -> new SummarizableArticle(
+						a.getArticleId(), a.getTitle(), a.getExcerpt()))
+				.toList();
 	}
 
 	// Chuỗi rỗng cũng tính là chưa có: một `summary` rỗng lọt vào bảng là dữ

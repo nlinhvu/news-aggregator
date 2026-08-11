@@ -1,7 +1,11 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.time.Duration;
+import java.time.Instant;
+
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
+import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
@@ -66,6 +70,16 @@ class ArticleCatalogServiceTest {
 		a.setExcerpt(excerpt);
 		a.setSummary(summary);
 		return a;
+	}
+
+	private Article article(String id, String publishedAt, String excerpt, String summary) {
+		Article a = article(id, excerpt, summary);
+		a.setPublishedAt(publishedAt);
+		return a;
+	}
+
+	private static String gioTruoc(int hours) {
+		return Instant.now().minus(Duration.ofHours(hours)).toString();
 	}
 
 	@Test
@@ -136,5 +150,82 @@ class ArticleCatalogServiceTest {
 		assertThat(after.getExcerpt()).isEqualTo(EXCERPT_DU_DAI);
 		assertThat(after.getTitle()).isEqualTo("Tiêu đề gan-summary");
 		assertThat(after.getCanonicalUrl()).isEqualTo("https://a.test/gan-summary");
+	}
+
+	@Test
+	void quet_tra_ve_bai_can_tom_tat_trong_cua_so() {
+		repository.save(article("moi-can-lam", gioTruoc(2), EXCERPT_DU_DAI, null));
+		repository.save(article("moi-da-xong", gioTruoc(3), EXCERPT_DU_DAI,
+				"Đã có tóm tắt."));
+		repository.save(article("moi-khong-excerpt", gioTruoc(4), null, null));
+
+		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25))
+				.extracting(SummarizableArticle::articleId)
+				.containsExactly("moi-can-lam");
+	}
+
+	/**
+	 * Cửa sổ là cơ chế chặn rò rỉ chi phí của ADR-0014: bài hỏng vĩnh viễn KHÔNG
+	 * được "tha thứ", nó chỉ già đi rồi rơi khỏi tầm với. Test này ghim cái ranh
+	 * giới đó.
+	 */
+	@Test
+	void quet_khong_lay_bai_ngoai_cua_so() {
+		repository.save(article("qua-cu", gioTruoc(72), EXCERPT_DU_DAI, null));
+
+		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25)).isEmpty();
+	}
+
+	/**
+	 * Ngưỡng độ dài KHÔNG nằm trong `FilterExpression` mà ở tầng ứng dụng, nên
+	 * nó là thứ duy nhất chặn bài excerpt-ngắn khỏi đường sweep. Bài như thế vẫn
+	 * thoả `attribute_exists(excerpt) AND attribute_not_exists(summary)` nên
+	 * query TRẢ VỀ nó; gỡ `filter` ở service thì nó vào queue, rồi bị
+	 * `SummarizeHandler` bỏ qua ở consumer — `enqueued` đếm việc không có thật.
+	 */
+	@Test
+	void quet_khong_lay_bai_excerpt_ngan_hon_nguong() {
+		repository.save(article("quet-qua-ngan", gioTruoc(2), "Ngắn.", null));
+
+		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25)).isEmpty();
+	}
+
+	/**
+	 * 30 bài đã có summary đứng trước 1 bài cần làm, để ghim rằng kết quả KHÔNG
+	 * dừng ở trang đầu. Bài mới nhất đứng TRƯỚC vì `gsi-recent-v2` sắp giảm dần
+	 * theo `publishedAt`, nên bài cần làm được đặt CŨ NHẤT để nó nằm sau đủ xa.
+	 *
+	 * Xuất phát điểm là cái bẫy DynamoDB: `Limit` áp TRƯỚC `FilterExpression`,
+	 * nên "đọc 25 item rồi lọc" có thể trả rỗng dù còn việc — không lỗi, log chỉ
+	 * nói `enqueued=0`, trông y hệt "không có việc để làm".
+	 *
+	 * Nhưng ĐO THẬT bằng mutation thì bẫy đó đã bị enhanced client vô hiệu, chứ
+	 * không phải bị code này chặn: `PageIterable.stream()` tự đi tiếp
+	 * `lastEvaluatedKey`, nên thêm `.limit(25)` vào request MỘT MÌNH không làm
+	 * test này đỏ (mutation sống sót). Test chỉ đỏ khi có THÊM việc cắt ở trang
+	 * đầu — `.stream().limit(1)` hoặc chuyển sang low-level client không phân
+	 * trang. Đó chính xác là phạm vi nó bảo vệ, không hơn.
+	 */
+	@Test
+	void quet_doc_tiep_trang_khi_limit_bi_filter_an_het() {
+		for (int i = 0; i < 30; i++) {
+			repository.save(article("da-xong-" + i, gioTruoc(1 + i), EXCERPT_DU_DAI,
+					"Tóm tắt " + i));
+		}
+		repository.save(article("con-sot-lai", gioTruoc(40), EXCERPT_DU_DAI, null));
+
+		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25))
+				.extracting(SummarizableArticle::articleId)
+				.containsExactly("con-sot-lai");
+	}
+
+	@Test
+	void quet_ton_trong_limit() {
+		for (int i = 0; i < 10; i++) {
+			repository.save(article("can-lam-" + i, gioTruoc(1 + i), EXCERPT_DU_DAI,
+					null));
+		}
+
+		assertThat(catalog.findSummarizable(Duration.ofHours(48), 4)).hasSize(4);
 	}
 }
