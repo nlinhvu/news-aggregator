@@ -19,12 +19,14 @@ import software.amazon.awscdk.services.lambda.Architecture;
 import software.amazon.awscdk.services.lambda.CfnFunction;
 import software.amazon.awscdk.services.lambda.Code;
 import software.amazon.awscdk.services.lambda.EcrImageCodeProps;
+import software.amazon.awscdk.services.lambda.EventInvokeConfigOptions;
 import software.amazon.awscdk.services.lambda.Function;
 import software.amazon.awscdk.services.lambda.FunctionUrl;
 import software.amazon.awscdk.services.lambda.FunctionUrlAuthType;
 import software.amazon.awscdk.services.lambda.FunctionUrlOptions;
 import software.amazon.awscdk.services.lambda.Handler;
 import software.amazon.awscdk.services.lambda.Runtime;
+import software.amazon.awscdk.services.lambda.destinations.SqsDestination;
 import software.amazon.awscdk.services.lambda.eventsources.SqsEventSource;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.amazon.awscdk.services.logs.RetentionDays;
@@ -296,6 +298,44 @@ public class AppStack extends Stack {
 					.retentionPeriod(Duration.days(14))
 					.enforceSsl(true)
 					.build();
+
+			// TẦNG ② của ADR-0015. Scheduler gọi Lambda BẤT ĐỒNG BỘ: nó trả
+			// `202 Accepted` ngay khi Lambda NHẬN sự kiện, và từ giây đó
+			// `retryAttempts(2)` + DLQ của Schedule không còn biết gì nữa. Chúng
+			// canh tầng ① (không giao được việc: throttle, mất quyền). Lỗi khi
+			// HÀM CHẠY rơi vào async retry của Lambda rồi tới ĐÂY.
+			//
+			// Không có destination thì sự kiện rơi mất, chỉ còn metric
+			// `AsyncEventsDropped` — biết "có thứ gì đó rơi" mà không biết cái gì.
+			// Message ở đây mang PAYLOAD GỐC nên đọc được ngay là `ingest-feeds`
+			// hay `summarize-sweep`.
+			//
+			// Cùng queue với tầng ①: một chỗ để nhìn tốt hơn hai, và hai loại
+			// message phân biệt được bằng hình dạng. Runbook mô tả cách đọc.
+			// KHÔNG có `executionRole.addToPolicy(sqs:SendMessage)` đi kèm ở đây, và
+			// đó là kết luận đã ĐO chứ không phải bỏ sót.
+			//
+			// `SqsDestination.bind()` tự gọi `queue.grantSendMessages(fn)`, nên
+			// `FunctionRoleDefaultPolicy` đã có `[GetQueueAttributes, GetQueueUrl,
+			// SendMessage]` trên `IngestDlq` mà không ai viết dòng nào. Thêm một
+			// statement tay nữa chỉ tạo bản sao trong policy: không sai, nhưng nó
+			// là thứ mà lần audit IAM sau phải mất công truy nguyên, và Task 9 —
+			// tập-đóng quyền — sẽ đếm nhầm nguồn gốc của nó.
+			//
+			// Cái giá của việc dựa vào auto-grant: nó RỘNG HƠN statement tay, thêm
+			// `GetQueueAttributes` và `GetQueueUrl`. Hai quyền đọc metadata trên
+			// một DLQ — chấp nhận được, nhưng phải nằm trong tập-đóng của Task 9
+			// một cách có ý thức, không phải lọt vào vì không ai nhìn.
+			//
+			// Chốt chặn: `function_co_on_failure_destination_tro_ve_ingest_dlq`
+			// khẳng định CẢ HAI vế — có `EventInvokeConfig`, VÀ role có
+			// `sqs:SendMessage` trên `IngestDlq`. Nếu CDK bỏ auto-grant ở bản sau,
+			// vế thứ hai đỏ.
+			this.function.configureAsyncInvoke(EventInvokeConfigOptions.builder()
+					.onFailure(new SqsDestination(scheduleDlq))
+					.build());
+
+
 		}
 
 		if (cfg.ingestionRate() != null) {

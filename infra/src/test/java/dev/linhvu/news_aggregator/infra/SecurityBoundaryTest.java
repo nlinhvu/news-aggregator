@@ -1231,6 +1231,38 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Tầng ② của ADR-0015. `retryAttempts` + Scheduler DLQ canh tầng ① (giao
+	 * việc); khi Lambda đã trả `202 Accepted` thì Scheduler coi như XONG và không
+	 * bao giờ biết hàm chạy ra sao. Thứ giữ lại sự kiện hỏng ở tầng ② là
+	 * `onFailure` destination của FUNCTION.
+	 *
+	 * Trỏ về chính `IngestDlq` đang có: một hàng đợi, hai nguồn. Người vận hành
+	 * chỉ phải nhìn một chỗ cho cùng một loại sự cố — "một lượt chạy theo lịch
+	 * không hoàn thành".
+	 */
+	@Test
+	void function_co_on_failure_destination_tro_ve_ingest_dlq() {
+		appStack().hasResourceProperties("AWS::Lambda::EventInvokeConfig",
+				Match.objectLike(Map.of("DestinationConfig",
+						Match.objectLike(Map.of("OnFailure", Match.anyValue())))));
+
+		List<String> sendOn = resourcesForAction(appStack(),
+				"FunctionRoleDefaultPolicy", "sqs:SendMessage");
+		assertTrue(sendOn.stream().anyMatch(r -> r.contains("IngestDlq")),
+				"onFailure destination cần sqs:SendMessage trên IngestDlq, thực tế: "
+						+ sendOn);
+	}
+
+	/**
+	 * `qa` không có Schedule nào nên không có `IngestDlq` — và vì thế cũng không
+	 * được có `EventInvokeConfig` trỏ vào hư vô.
+	 */
+	@Test
+	void qa_khong_co_on_failure_destination() {
+		appStack(EnvConfig.QA).resourceCountIs("AWS::Lambda::EventInvokeConfig", 0);
+	}
+
+	/**
 	 * Execution role được gửi và nhận trên queue summarize, nhưng KHÔNG có
 	 * quyền nào trên DLQ — chỉ dịch vụ SQS ghi vào đó. Cấp quyền thừa lên DLQ
 	 * nghĩa là một bug trong code có thể dọn sạch bằng chứng của chính nó.
