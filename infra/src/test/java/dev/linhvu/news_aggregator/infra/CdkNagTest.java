@@ -82,6 +82,26 @@ class CdkNagTest {
 					+ "và resource khoá đúng bucket SPA, nên wildcard còn lại chỉ nằm ở "
 					+ "phần key của object."));
 
+	// KHÔNG có entry nào cho SNS, và đó là kết luận đã đo chứ không phải bỏ sót.
+	//
+	// Topic của ObservabilityStack CỐ Ý không bật SSE (xem Javadoc của
+	// `SecurityBoundaryTest#sns_khong_bat_sse_nhung_bat_ssl`), nên phản xạ đầu
+	// tiên là thêm một suppression `AwsSolutions-SNS2`. Entry đó sẽ là entry
+	// CHẾT: rule ấy KHÔNG TỒN TẠI trong cdk-nag 3.0.1. Pack `aws-solutions` nạp
+	// đúng MỘT rule SNS — `SNSTopicSSLPublishOnly` → `AwsSolutions-SNS3`; rule
+	// mã hoá (`SNSEncryptedKMS`) chỉ nằm trong pack PCI-DSS / NIST-800-53 /
+	// HIPAA, những pack test này không chạy.
+	//
+	// Một entry chết ở đây tệ hơn không có entry: nó trông y hệt một ngoại lệ đã
+	// được cân nhắc, và nếu bản cdk-nag sau này THÊM rule SSE thật thì nó nuốt
+	// luôn finding đó mà không ai phải quyết định lại. Cùng lý do với comment
+	// "assertion CHẾT" ở cuối `SecurityBoundaryTest#kms_decrypt_ghim_ve_khoa_cua_ssm`.
+	//
+	// `AwsSolutions-SNS3` thì có thật và ĐANG xanh nhờ `enforceSsl(true)` — đo
+	// bằng mutation: bỏ dòng đó ra thì test này đỏ với
+	// `[ObservabilityStack → AwsSolutions-SNS3]`. Đó cũng là bằng chứng
+	// ObservabilityStack thật sự nằm trong tầm quét của vòng lặp dưới.
+
 	/**
 	 * cdk-nag quét best practice trên construct tree — không cần AWS, chạy
 	 * trong ./gradlew test. Bất kỳ finding nào KHÔNG nằm trong ACCEPTED đều
@@ -102,7 +122,7 @@ class CdkNagTest {
 
 		List<String> unexpected = new ArrayList<>();
 		for (String stackId : List.of("DnsStack", "DataStack", "AppStack", "EdgeStack",
-				"CicdStack")) {
+				"CicdStack", "ObservabilityStack")) {
 			Stack stack = (Stack) stage.getNode().findChild(stackId);
 			PolicyValidationPluginReport report =
 					new AwsSolutionsChecks().validateScope(stack);

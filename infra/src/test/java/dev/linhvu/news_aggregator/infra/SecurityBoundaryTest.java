@@ -54,6 +54,13 @@ class SecurityBoundaryTest {
 				stage.getNode().findChild("CicdStack"));
 	}
 
+	private Template observabilityStack(EnvConfig cfg) {
+		App app = new App();
+		AppStage stage = new AppStage(app, cfg);
+		return Template.fromStack((software.amazon.awscdk.Stack)
+				stage.getNode().findChild("ObservabilityStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -892,6 +899,79 @@ class SecurityBoundaryTest {
 								+ "hình là việc của sourcesSync, thực tế: " + resource);
 			}
 		}
+	}
+
+	/**
+	 * SNS topic KHÔNG được bật server-side encryption, và đây là ngược trực giác
+	 * nên phải có test canh.
+	 *
+	 * CloudWatch alarm publish vào topic bật SSE bằng `alias/aws/sns` thì **alarm
+	 * action THẤT BẠI** — key policy của AWS-managed key không cho CloudWatch gọi
+	 * `kms:GenerateDataKey`, và key policy của AWS-managed key thì KHÔNG SỬA ĐƯỢC.
+	 * Muốn vừa mã hoá vừa chạy phải dùng customer-managed key: $1/tháng/key × 3 =
+	 * $3, cùng họ với Secrets Manager mà master §8.3 cấm theo nguyên tắc.
+	 *
+	 * Nội dung message: tên alarm, trạng thái, account id, region, tên metric,
+	 * timestamp. Không PII, không secret. `enforceSsl` vẫn bật để siết đường
+	 * truyền — đó mới là thứ thật sự bảo vệ được gì ở đây.
+	 */
+	@Test
+	void sns_khong_bat_sse_nhung_bat_ssl() {
+		Template t = observabilityStack(EnvConfig.DEV);
+		t.hasResourceProperties("AWS::SNS::Topic",
+				Match.objectLike(Map.of("KmsMasterKeyId", Match.absent())));
+		t.resourceCountIs("AWS::SNS::TopicPolicy", 1);
+	}
+
+	/**
+	 * Ba môi trường, ba topic độc lập, KHÔNG cross-account. Master §5 chỉ cho
+	 * phép một ngoại lệ có tên cho quy tắc "không có đường giữa các account"
+	 * (ECR repository policy), và "đỡ phải bấm xác nhận ba lần" không đủ nặng.
+	 *
+	 * Lý do quyết định lại là bán kính vụ nổ: topic chung phải nằm ở MỘT account,
+	 * và đặt ở `dev` — nơi ta cố tình làm hỏng đồ — thì một sai sót ở dev làm câm
+	 * cảnh báo của prod.
+	 */
+	@Test
+	void moi_moi_truong_mot_topic_va_mot_subscription() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Template t = observabilityStack(cfg);
+			t.resourceCountIs("AWS::SNS::Topic", 1);
+			t.resourceCountIs("AWS::SNS::Subscription", 1);
+			t.hasResourceProperties("AWS::SNS::Subscription",
+					Match.objectLike(Map.of("Protocol", "email")));
+		}
+	}
+
+	/**
+	 * `Errors` là metric AWS cấp — miễn phí, không ăn vào hạn mức 10 custom
+	 * metric của org. `NOT_BREACHING` là bắt buộc: phần lớn thời gian không có
+	 * lỗi nào, và "không có dữ liệu" ở đây nghĩa là BÌNH THƯỜNG. Để mặc định
+	 * (`missing`) thì alarm treo ở `INSUFFICIENT_DATA` và không bao giờ nổ.
+	 */
+	@Test
+	void alarm_errors_o_prod_va_dev_khong_o_qa() {
+		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of(
+						"MetricName", "Errors",
+						"Namespace", "AWS/Lambda",
+						"TreatMissingData", "notBreaching")));
+		observabilityStack(EnvConfig.DEV).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of("MetricName", "Errors")));
+		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Alarm", 0);
+	}
+
+	/**
+	 * Tên alarm phải mang tiền tố môi trường. Ba topic khác nhau nhưng cùng đổ về
+	 * MỘT hộp thư, và tiêu đề mail do CloudWatch sinh chỉ chứa tên alarm — không
+	 * tiền tố thì người vận hành không biết mail đến từ đâu.
+	 */
+	@Test
+	void ten_alarm_mang_tien_to_moi_truong() {
+		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of("AlarmName", "na-prod-function-errors")));
+		observabilityStack(EnvConfig.DEV).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of("AlarmName", "na-dev-function-errors")));
 	}
 
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */

@@ -41,6 +41,7 @@ public class AppStack extends Stack {
 
 	private final Function function;
 	private final FunctionUrl functionUrl;
+	private final LogGroup logGroup;
 
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
 			final ITable articlesTable, final ITable featureTogglesTable,
@@ -54,7 +55,7 @@ public class AppStack extends Stack {
 				"arn:aws:ecr:" + cfg.region() + ":" + EnvConfig.TOOLING_ACCOUNT
 						+ ":repository/news-aggregator");
 
-		LogGroup logGroup = LogGroup.Builder.create(this, "LogGroup")
+		this.logGroup = LogGroup.Builder.create(this, "LogGroup")
 				.retention(RetentionDays.TWO_WEEKS)
 				.removalPolicy(RemovalPolicy.DESTROY)
 				.build();
@@ -66,7 +67,7 @@ public class AppStack extends Stack {
 		Role executionRole = Role.Builder.create(this, "FunctionRole")
 				.assumedBy(new ServicePrincipal("lambda.amazonaws.com"))
 				.build();
-		logGroup.grantWrite(executionRole);
+		this.logGroup.grantWrite(executionRole);
 
 		// KHÔNG dùng `articlesTable.grantReadData()`. Nó cấp resource
 		// `<table>.Arn/index/*` trong khi bảng có ĐÚNG MỘT index; kèm theo
@@ -238,7 +239,7 @@ public class AppStack extends Stack {
 				// để lại ~15s cho việc fetch 4 feed là quá sát. Timeout cao không
 				// tốn tiền — Lambda tính theo duration thật, không theo cấu hình.
 				.timeout(Duration.seconds(120))
-				.logGroup(logGroup)
+				.logGroup(this.logGroup)
 				.environment(env)
 				.build();
 
@@ -340,5 +341,9 @@ public class AppStack extends Stack {
 
 	public FunctionUrl getFunctionUrl() {
 		return functionUrl;
+	}
+
+	public LogGroup getLogGroup() {
+		return logGroup;
 	}
 }

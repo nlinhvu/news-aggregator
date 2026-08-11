@@ -79,6 +79,15 @@ public record EnvConfig(
 			Duration.hours(1), Duration.hours(6));
 
 
+	/**
+	 * Đích đến của mọi cảnh báo, cả ba môi trường. Một hộp thư, ba topic —
+	 * TDD §17 #2 giải thích vì sao không gộp thành một topic dùng chung.
+	 *
+	 * Vì cả ba đổ về cùng hộp thư, TÊN ALARM phải mang tiền tố môi trường,
+	 * nếu không mail không nói được nó từ đâu tới.
+	 */
+	public static final String OPERATOR_EMAIL = "vungoclinh2710@gmail.com";
+
 	public static final String TOOLING_ACCOUNT = "237076104209";
 	public static final String TOOLING_REGION = "us-east-1";
 	public static final String ECR_REPOSITORY_NAME = "news-aggregator";
