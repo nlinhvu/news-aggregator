@@ -74,5 +74,44 @@ sources:
     feedUrl: https://inside.java/feed.xml
     enabled: true
 
+  - sourceId: jetbrains-blog
+    name: JetBrains Blog
+    # Đo 2026-08-11: 200, root THẬT `<rss version="2.0">` và khai đúng
+    # `application/rss+xml` — nguồn thứ hai khai đúng, sau AWS.
+    #
+    # `blog.jetbrains.com/robots.txt` 200, nhóm `*` chỉ có `Disallow: /wp-admin/`
+    # → `/feed/` ALLOW (kiểm bằng `urllib.robotparser` với đúng UA của chương
+    # trình, không đọc bằng mắt).
+    #
+    # Phát cả `ETag` lẫn `Last-Modified`, và conditional GET CHẠY THẬT: gửi
+    # `If-None-Match`, `If-Modified-Since`, hay cả hai đều nhận 304 — ngược hẳn
+    # InfoQ.
+    #
+    # ⚠️ ETag là giá trị của CẢ HOST, không riêng feed này: gửi etag của
+    # `/feed/` cho `/kotlin/feed/` vẫn nhận 304 dù hai body khác nhau (129 KB so
+    # với 184 KB, channel title khác). Không sai — token đổi khi bất kỳ đâu trên
+    # host đổi, nên 304 vẫn kéo theo "feed này không đổi". Nhưng thêm feed con
+    # thứ hai của cùng host thì mỗi bài đăng ở BẤT KỲ đâu sẽ làm mọi feed con
+    # tải full một lượt. Tốn băng thông, không ảnh hưởng tính đúng.
+    #
+    # Nguồn đầu tiên mà MỌI item đều có `content:encoded` (12/12): excerpt sau
+    # khi strip ngắn nhất 918 ký tự, median chạm trần `max-excerpt-chars` 2000,
+    # không item nào dưới ngưỡng 200 của `min-excerpt-chars`. Tức mọi bài của
+    # nguồn này đều đủ điều kiện tóm tắt — khác Phase 2, nơi nguồn có thể cho
+    # excerpt quá ngắn.
+    #
+    # ⚠️ Một item có `<title>` là ĐÚNG MỘT ký tự U+00A0 (non-breaking space):
+    # `/qodana/2026/08/alexey-gopachenko/`. `IngestionRunner.publish` chỉ validate
+    # link và date, KHÔNG validate title, nên bài đó vào bảng với tiêu đề trống và
+    # hiện lên trang như vậy. Đã cân nhắc và CHẤP NHẬN: đó là dữ liệu thật của
+    # nguồn. Thấy một tiêu đề trống trên trang thì đây là lý do, không phải bug
+    # parser.
+    #
+    # Nội dung trộn nhiều hệ sinh thái (.NET, Rust, Go, WebStorm) — chỉ 2/12 bài
+    # dính Java. Đây là nguồn RỘNG nhất trong danh sách; nếu muốn hẹp về JVM thì
+    # `https://blog.jetbrains.com/kotlin/feed/` là feed cùng host, cùng hình dạng.
+    feedUrl: https://blog.jetbrains.com/feed/
+    enabled: true
+
 # Baeldung ĐÃ BỊ LOẠI — trả 403 với `User-Agent` định danh của chương trình
 # (đo 2026-08-05). Không đổi UA để lách; xem TDD §17 #18.
