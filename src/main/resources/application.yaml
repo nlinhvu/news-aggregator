@@ -42,7 +42,7 @@ news:
     key-parameter: ${NEWS_GEMINI_KEY_PARAMETER:/news/local/gemini-api-key}
     # Cùng model ở CẢ BỐN môi trường; dev/qa/local chạy trên free tier của chính
     # nó (master §8.3, sửa 2026-08-10). Đây là parity mà Phase 3 ĐÒI LẠI.
-    model: ${NEWS_SUMMARIZATION_MODEL:gemini-3.5-flash-lite}
+    model: ${NEWS_SUMMARIZATION_MODEL:gemini-2.5-flash-lite}
     # Tóm tắt cần ổn định, không cần sáng tạo.
     temperature: 0.2
     call-timeout: 25s

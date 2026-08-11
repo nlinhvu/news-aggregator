@@ -214,7 +214,7 @@ public class AppStack extends Stack {
 		// `AWS::Lambda::Function` không nằm trong đó), nên truyền tham chiếu là
 		// cách DUY NHẤT giữ được cả audit lẫn xoay key không cần redeploy.
 		env.put("NEWS_GEMINI_KEY_PARAMETER", keyParameterName);
-		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
+		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-2.5-flash-lite");
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)
