@@ -25,6 +25,18 @@ public class DataStack extends Stack {
 	public static final String RECENT_INDEX_NAME = "gsi-recent";
 
 	/**
+	 * Index thay thế cho `gsi-recent`, thêm `excerpt` vào projection.
+	 *
+	 * Tồn tại vì projection của một GSI là BẤT BIẾN: thêm `excerpt` vào index cũ
+	 * làm CloudFormation UPDATE_FAILED và pipeline Infra đỏ (2026-08-10). Đường
+	 * duy nhất là index tên mới.
+	 *
+	 * `gsi-recent` cũ bị xoá ở Task 17, KHÔNG phải ở đây — CloudFormation chỉ
+	 * thêm/xoá được MỘT GSI mỗi lần update stack.
+	 */
+	public static final String RECENT_INDEX_V2_NAME = "gsi-recent-v2";
+
+	/**
 	 * Partition key của bảng feature-toggles. Giá trị này do `togglz-dynamodb`
 	 * quy định chứ không phải ta chọn — xem comment tại chỗ tạo bảng. Là hằng số
 	 * public để `DataStackTest` khẳng định lại đúng chuỗi đó thay vì chép tay.
@@ -64,6 +76,18 @@ public class DataStack extends Stack {
 				.projectionType(ProjectionType.INCLUDE)
 				.nonKeyAttributes(List.of(
 						"title", "canonicalUrl", "sourceName", "summary"))
+				.build());
+
+		this.articlesTable.addGlobalSecondaryIndex(GlobalSecondaryIndexProps.builder()
+				.indexName(RECENT_INDEX_V2_NAME)
+				.partitionKey(Attribute.builder()
+						.name("listBucket").type(AttributeType.STRING).build())
+				.sortKey(Attribute.builder()
+						.name("publishedAt").type(AttributeType.STRING).build())
+				.projectionType(ProjectionType.INCLUDE)
+				// Y hệt v1 CỘNG `excerpt` — đây là toàn bộ lý do v2 tồn tại.
+				.nonKeyAttributes(List.of("title", "canonicalUrl", "sourceName",
+						"summary", "excerpt"))
 				.build());
 
 		CfnOutput.Builder.create(this, "ArticlesTableName")

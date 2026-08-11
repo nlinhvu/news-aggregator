@@ -228,7 +228,17 @@ class SecurityBoundaryTest {
 				List<Object> list = actions instanceof List
 						? (List<Object>) actions : List.of(actions);
 				if (list.contains(action)) {
-					resources.add(String.valueOf(stmt.get("Resource")));
+					// Một statement cấp trên NHIỀU resource thì mỗi resource phải là
+					// một phần tử RIÊNG, không phải một chuỗi `[r1, r2]` gộp. Gộp lại
+					// làm mọi vế `contains` thành đúng-nhờ-hàng-xóm: từ Phase 3,
+					// `…/index/gsi-recent` là TIỀN TỐ của `…/index/gsi-recent-v2`, nên
+					// chuỗi gộp thoả vế "có v1" ngay cả khi ARN v1 đã bị xoá khỏi
+					// `AppStack`. Đã đo — cả suite vẫn xanh.
+					Object resource = stmt.get("Resource");
+					for (Object one : resource instanceof List
+							? (List<Object>) resource : List.of(resource)) {
+						resources.add(String.valueOf(one));
+					}
 				}
 			}
 		}
@@ -481,7 +491,7 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * Lambda chỉ được Query ĐÚNG index `gsi-recent`, không phải `/index/*`.
+	 * Lambda chỉ được Query ĐÚNG hai index của `articles`, không phải `/index/*`.
 	 *
 	 * `articlesTable.grantReadData()` — cách viết hiển nhiên, và là cách plan
 	 * đề xuất ban đầu — cấp resource `<table>.Arn/index/*` trong khi bảng có
@@ -496,16 +506,42 @@ class SecurityBoundaryTest {
 	 * chuyển thành "không bao giờ trên `articles`" và có nhà riêng ở
 	 * {@link #khong_bao_gio_scan_bang_articles()}. Để lại một bản sao ở đây thì
 	 * lần sửa quy tắc tiếp theo sẽ chỉ sửa một trong hai chỗ.
+	 *
+	 * HAI ARN chứ không phải một là trạng thái TẠM của lần migrate sang
+	 * `gsi-recent-v2` (Task 11B): code còn đọc v1 tới Task 13, còn thiếu ARN v2 ở
+	 * đây thì đúng lần chuyển đọc đó chết bằng AccessDenied lúc runtime trong khi
+	 * `cdk synth` vẫn xanh. Task 17 xoá v1 sẽ làm test này ĐỎ — đó là ý đồ, không
+	 * phải phiền toái.
+	 *
+	 * Vế v1 viết là "chứa v1 mà KHÔNG chứa v2" chứ không phải `contains(v1)` trần,
+	 * vì `…/index/gsi-recent` là TIỀN TỐ của `…/index/gsi-recent-v2`: vế trần được
+	 * chính ARN v2 làm cho xanh, nên xoá hẳn ARN v1 khỏi `AppStack` vẫn không đỏ.
+	 * Đã đo cả hai chiều trước khi viết dòng này.
 	 */
 	@Test
-	void lambda_chi_query_dung_index_gsi_recent() {
-		String queryOn = resourceForAction(appStack(), "FunctionRoleDefaultPolicy",
-				"dynamodb:Query");
+	void lambda_chi_query_dung_hai_index_cua_articles() {
+		List<String> queryOn = resourcesForAction(appStack(),
+				"FunctionRoleDefaultPolicy", "dynamodb:Query");
 
-		assertTrue(queryOn.contains("/index/" + DataStack.RECENT_INDEX_NAME),
-				"Lambda phải được Query trên đúng index gsi-recent, thực tế: " + queryOn);
-		assertFalse(queryOn.contains("/index/*"),
-				"KHÔNG được cấp wildcard /index/*, thực tế: " + queryOn);
+		assertEquals(2, queryOn.size(),
+				"Query phải được cấp trên đúng hai index, thực tế: " + queryOn);
+		assertEquals(1, queryOn.stream()
+						.filter(resource -> resource.contains(
+								"/index/" + DataStack.RECENT_INDEX_V2_NAME))
+						.count(),
+				"phải có đúng một ARN trỏ gsi-recent-v2, thực tế: " + queryOn);
+		assertEquals(1, queryOn.stream()
+						.filter(resource -> resource.contains(
+								"/index/" + DataStack.RECENT_INDEX_NAME)
+								&& !resource.contains(
+										"/index/" + DataStack.RECENT_INDEX_V2_NAME))
+						.count(),
+				"phải có đúng một ARN trỏ gsi-recent mà KHÔNG phải v2, thực tế: "
+						+ queryOn);
+		for (String resource : queryOn) {
+			assertFalse(resource.contains("/index/*"),
+					"KHÔNG được cấp wildcard /index/*, thực tế: " + resource);
+		}
 	}
 
 	/**

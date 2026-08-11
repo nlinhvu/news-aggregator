@@ -15,6 +15,16 @@ public class Article {
 	 */
 	public static final String RECENT_INDEX = "gsi-recent";
 
+	/**
+	 * Index thay thế cho {@link #RECENT_INDEX}, có thêm `excerpt` trong
+	 * projection. Cùng ràng buộc khớp-từng-ký-tự với
+	 * `DataStack.RECENT_INDEX_V2_NAME`.
+	 *
+	 * Khai ở đây TRƯỚC khi có ai query nó: bean schema chỉ là metadata phía
+	 * client nên khai một index chưa tồn tại là vô hại, còn query nó mới lỗi.
+	 */
+	public static final String RECENT_INDEX_V2 = "gsi-recent-v2";
+
 	/** Partition key hằng số của gsi-recent — xem TDD §6. */
 	public static final String LIST_BUCKET = "ALL";
 
@@ -31,11 +41,11 @@ public class Article {
 	public String getArticleId() { return articleId; }
 	public void setArticleId(String articleId) { this.articleId = articleId; }
 
-	@DynamoDbSecondaryPartitionKey(indexNames = RECENT_INDEX)
+	@DynamoDbSecondaryPartitionKey(indexNames = { RECENT_INDEX, RECENT_INDEX_V2 })
 	public String getListBucket() { return listBucket; }
 	public void setListBucket(String listBucket) { this.listBucket = listBucket; }
 
-	@DynamoDbSecondarySortKey(indexNames = RECENT_INDEX)
+	@DynamoDbSecondarySortKey(indexNames = { RECENT_INDEX, RECENT_INDEX_V2 })
 	public String getPublishedAt() { return publishedAt; }
 	public void setPublishedAt(String publishedAt) { this.publishedAt = publishedAt; }
 

@@ -72,6 +72,30 @@ class DataStackTest {
 				)));
 	}
 
+	/**
+	 * `gsi-recent-v2` là index DUY NHẤT có `excerpt`, và Task 13 dựa hoàn toàn
+	 * vào điều đó: `excerpt` không nằm trong projection thì query trả về
+	 * `getExcerpt() == null` cho MỌI item — đã đo — và sweep im lặng không nhặt
+	 * bài nào.
+	 *
+	 * Ghim ĐÚNG danh sách vì cùng lý do với index cũ: projection là bất biến sau
+	 * lần deploy đầu, nên sửa dòng này rồi deploy là làm gãy môi trường.
+	 */
+	@Test
+	void gsi_v2_project_ca_excerpt() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
+								Match.objectLike(Map.of(
+										"IndexName", "gsi-recent-v2",
+										"Projection", Match.objectLike(Map.of(
+												"NonKeyAttributes", List.of("title",
+														"canonicalUrl", "sourceName",
+														"summary", "excerpt")))))
+						))
+				)));
+	}
+
 	/** On-demand billing — master §6.3 cấm mọi thứ tính tiền theo giờ. */
 	@Test
 	void billing_la_on_demand() {
