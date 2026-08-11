@@ -6,12 +6,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered;
 import dev.linhvu.news_aggregator.platform.IngestionRunMetrics;
 import dev.linhvu.news_aggregator.sources.SourceCatalog;
 import dev.linhvu.news_aggregator.sources.api.SourceView;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -33,6 +38,24 @@ class IngestionRunnerTest {
 
 	private final IngestionRunner runner =
 			new IngestionRunner(catalog, fetcher, parser, events, metrics, 8);
+
+	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
+
+	@BeforeEach
+	void batLog() {
+		logs.start();
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IngestionRunner.class)).addAppender(logs);
+	}
+
+	@AfterEach
+	void thaLog() {
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IngestionRunner.class)).detachAppender(logs);
+		logs.stop();
+	}
+
+	private List<String> logEvents() {
+		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+	}
 
 	@Test
 	void mot_nguon_hong_khong_giet_luot_chay() {
@@ -189,6 +212,38 @@ class IngestionRunnerTest {
 
 		assertThatCode(() -> assertThat(runner.run().failed()).isEqualTo(1))
 				.doesNotThrowAnyException();
+	}
+
+	/**
+	 * Ghim TIỀN TỐ `ingestion run xong:` vì `ObservabilityStack` dựng một CloudWatch
+	 * metric filter khớp chính chuỗi đó, và heartbeat alarm của prod đọc metric ấy.
+	 *
+	 * Hai repo không thấy nhau: đổi dòng log này ở đây thì metric filter bên
+	 * `infra/` ngừng khớp, heartbeat mất datapoint, và vì alarm dùng
+	 * `treatMissingData: BREACHING` nó sẽ nổ — một BÁO ĐỘNG GIẢ, đúng loại làm
+	 * người vận hành mất niềm tin. Không có test này thì triệu chứng xuất hiện
+	 * nhiều giờ sau, ở một repo khác.
+	 *
+	 * Ghim tiền tố chứ không ghim cả câu: thêm một trường số vào cuối là thay đổi
+	 * lành tính và không nên làm test đỏ.
+	 *
+	 * Test này XANH ngay từ lúc viết — nó ghim một hợp đồng đang đúng từ Phase 2,
+	 * không dẫn dắt một thay đổi. Loại test đó chỉ có giá trị nếu chứng minh được
+	 * nó thật sự canh, nên nó đi kèm một bước mutation trong plan Task 6 Step 3.
+	 */
+	@Test
+	void log_ket_thuc_luot_giu_dung_tien_to_ma_metric_filter_can() {
+		given(catalog.enabledSources()).willReturn(List.of(source("a")));
+		given(fetcher.fetch(any())).willReturn(body());
+		given(parser.parse(any())).willReturn(List.of(new ParsedItem("T",
+				"https://a.test/1", "Tue, 04 Aug 2026 10:00:00 GMT", "Đoạn trích.")));
+
+		runner.run();
+
+		assertThat(logEvents())
+				.as("metric filter của heartbeat khớp tiền tố này — xem "
+						+ "ObservabilityStack.ingestHeartbeat")
+				.anyMatch(m -> m.startsWith("ingestion run xong:"));
 	}
 
 	private static FetchOutcome.Body body() {
