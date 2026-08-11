@@ -1,5 +1,8 @@
 package dev.linhvu.news_aggregator.infra;
 
+import java.util.List;
+import java.util.Map;
+
 import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
@@ -8,6 +11,9 @@ import software.amazon.awscdk.services.cloudwatch.ComparisonOperator;
 import software.amazon.awscdk.services.cloudwatch.MetricOptions;
 import software.amazon.awscdk.services.cloudwatch.TreatMissingData;
 import software.amazon.awscdk.services.cloudwatch.actions.SnsAction;
+import software.amazon.awscdk.services.iam.Effect;
+import software.amazon.awscdk.services.iam.PolicyStatement;
+import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Function;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.amazon.awscdk.services.sns.Topic;
@@ -43,6 +49,45 @@ public class ObservabilityStack extends Stack {
 				.displayName("news-" + cfg.tagPrefix())
 				.enforceSsl(true)
 				.build();
+
+		// ⚠️ BẮT BUỘC, và lý do thì ngược trực giác hoàn toàn.
+		//
+		// `enforceSsl(true)` ở trên sinh một `AWS::SNS::TopicPolicy`. Gắn BẤT KỲ
+		// TopicPolicy nào cũng THAY THẾ policy mặc định của SNS — mà chính policy
+		// mặc định đó là nơi CloudWatch lấy quyền publish. Sau khi thay, policy chỉ
+		// còn đúng một statement `Deny`, tức topic không cho phép AI publish cả.
+		//
+		// Chế độ hỏng là IM LẶNG TUYỆT ĐỐI, và nó đã xảy ra thật trên cả `dev` lẫn
+		// `prod` ngày 2026-08-11: alarm vẫn chuyển `ALARM`, `StateReason` vẫn trỏ
+		// đúng datapoint, console nhìn hoàn hảo — và không mail nào tới. Metric
+		// `NumberOfMessagesPublished` của topic không có lấy một datapoint. Chỗ DUY
+		// NHẤT nói ra sự thật là `aws cloudwatch describe-alarm-history
+		// --history-item-type Action`:
+		//
+		//   "actionState": "Failed",
+		//   "error": "CloudWatch Alarms is not authorized to perform: SNS:Publish"
+		//
+		// Đây đúng là chế độ hỏng mà khối comment bên trên né tránh cho SSE — chỉ
+		// khác là `enforceSsl` gây ra nó, không phải `masterKey`.
+		//
+		// `aws:SourceAccount` chặn confused deputy: thiếu nó thì CloudWatch của BẤT
+		// KỲ account nào biết ARN này đều bơm được vào hộp thư cảnh báo. Nhưng nó
+		// cũng là vế rủi ro — sai condition key thì `Allow` không áp và ta quay lại
+		// đúng sự im lặng trên, nên mỗi lần deploy phải ép một alarm nổ thật
+		// (`aws cloudwatch set-alarm-state`) rồi đọc lại alarm history.
+		//
+		// `qa` CŨNG được cấp, dù nó không có alarm thường trực: topic của nó tồn tại
+		// để một alarm ad-hoc trong lúc điều tra sự cố dùng được NGAY. Một topic
+		// không publish được thì không phục vụ được mục đích đó.
+		this.alerts.addToResourcePolicy(PolicyStatement.Builder.create()
+				.sid("AllowCloudWatchAlarmsToPublish")
+				.effect(Effect.ALLOW)
+				.principals(List.of(new ServicePrincipal("cloudwatch.amazonaws.com")))
+				.actions(List.of("sns:Publish"))
+				.resources(List.of(this.alerts.getTopicArn()))
+				.conditions(Map.of("StringEquals",
+						Map.of("aws:SourceAccount", cfg.account())))
+				.build());
 
 		// ⚠️ Subscription sinh ra ở trạng thái PendingConfirmation. CDK KHÔNG xác
 		// nhận được — chỉ người thật bấm link trong mail. Chưa xác nhận thì alarm

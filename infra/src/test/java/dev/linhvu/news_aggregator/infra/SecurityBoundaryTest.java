@@ -924,6 +924,76 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Topic policy phải có một statement ALLOW cho `cloudwatch.amazonaws.com`.
+	 *
+	 * ĐÃ HỎNG THẬT TRÊN CẢ dev LẪN prod, 2026-08-11, và hỏng đúng kiểu mà cả slice
+	 * 1 sinh ra để loại bỏ: alarm chuyển `ALARM`, `StateReason` trỏ đúng datapoint,
+	 * console nhìn hoàn hảo — và KHÔNG mail nào tới. `NumberOfMessagesPublished`
+	 * của topic không có lấy một datapoint. `describe-alarm-history
+	 * --history-item-type Action` là chỗ duy nhất nói ra sự thật:
+	 *
+	 *   "actionState": "Failed",
+	 *   "error": "CloudWatch Alarms is not authorized to perform: SNS:Publish"
+	 *
+	 * CƠ CHẾ: `enforceSsl(true)` sinh một `AWS::SNS::TopicPolicy` chứa ĐÚNG MỘT
+	 * statement, và nó là `Deny`. Gắn bất kỳ TopicPolicy nào cũng THAY THẾ policy
+	 * mặc định của SNS — mà chính policy mặc định đó là nơi CloudWatch lấy quyền
+	 * publish. Sau khi thay, topic không cho phép ai publish cả.
+	 *
+	 * Test cũ `sns_khong_bat_sse_nhung_bat_ssl` không bắt được: nó khẳng định
+	 * policy TỒN TẠI (`resourceCountIs(…TopicPolicy, 1)`), không khẳng định nó CHO
+	 * PHÉP gì. Một policy toàn Deny thoả nó hoàn hảo.
+	 *
+	 * Điều kiện `aws:SourceAccount` là vế chặn confused deputy: không có nó thì
+	 * CloudWatch của BẤT KỲ account nào biết ARN này đều bơm được vào hộp thư cảnh
+	 * báo. Nhưng nó cũng là vế rủi ro — sai condition key thì `Allow` không áp và
+	 * ta quay lại đúng chế độ hỏng im lặng này. Chốt chặn là bước ép alarm thật sau
+	 * mỗi lần deploy, không phải test này.
+	 */
+	@Test
+	void topic_policy_cho_phep_cloudwatch_publish() {
+		// Gồm cả `qa`, dù nó không có alarm thường trực: topic của nó tồn tại để một
+		// alarm ad-hoc trong lúc điều tra sự cố dùng được NGAY (khỏi chờ bấm mail xác
+		// nhận). Một topic không publish được thì không phục vụ được mục đích đó, và
+		// người vận hành sẽ phát hiện ra điều đó đúng lúc tệ nhất.
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Map<String, Object> allowCloudWatch = Map.of(
+					"Effect", "Allow",
+					"Action", "sns:Publish",
+					"Principal", Map.of("Service", "cloudwatch.amazonaws.com"),
+					"Condition", Map.of("StringEquals",
+							Map.of("aws:SourceAccount", cfg.account())));
+
+			observabilityStack(cfg).hasResourceProperties("AWS::SNS::TopicPolicy",
+					policyWithStatement(allowCloudWatch));
+		}
+	}
+
+	/** Khớp một `AWS::SNS::TopicPolicy` có CHỨA statement mô tả bởi {@code statement}. */
+	private software.amazon.awscdk.assertions.Matcher policyWithStatement(
+			Map<String, Object> statement) {
+		return Match.objectLike(Map.of(
+				"PolicyDocument", Match.objectLike(Map.of(
+						"Statement", Match.arrayWith(List.of(
+								Match.objectLike(statement)))))));
+	}
+
+	/**
+	 * Vế phủ định của test trên: statement `Deny` chặn non-SSL vẫn phải còn.
+	 *
+	 * Cách sửa "hiển nhiên" cho lỗi 2026-08-11 là bỏ `enforceSsl` — policy mặc định
+	 * quay lại và alarm chạy ngay. Nó cũng làm `AwsSolutions-SNS3` đỏ, nhưng ai đó
+	 * đang vội có thể thêm suppression rồi đi tiếp. Hai vế phải cùng đúng.
+	 */
+	@Test
+	void topic_policy_van_chan_non_ssl() {
+		observabilityStack(EnvConfig.DEV).hasResourceProperties("AWS::SNS::TopicPolicy",
+				policyWithStatement(Map.of(
+						"Effect", "Deny",
+						"Sid", "AllowPublishThroughSSLOnly")));
+	}
+
+	/**
 	 * Ba môi trường, ba topic độc lập, KHÔNG cross-account. Master §5 chỉ cho
 	 * phép một ngoại lệ có tên cho quy tắc "không có đường giữa các account"
 	 * (ECR repository policy), và "đỡ phải bấm xác nhận ba lần" không đủ nặng.
