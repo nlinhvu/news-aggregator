@@ -31,7 +31,7 @@ class DataStackTest {
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
 								Match.objectLike(Map.of(
-										"IndexName", "gsi-recent",
+										"IndexName", "gsi-recent-v2",
 										"Projection", Match.objectLike(Map.of(
 												"ProjectionType", "INCLUDE"))))
 						))
@@ -39,36 +39,22 @@ class DataStackTest {
 	}
 
 	/**
-	 * Projection của `gsi-recent` là BẤT BIẾN sau lần deploy đầu tiên.
+	 * ĐÚNG MỘT GSI — vế cuối của migrate `gsi-recent` → `gsi-recent-v2`.
 	 *
-	 * DynamoDB từ chối mọi thay đổi projection trên một GSI đã tồn tại:
-	 * *"Cannot update GSI's properties other than Provisioned Throughput and
-	 * Contributor Insights Specification. You can create a new GSI with a
-	 * different name."* Đây không phải cảnh báo lý thuyết — thêm `"excerpt"` vào
-	 * danh sách này đã làm `Dev-DataStack` UPDATE_FAILED và cả pipeline Infra đỏ
-	 * (2026-08-10), rollback về đúng bốn attribute dưới đây.
+	 * `arrayEquals` chứ không `arrayWith`: vế "có chứa v2" xanh cả khi index cũ
+	 * còn nguyên, mà index cũ còn nguyên nghĩa là mỗi lượt ghi vẫn trả WCU cho
+	 * một index không ai đọc. Con số 2 ở đây là hồi quy thật, không phải giả định.
 	 *
-	 * Nên test này ghim ĐÚNG danh sách, không phải "có chứa". Muốn thêm attribute
-	 * vào index thì phải tạo GSI TÊN MỚI và migrate — sửa dòng dưới đây rồi
-	 * `cdk deploy` là làm gãy môi trường, không phải làm đỏ một test.
-	 *
-	 * Danh sách này cũng phải soi gương `FlociTestConfiguration.articlesTableSchema`
-	 * (master §9: schema chép tay, rủi ro đã chấp nhận). Lệch nhau thì test xanh
-	 * mà prod thiếu attribute trong kết quả query — đã đo: cùng một đoạn code,
-	 * `getExcerpt()` trả về giá trị khi có projection và trả `null` khi không.
+	 * Và nó phải soi gương `FlociTestConfiguration.articlesTableSchema` (master §9:
+	 * schema chép tay, rủi ro đã chấp nhận). Để sót v1 ở fixture test thì test vẫn
+	 * xanh trong khi prod đã xoá nó — sai lệch theo chiều không ai phát hiện được.
 	 */
 	@Test
-	void projection_cua_gsi_la_bat_bien() {
+	void bang_articles_chi_con_mot_gsi() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
-						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
-								Match.objectLike(Map.of(
-										"IndexName", "gsi-recent",
-										"Projection", Match.objectLike(Map.of(
-												"NonKeyAttributes", List.of("title",
-														"canonicalUrl", "sourceName",
-														"summary")))))
-						))
+						"GlobalSecondaryIndexes", Match.arrayEquals(List.of(
+								Match.objectLike(Map.of("IndexName", "gsi-recent-v2"))))
 				)));
 	}
 

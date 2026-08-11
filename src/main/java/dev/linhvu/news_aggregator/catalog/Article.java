@@ -9,19 +9,15 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecon
 public class Article {
 
 	/**
-	 * Tên GSI cho AP1. Phải KHỚP TỪNG KÝ TỰ với `DataStack.RECENT_INDEX_NAME`
-	 * bên module `infra` — hai module không thấy nhau nên compiler không bắt
-	 * được, và lệch tên chỉ lộ ra lúc runtime dưới dạng `ResourceNotFoundException`.
-	 */
-	public static final String RECENT_INDEX = "gsi-recent";
-
-	/**
-	 * Index thay thế cho {@link #RECENT_INDEX}, có thêm `excerpt` trong
-	 * projection. Cùng ràng buộc khớp-từng-ký-tự với
-	 * `DataStack.RECENT_INDEX_V2_NAME`.
+	 * Tên GSI cho AP1 và AP9. Phải KHỚP TỪNG KÝ TỰ với
+	 * `DataStack.RECENT_INDEX_V2_NAME` bên module `infra` — hai module không thấy
+	 * nhau nên compiler không bắt được, và lệch tên chỉ lộ ra lúc runtime dưới
+	 * dạng `ResourceNotFoundException`.
 	 *
-	 * Khai ở đây TRƯỚC khi có ai query nó: bean schema chỉ là metadata phía
-	 * client nên khai một index chưa tồn tại là vô hại, còn query nó mới lỗi.
+	 * Hậu tố `-v2` là di sản của lần migrate: index đời đầu không project
+	 * `excerpt`, mà projection của GSI là bất biến nên phải đổi tên mới thêm được.
+	 * Index cũ đã bị xoá; tên này không đổi nữa vì đổi nó lại là một migrate hai
+	 * lần deploy nữa.
 	 */
 	public static final String RECENT_INDEX_V2 = "gsi-recent-v2";
 
@@ -41,11 +37,11 @@ public class Article {
 	public String getArticleId() { return articleId; }
 	public void setArticleId(String articleId) { this.articleId = articleId; }
 
-	@DynamoDbSecondaryPartitionKey(indexNames = { RECENT_INDEX, RECENT_INDEX_V2 })
+	@DynamoDbSecondaryPartitionKey(indexNames = { RECENT_INDEX_V2 })
 	public String getListBucket() { return listBucket; }
 	public void setListBucket(String listBucket) { this.listBucket = listBucket; }
 
-	@DynamoDbSecondarySortKey(indexNames = { RECENT_INDEX, RECENT_INDEX_V2 })
+	@DynamoDbSecondarySortKey(indexNames = { RECENT_INDEX_V2 })
 	public String getPublishedAt() { return publishedAt; }
 	public void setPublishedAt(String publishedAt) { this.publishedAt = publishedAt; }
 

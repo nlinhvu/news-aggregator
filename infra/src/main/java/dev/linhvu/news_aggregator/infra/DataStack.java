@@ -21,18 +21,13 @@ public class DataStack extends Stack {
 	 * trỏ THẲNG vào ARN của index này — hai nơi viết rời cùng một chuỗi thì lệch
 	 * nhau lúc nào không hay, và hậu quả là AccessDenied lúc runtime chứ không
 	 * phải lỗi lúc synth.
-	 */
-	public static final String RECENT_INDEX_NAME = "gsi-recent";
-
-	/**
-	 * Index thay thế cho `gsi-recent`, thêm `excerpt` vào projection.
 	 *
-	 * Tồn tại vì projection của một GSI là BẤT BIẾN: thêm `excerpt` vào index cũ
-	 * làm CloudFormation UPDATE_FAILED và pipeline Infra đỏ (2026-08-10). Đường
-	 * duy nhất là index tên mới.
-	 *
-	 * `gsi-recent` cũ bị xoá ở Task 17, KHÔNG phải ở đây — CloudFormation chỉ
-	 * thêm/xoá được MỘT GSI mỗi lần update stack.
+	 * Tên có hậu tố `-v2` vì nó thay cho `gsi-recent` đời đầu: projection của một
+	 * GSI là BẤT BIẾN, nên thêm `excerpt` vào index cũ làm CloudFormation
+	 * UPDATE_FAILED và pipeline Infra đỏ (2026-08-10). Đường duy nhất là index
+	 * tên mới. Index cũ đã bị xoá ở lần deploy THỨ HAI của migrate — CloudFormation
+	 * chỉ thêm/xoá được MỘT GSI mỗi lần update stack, nên tạo v2 và xoá v1 không
+	 * thể nằm cùng một deploy.
 	 */
 	public static final String RECENT_INDEX_V2_NAME = "gsi-recent-v2";
 
@@ -67,17 +62,11 @@ public class DataStack extends Stack {
 		// AP1: lấy N article mới nhất. Partition key HẰNG SỐ "ALL" —
 		// xem TDD §6 "Worked example" về vì sao đây không phải hot partition
 		// ở khối lượng này (tới hạn sau ~68 năm).
-		this.articlesTable.addGlobalSecondaryIndex(GlobalSecondaryIndexProps.builder()
-				.indexName(RECENT_INDEX_NAME)
-				.partitionKey(Attribute.builder()
-						.name("listBucket").type(AttributeType.STRING).build())
-				.sortKey(Attribute.builder()
-						.name("publishedAt").type(AttributeType.STRING).build())
-				.projectionType(ProjectionType.INCLUDE)
-				.nonKeyAttributes(List.of(
-						"title", "canonicalUrl", "sourceName", "summary"))
-				.build());
-
+		//
+		// AP9 dùng CHUNG index này: `publishedAt` là sort key nên cửa sổ thời gian
+		// của sweep là điều kiện KEY thật, và `excerpt` nằm trong projection nên
+		// `attribute_exists(excerpt)` lọc được. Thiếu vế sau thì filter khớp KHÔNG
+		// item nào — im lặng, không lỗi.
 		this.articlesTable.addGlobalSecondaryIndex(GlobalSecondaryIndexProps.builder()
 				.indexName(RECENT_INDEX_V2_NAME)
 				.partitionKey(Attribute.builder()
@@ -85,7 +74,8 @@ public class DataStack extends Stack {
 				.sortKey(Attribute.builder()
 						.name("publishedAt").type(AttributeType.STRING).build())
 				.projectionType(ProjectionType.INCLUDE)
-				// Y hệt v1 CỘNG `excerpt` — đây là toàn bộ lý do v2 tồn tại.
+				// Danh sách này là BẤT BIẾN sau lần deploy đầu — sửa nó rồi deploy là
+				// UPDATE_FAILED, và cách chữa duy nhất lại là một index tên mới nữa.
 				.nonKeyAttributes(List.of("title", "canonicalUrl", "sourceName",
 						"summary", "excerpt"))
 				.build());

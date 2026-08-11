@@ -82,17 +82,14 @@ public class AppStack extends Stack {
 		// tường minh ở task riêng — KHÔNG phải ở dòng này.
 		// Thêm operation mới cho Lambda thì phải thêm action ở ĐÂY một cách có ý thức.
 		//
-		// Cấp CẢ HAI index trong lúc migrate sang `gsi-recent-v2`: code còn đọc v1
-		// tới Task 13, và thiếu ARN v2 ở đây thì lần chuyển đọc đó là AccessDenied
-		// lúc runtime trong khi `cdk synth` vẫn xanh. ARN v1 biến mất ở Task 17,
-		// sau khi không còn ai đọc index cũ.
+		// ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng: cấp `dynamodb:Query` trên
+		// `articlesTable.getTableArn()` trần là cấp luôn Query trên bảng, và
+		// `/index/*` là cấp trên mọi index tương lai. Cả hai đều làm mất tính chất
+		// "muốn thêm đường đọc thì phải sửa dòng này".
 		executionRole.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("dynamodb:Query"))
-				.resources(List.of(
-						articlesTable.getTableArn()
-								+ "/index/" + DataStack.RECENT_INDEX_NAME,
-						articlesTable.getTableArn()
-								+ "/index/" + DataStack.RECENT_INDEX_V2_NAME))
+				.resources(List.of(articlesTable.getTableArn()
+						+ "/index/" + DataStack.RECENT_INDEX_V2_NAME))
 				.build());
 
 		// Bộ action dưới đây đọc ra từ bytecode của togglz-dynamodb 4.6.2, không

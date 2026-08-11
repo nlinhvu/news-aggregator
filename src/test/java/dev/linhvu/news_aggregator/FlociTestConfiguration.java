@@ -75,23 +75,10 @@ public class FlociTestConfiguration {
 										.attributeType(ScalarAttributeType.S).build(),
 								AttributeDefinition.builder().attributeName("publishedAt")
 										.attributeType(ScalarAttributeType.S).build())
-						// CẢ HAI index, y như `DataStack` trong lúc migrate. Giới hạn
-						// "một GSI mỗi lần" của CloudFormation chỉ áp cho *update*;
-						// `CreateTable` khai được nhiều index ngay lúc tạo.
+						// MỘT index, y như `DataStack` sau khi migrate xong. Thiếu
+						// `excerpt` trong projection thì `findPendingSummary` khớp KHÔNG
+						// item nào và sweep im lặng không nhặt bài — đã đo bằng mutation.
 						.globalSecondaryIndexes(
-								GlobalSecondaryIndex.builder()
-										.indexName(Article.RECENT_INDEX)
-										.keySchema(
-												KeySchemaElement.builder().attributeName("listBucket")
-														.keyType(KeyType.HASH).build(),
-												KeySchemaElement.builder().attributeName("publishedAt")
-														.keyType(KeyType.RANGE).build())
-										.projection(Projection.builder()
-												.projectionType(ProjectionType.INCLUDE)
-												.nonKeyAttributes("title", "canonicalUrl",
-														"sourceName", "summary")
-												.build())
-										.build(),
 								GlobalSecondaryIndex.builder()
 										.indexName(Article.RECENT_INDEX_V2)
 										.keySchema(

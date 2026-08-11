@@ -590,37 +590,30 @@ class SecurityBoundaryTest {
 	 * {@link #khong_bao_gio_scan_bang_articles()}. Để lại một bản sao ở đây thì
 	 * lần sửa quy tắc tiếp theo sẽ chỉ sửa một trong hai chỗ.
 	 *
-	 * HAI ARN chứ không phải một là trạng thái TẠM của lần migrate sang
-	 * `gsi-recent-v2` (Task 11B): code còn đọc v1 tới Task 13, còn thiếu ARN v2 ở
-	 * đây thì đúng lần chuyển đọc đó chết bằng AccessDenied lúc runtime trong khi
-	 * `cdk synth` vẫn xanh. Task 17 xoá v1 sẽ làm test này ĐỎ — đó là ý đồ, không
-	 * phải phiền toái.
+	 * ĐÚNG MỘT ARN. Trong lúc migrate sang `gsi-recent-v2` chỗ này có HAI — code
+	 * còn đọc v1 tới Task 13 — và con số đó quay về 1 khi index cũ bị xoá. Giữ
+	 * lại ARN của một index không còn tồn tại là để execution role mang một quyền
+	 * trỏ vào hư không: không lỗi, không triệu chứng, chỉ là quyền thừa mà lần
+	 * audit sau phải mất công truy nguyên.
 	 *
-	 * Vế v1 viết là "chứa v1 mà KHÔNG chứa v2" chứ không phải `contains(v1)` trần,
-	 * vì `…/index/gsi-recent` là TIỀN TỐ của `…/index/gsi-recent-v2`: vế trần được
-	 * chính ARN v2 làm cho xanh, nên xoá hẳn ARN v1 khỏi `AppStack` vẫn không đỏ.
-	 * Đã đo cả hai chiều trước khi viết dòng này.
+	 * Vế `contains(RECENT_INDEX_V2_NAME)` là an toàn, nhưng vế `contains(v1)` thì
+	 * KHÔNG bao giờ được viết trần: `…/index/gsi-recent` là TIỀN TỐ của
+	 * `…/index/gsi-recent-v2`, nên nó được chính ARN v2 làm cho xanh vĩnh viễn.
+	 * Đã đo cả hai chiều hồi Task 11B. Ở đây `assertEquals(1, size)` là thứ chặn
+	 * việc ARN v1 lặng lẽ quay lại.
 	 */
 	@Test
-	void lambda_chi_query_dung_hai_index_cua_articles() {
+	void lambda_chi_query_dung_index_gsi_recent_v2() {
 		List<String> queryOn = resourcesForAction(appStack(),
 				"FunctionRoleDefaultPolicy", "dynamodb:Query");
 
-		assertEquals(2, queryOn.size(),
-				"Query phải được cấp trên đúng hai index, thực tế: " + queryOn);
+		assertEquals(1, queryOn.size(),
+				"Query phải được cấp trên đúng một index, thực tế: " + queryOn);
 		assertEquals(1, queryOn.stream()
 						.filter(resource -> resource.contains(
 								"/index/" + DataStack.RECENT_INDEX_V2_NAME))
 						.count(),
-				"phải có đúng một ARN trỏ gsi-recent-v2, thực tế: " + queryOn);
-		assertEquals(1, queryOn.stream()
-						.filter(resource -> resource.contains(
-								"/index/" + DataStack.RECENT_INDEX_NAME)
-								&& !resource.contains(
-										"/index/" + DataStack.RECENT_INDEX_V2_NAME))
-						.count(),
-				"phải có đúng một ARN trỏ gsi-recent mà KHÔNG phải v2, thực tế: "
-						+ queryOn);
+				"ARN duy nhất phải trỏ gsi-recent-v2, thực tế: " + queryOn);
 		for (String resource : queryOn) {
 			assertFalse(resource.contains("/index/*"),
 					"KHÔNG được cấp wildcard /index/*, thực tế: " + resource);
