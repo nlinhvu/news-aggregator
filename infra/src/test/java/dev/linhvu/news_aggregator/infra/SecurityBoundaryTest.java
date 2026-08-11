@@ -375,6 +375,35 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Một chuỗi trong env map — không compiler nào bắt được khi nó bị xoá, và
+	 * không có triệu chứng nào ở runtime: hệ thống chạy y hệt, chỉ là mọi lỗi
+	 * tầng ứng dụng lại trở nên vô hình. Đây là chốt chặn duy nhất.
+	 *
+	 * `500-599` chứ không rộng hơn: 4xx CỐ Ý nằm ngoài. Bot quét sinh 404 trên
+	 * đường public hàng ngày; đưa 4xx vào là biến lưu lượng rác thành "lỗi Lambda"
+	 * và alarm `Errors` mất hết giá trị. Xem ADR-0015 §6.
+	 */
+	@Test
+	void lwa_coi_5xx_la_loi_invoke() {
+		appStack().hasResourceProperties("AWS::Lambda::Function",
+				Match.objectLike(Map.of("Environment", Map.of("Variables",
+						Match.objectLike(Map.of(
+								"AWS_LWA_ERROR_STATUS_CODES", "500-599"))))));
+	}
+
+	/**
+	 * Phủ định của test trên. Nếu ai đó "sửa" dải thành `400-599` để bắt thêm lỗi,
+	 * alarm sẽ nổ vì mỗi con bot — và một alarm hay báo động giả bị phớt lờ đúng
+	 * lúc nó cần được tin nhất.
+	 */
+	@Test
+	void lwa_khong_coi_4xx_la_loi_invoke() {
+		String env = appStack().findResources("AWS::Lambda::Function").toString();
+		assertFalse(env.contains("400-"),
+				"4xx phải nằm NGOÀI AWS_LWA_ERROR_STATUS_CODES — xem ADR-0015 §6");
+	}
+
+	/**
 	 * Image phải tham chiếu bằng DIGEST (`@sha256:…`), không phải TAG (`:sha256:…`).
 	 *
 	 * `Code.fromEcrImage(...tagOrDigest(x))` chọn `@` hay `:` bằng cách gọi

@@ -206,6 +206,15 @@ public class AppStack extends Stack {
 		// `EventsController` lấy path của nó); hai bên không thấy nhau nên
 		// compiler không bắt được lệch.
 		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
+		// ADR-0015. Không có dòng này, LWA trả HTTP status trong BODY và Lambda
+		// coi mọi response là thành công — kể cả 500. Đó là lý do
+		// `retryAttempts(2)` và DLQ của Schedule chưa bao giờ kích hoạt kể từ
+		// Phase 2, và Phase 3 §20B #1 đo được điều đó trên prod.
+		//
+		// CHỈ 5xx. Đưa 4xx vào là biến mỗi con bot quét 404 thành một "lỗi
+		// Lambda" và tự đầu độc alarm. Cái giá đã biết: `/events` phải tự trả
+		// 500 cho `job` lạ thay vì 400 — xem `EventsController#handleUnknown`.
+		env.put("AWS_LWA_ERROR_STATUS_CODES", "500-599");
 		env.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
 		// Chỉ TÊN parameter đi qua đây, không phải giá trị: key nằm nguyên trong
 		// SSM SecureString và chỉ được giải mã lúc runtime bằng đúng hai quyền ở
