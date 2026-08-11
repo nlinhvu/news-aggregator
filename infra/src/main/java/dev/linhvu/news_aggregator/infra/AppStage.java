@@ -17,7 +17,8 @@ public class AppStage extends Stage {
 				data.getArticlesTable(), data.getFeatureTogglesTable(),
 				data.getSourcesTable());
 		new ObservabilityStack(this, "ObservabilityStack", cfg,
-				appStack.getFunction(), appStack.getLogGroup());
+				appStack.getFunction(), appStack.getLogGroup(),
+				appStack.getScheduleDlq(), appStack.getSummarizeDlq());
 		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
 				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());
 		new CicdStack(this, "CicdStack", cfg,

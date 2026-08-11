@@ -15,9 +15,12 @@ import software.amazon.awscdk.services.iam.Effect;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Function;
+import software.amazon.awscdk.services.logs.FilterPattern;
 import software.amazon.awscdk.services.logs.LogGroup;
+import software.amazon.awscdk.services.logs.MetricFilter;
 import software.amazon.awscdk.services.sns.Topic;
 import software.amazon.awscdk.services.sns.subscriptions.EmailSubscription;
+import software.amazon.awscdk.services.sqs.IQueue;
 import software.constructs.Construct;
 
 /**
@@ -36,7 +39,8 @@ public class ObservabilityStack extends Stack {
 	private final Topic alerts;
 
 	public ObservabilityStack(final Construct scope, final String id, final EnvConfig cfg,
-			final Function function, final LogGroup logGroup) {
+			final Function function, final LogGroup logGroup, final IQueue scheduleDlq,
+			final IQueue summarizeDlq) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		// KHÔNG masterKey. SSE bằng `alias/aws/sns` làm alarm action THẤT BẠI IM
@@ -123,6 +127,97 @@ public class ObservabilityStack extends Stack {
 				.treatMissingData(TreatMissingData.NOT_BREACHING)
 				.build();
 		errors.addAlarmAction(new SnsAction(this.alerts));
+
+		// Ngưỡng 1: message ĐẦU TIÊN trong DLQ đã là tin đáng đọc. ADR-0014 §8 có
+		// mốc "> 20 message/ngày" nhưng đó là mốc để đổi THIẾT KẾ (thêm state
+		// `failed`), không phải mốc để BÁO — tính tới 2026-08-11 `SummarizeDlq`
+		// chưa nhận message nào.
+		//
+		// Vế `!= null` KHÔNG bao giờ sai ở đây hôm nay: `qa` là môi trường duy nhất
+		// không có Schedule, và nó đã `return` phía trên. Giữ lại vì nó canh môi
+		// trường TIẾP THEO — `getScheduleDlq()` trả `null` là một phần hợp đồng, và
+		// một alarm trỏ vào queue không tồn tại thì chết lúc synth chứ không lúc đọc.
+		if (scheduleDlq != null) {
+			dlqDepthAlarm(cfg, "IngestDlqDepth", "ingest-dlq-depth", scheduleDlq);
+		}
+
+		if (cfg == EnvConfig.PROD) {
+			// Chỉ prod, và đó là ngân sách chứ không phải thiếu sót: 10 alarm metric
+			// cho CẢ ORG. dev có DLQ này nhưng dev là nơi ta cố tình làm hỏng đồ —
+			// message trong đó thường là do chính ta bỏ vào.
+			dlqDepthAlarm(cfg, "SummarizeDlqDepth", "summarize-dlq-depth", summarizeDlq);
+
+			// CUSTOM METRIC DUY NHẤT của cả phase (10 cho toàn org, $0,30/cái khi
+			// vượt). Không có metric AWS nào tách được lượt ingest khỏi lưu lượng
+			// đọc: `Invocations` gộp cả ba đường vào, còn metric của EventBridge
+			// Scheduler gắn theo `ScheduleGroup` nên ingest và sweep che lấp nhau.
+			//
+			// `$.message` chứ không phải text trần hay `$.log.message`:
+			// `logging.structured.format.console: ecs` cho ECS JSON có `message` ở
+			// TẦNG GỐC. Đã đo trên log group prod bằng `aws logs filter-log-events`,
+			// gồm cả hai vế phủ định — bỏ `*` khớp 0 event, đổi chuỗi khớp 0 event.
+			//
+			// Pattern khớp TIỀN TỐ của dòng log ở `IngestionRunner`, và dòng đó chỉ
+			// xuất hiện khi lượt chạy THÀNH CÔNG (runner ném trước khi log nếu mọi
+			// nguồn hỏng). `IngestionRunnerTest#log_ket_thuc_luot_giu_dung_tien_to…`
+			// canh phía kia của hợp đồng — hai tầng không thấy nhau.
+			MetricFilter heartbeat = MetricFilter.Builder.create(this, "IngestHeartbeat")
+					.logGroup(logGroup)
+					.filterPattern(FilterPattern.stringValue(
+							"$.message", "=", "ingestion run xong:*"))
+					.metricNamespace("NewsAggregator")
+					.metricName("IngestRunCompleted")
+					.metricValue("1")
+					.build();
+
+			Alarm heartbeatAlarm = Alarm.Builder.create(this, "IngestHeartbeatAlarm")
+					.alarmName("na-" + cfg.tagPrefix() + "-ingest-heartbeat")
+					.alarmDescription("Không lượt ingest thành công nào trong 3 giờ — "
+							+ "schedule bị xoá, function không boot nổi, hoặc "
+							+ "EventBridge hỏng")
+					.metric(heartbeat.metric(MetricOptions.builder()
+							.period(Duration.hours(1))
+							.statistic("Sum")
+							.build()))
+					.threshold(1)
+					// prod chạy mỗi giờ; 3 chu kỳ tha thứ được 2 lượt trượt trước
+					// khi báo. Hẹp hơn thì một lượt chậm thành báo động giả, và một
+					// alarm hay báo động giả bị phớt lờ đúng lúc cần tin nhất.
+					.evaluationPeriods(3)
+					.datapointsToAlarm(3)
+					.comparisonOperator(ComparisonOperator.LESS_THAN_THRESHOLD)
+					// TOÀN BỘ Ý NGHĨA CỦA HEARTBEAT nằm ở dòng này. Không có
+					// datapoint = không lượt chạy nào = HỎNG. Đổi thành
+					// NOT_BREACHING là làm nó câm đúng lúc cần nhất.
+					.treatMissingData(TreatMissingData.BREACHING)
+					.build();
+			heartbeatAlarm.addAlarmAction(new SnsAction(this.alerts));
+		}
+	}
+
+	/**
+	 * `ApproximateNumberOfMessagesVisible` là metric AWS cấp — miễn phí, không ăn
+	 * vào hạn mức 10 custom metric của org.
+	 *
+	 * `Maximum` chứ không phải `Sum`: đây là ĐỘ SÂU tại một thời điểm, không phải
+	 * lưu lượng. `Sum` trên một gauge cộng dồn các mẫu trong period và cho ra một
+	 * con số không có ý nghĩa vật lý nào.
+	 */
+	private void dlqDepthAlarm(EnvConfig cfg, String id, String suffix, IQueue queue) {
+		Alarm alarm = Alarm.Builder.create(this, id)
+				.alarmName("na-" + cfg.tagPrefix() + "-" + suffix)
+				.alarmDescription("DLQ có message — đọc payload để biết cái gì hỏng")
+				.metric(queue.metricApproximateNumberOfMessagesVisible(
+						MetricOptions.builder()
+								.period(Duration.minutes(5))
+								.statistic("Maximum")
+								.build()))
+				.threshold(1)
+				.evaluationPeriods(1)
+				.comparisonOperator(ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD)
+				.treatMissingData(TreatMissingData.NOT_BREACHING)
+				.build();
+		alarm.addAlarmAction(new SnsAction(this.alerts));
 	}
 
 	public Topic getAlerts() {

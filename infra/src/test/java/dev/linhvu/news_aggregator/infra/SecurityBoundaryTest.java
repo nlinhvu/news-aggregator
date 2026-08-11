@@ -1045,6 +1045,105 @@ class SecurityBoundaryTest {
 				Match.objectLike(Map.of("AlarmName", "na-dev-function-errors")));
 	}
 
+	/**
+	 * DLQ nhận message = một lượt chạy theo lịch đã hỏng hết retry, hoặc một
+	 * article hỏng qua cả 3 lần giao lại. Cả hai đều đáng biết ngay.
+	 *
+	 * `ApproximateNumberOfMessagesVisible` là metric AWS cấp — miễn phí. Ngưỡng
+	 * 1, không phải 20: ADR-0014 §8 đặt mốc *"> 20 message/ngày thì state `failed`
+	 * mới đáng giá"*, nhưng đó là mốc để đổi THIẾT KẾ, không phải mốc để BÁO.
+	 * Tính tới 2026-08-11 `SummarizeDlq` chưa nhận message nào, nên message đầu
+	 * tiên là tin đáng đọc.
+	 */
+	@Test
+	void alarm_do_sau_dlq_o_prod_va_dev() {
+		Template prod = observabilityStack(EnvConfig.PROD);
+		prod.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike(Map.of(
+				"AlarmName", "na-prod-ingest-dlq-depth",
+				"MetricName", "ApproximateNumberOfMessagesVisible",
+				"Namespace", "AWS/SQS")));
+		prod.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike(Map.of(
+				"AlarmName", "na-prod-summarize-dlq-depth")));
+
+		observabilityStack(EnvConfig.DEV).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of("AlarmName", "na-dev-ingest-dlq-depth")));
+	}
+
+	/**
+	 * `BREACHING` là toàn bộ ý nghĩa của heartbeat: nó nổ vì VẮNG MẶT dữ liệu,
+	 * không vì có dữ liệu xấu. Đặt nhầm thành `NOT_BREACHING` thì alarm im lặng
+	 * đúng lúc schedule bị xoá — tức mất chính chế độ hỏng duy nhất mà nó sinh ra
+	 * để bắt, và mất một cách hoàn toàn không nhìn thấy được.
+	 *
+	 * Chỉ ở `prod`: lời hứa *"bài mới trong vòng tối đa một giờ"* của master §3.1
+	 * là lời hứa của prod.
+	 */
+	@Test
+	void heartbeat_chi_o_prod_va_no_vi_vang_mat() {
+		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
+				Match.objectLike(Map.of(
+						"AlarmName", "na-prod-ingest-heartbeat",
+						"TreatMissingData", "breaching",
+						"ComparisonOperator", "LessThanThreshold")));
+
+		String dev = observabilityStack(EnvConfig.DEV).toJSON().toString();
+		assertFalse(dev.contains("heartbeat"),
+				"heartbeat chỉ dựng ở prod — xem TDD §17 #3");
+	}
+
+	/**
+	 * Pattern của metric filter phải soi `$.message` — tức phải khớp hình dạng
+	 * JSON mà ứng dụng thật sự ghi ra, không phải hình dạng ta tưởng.
+	 *
+	 * `logging.structured.format.console: ecs` (application-aws.yaml) cho ECS
+	 * JSON có `message` ở TẦNG GỐC, cạnh `log.level` và `log.logger` lồng trong
+	 * `log`. Nhắm nhầm vào `$.log.message` hay soi text trần thì filter không
+	 * khớp gì cả — và vì heartbeat là `TreatMissingData.BREACHING`, hậu quả
+	 * KHÔNG phải im lặng mà là NỔ VĨNH VIỄN: mỗi 3 giờ một mail báo prod chết
+	 * trong khi prod hoàn toàn khoẻ. Alarm hay báo động giả bị phớt lờ đúng lúc
+	 * cần tin nhất.
+	 *
+	 * Vế `*` không thừa: bỏ nó đi thì pattern đòi `message` bằng ĐÚNG
+	 * `"ingestion run xong:"`, mà dòng thật luôn có hậu tố `discovered=… added=…`.
+	 * Đã đo cả ba vế trên log group prod bằng `aws logs filter-log-events`:
+	 * có `*` khớp 5 event, bỏ `*` khớp 0, đổi chuỗi khớp 0.
+	 */
+	@Test
+	void metric_filter_soi_dung_truong_message_cua_ecs_json() {
+		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::Logs::MetricFilter",
+				Match.objectLike(Map.of(
+						"FilterPattern", "{ $.message = \"ingestion run xong:*\" }",
+						"MetricTransformations", Match.arrayWith(List.of(
+								Match.objectLike(Map.of(
+										"MetricNamespace", "NewsAggregator",
+										"MetricName", "IngestRunCompleted")))))));
+	}
+
+	/**
+	 * Tổng kiểm kê: 6 alarm metric trên hạn mức 10 CỦA CẢ ORG (8 account, chia
+	 * chung với một project khác). Test này là thứ duy nhất giữ con số đó khỏi
+	 * trôi — mỗi phase sau thêm alarm phải sửa đúng chỗ này và nêu chỗ nó lấy từ đâu.
+	 */
+	@Test
+	void tong_so_alarm_dung_ngan_sach_free_tier() {
+		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Alarm", 4);
+		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Alarm", 2);
+		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Alarm", 0);
+	}
+
+	/**
+	 * Custom metric là tài nguyên khan hiếm nhất: 10 cho cả org, $0,30/cái khi
+	 * vượt. Phase 4 dùng ĐÚNG MỘT — heartbeat. Năm alarm còn lại chạy trên metric
+	 * AWS cấp miễn phí, và đó là quyết định thiết kế (§4 nguyên tắc 7), không
+	 * phải may mắn.
+	 */
+	@Test
+	void dung_dung_mot_metric_filter_trong_ca_phase() {
+		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::Logs::MetricFilter", 1);
+		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::Logs::MetricFilter", 0);
+		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::Logs::MetricFilter", 0);
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {

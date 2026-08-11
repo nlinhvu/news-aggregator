@@ -44,6 +44,8 @@ public class AppStack extends Stack {
 	private final Function function;
 	private final FunctionUrl functionUrl;
 	private final LogGroup logGroup;
+	private final Queue scheduleDlq;
+	private final Queue summarizeDlq;
 
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
 			final ITable articlesTable, final ITable featureTogglesTable,
@@ -143,7 +145,7 @@ public class AppStack extends Stack {
 		// Queue summarize + DLQ. Đặt trong AppStack cùng lý do Schedule của Phase 2
 		// (TDD §17 #2): đây là TRIGGER CỦA FUNCTION, tách ra thành stack riêng chỉ
 		// tạo một stack chứa một trigger trỏ ngược về stack bên cạnh.
-		Queue summarizeDlq = Queue.Builder.create(this, "SummarizeDlq")
+		this.summarizeDlq = Queue.Builder.create(this, "SummarizeDlq")
 				.retentionPeriod(Duration.days(14))
 				.enforceSsl(true)
 				.build();
@@ -155,7 +157,7 @@ public class AppStack extends Stack {
 				.visibilityTimeout(Duration.seconds(780))
 				.enforceSsl(true)
 				.deadLetterQueue(DeadLetterQueue.builder()
-						.queue(summarizeDlq)
+						.queue(this.summarizeDlq)
 						.maxReceiveCount(3)
 						.build())
 				.build();
@@ -334,9 +336,8 @@ public class AppStack extends Stack {
 			this.function.configureAsyncInvoke(EventInvokeConfigOptions.builder()
 					.onFailure(new SqsDestination(scheduleDlq))
 					.build());
-
-
 		}
+		this.scheduleDlq = scheduleDlq;
 
 		if (cfg.ingestionRate() != null) {
 			Schedule.Builder.create(this, "IngestSchedule")
@@ -385,5 +386,17 @@ public class AppStack extends Stack {
 
 	public LogGroup getLogGroup() {
 		return logGroup;
+	}
+
+	/**
+	 * `null` ở môi trường không có Schedule nào (`qa`) — chỗ gọi phải xử lý, đừng
+	 * dựng alarm trỏ vào hư vô.
+	 */
+	public Queue getScheduleDlq() {
+		return scheduleDlq;
+	}
+
+	public Queue getSummarizeDlq() {
+		return summarizeDlq;
 	}
 }
