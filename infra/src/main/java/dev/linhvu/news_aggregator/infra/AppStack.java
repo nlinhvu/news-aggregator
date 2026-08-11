@@ -160,6 +160,36 @@ public class AppStack extends Stack {
 				.resources(List.of(summarizeQueue.getQueueArn()))
 				.build());
 
+		// AP4 (ghi `summary`) + AP8 (đọc bài cần tóm tắt). Resource là ARN BẢNG,
+		// không phải ARN index — dòng `Query` ở trên trỏ index vì nó query GSI,
+		// còn hai action này đọc/ghi theo partition key. Cấp nhầm chiều thì synth
+		// vẫn xanh, cdk-nag vẫn im, và mọi lượt summarize chết bằng AccessDenied.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:GetItem", "dynamodb:UpdateItem"))
+				.resources(List.of(articlesTable.getTableArn()))
+				.build());
+
+		// Secret ĐẦU TIÊN và duy nhất của chương trình (master §8.1). Đọc đúng
+		// MỘT parameter — KHÔNG `GetParametersByPath`: ta biết chính xác tên, nên
+		// quyền quét cây là quyền thừa và nó với tới cả image digest lẫn mọi config
+		// tương lai. KHÔNG `PutParameter`: key do người vận hành ghi bằng credential
+		// của chính họ (TDD §17 #10).
+		String keyParameterName = "/news/" + cfg.tagPrefix() + "/gemini-api-key";
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("ssm:GetParameter"))
+				.resources(List.of("arn:aws:ssm:" + cfg.region() + ":" + cfg.account()
+						+ ":parameter" + keyParameterName))
+				.build());
+
+		// SecureString dùng khoá quản lý `alias/aws/ssm`. Ghim về đúng khoá đó —
+		// để `Resource: *` thì execution role giải mã được MỌI thứ mã hoá trong
+		// account, và đó là quyền không ai để ý cho tới khi có sự cố.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("kms:Decrypt"))
+				.resources(List.of("arn:aws:kms:" + cfg.region() + ":" + cfg.account()
+						+ ":alias/aws/ssm"))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
@@ -172,6 +202,14 @@ public class AppStack extends Stack {
 		// compiler không bắt được lệch.
 		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
 		env.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
+		// Chỉ TÊN parameter đi qua đây, không phải giá trị: key nằm nguyên trong
+		// SSM SecureString và chỉ được giải mã lúc runtime bằng đúng hai quyền ở
+		// trên. `ssm-secure` dynamic reference KHÔNG dùng được cho env var của
+		// Lambda (CloudFormation chỉ hỗ trợ nó trên 11 cặp resource/property, và
+		// `AWS::Lambda::Function` không nằm trong đó), nên truyền tham chiếu là
+		// cách DUY NHẤT giữ được cả audit lẫn xoay key không cần redeploy.
+		env.put("NEWS_GEMINI_KEY_PARAMETER", keyParameterName);
+		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)

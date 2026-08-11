@@ -180,9 +180,10 @@ class SecurityBoundaryTest {
 	 *
 	 * Chỉ dùng khi câu hỏi là "có được cấp không / cấp ở đâu" và cả stack chỉ có
 	 * MỘT statement cấp action đó. Khi cùng một action được cấp trên nhiều bảng —
-	 * từ Phase 2 thì `Scan`, `UpdateItem`, `PutItem` đều rơi vào diện này — hàm này
-	 * chỉ thấy statement đầu tiên và sẽ bỏ lọt statement thứ hai. Dùng
-	 * {@link #resourcesForAction} cho những trường hợp đó.
+	 * từ Phase 2 thì `Scan`, `UpdateItem`, `PutItem` đều rơi vào diện này, và
+	 * Phase 3 thêm `GetItem` (feature-toggles + articles) cùng `UpdateItem` thứ
+	 * hai (articles) — hàm này chỉ thấy statement đầu tiên và sẽ bỏ lọt statement
+	 * thứ hai. Dùng {@link #resourcesForAction} cho những trường hợp đó.
 	 */
 	private String resourceForAction(Template template, String policyPrefix,
 			String action) {
@@ -530,9 +531,13 @@ class SecurityBoundaryTest {
 	void lambda_chi_doc_bang_feature_toggles() {
 		Template t = appStack();
 
+		// `resourcesForAction` chứ KHÔNG phải `resourceForAction`: từ Phase 3,
+		// `GetItem` được cấp trên HAI bảng (feature-toggles và articles), nên hỏi
+		// "statement đầu tiên là gì" là đọc nhờ vào thứ tự khai báo trong
+		// `AppStack` — đảo hai khối policy cho nhau là test đỏ mà không có gì sai.
 		for (String action : List.of("dynamodb:DescribeTable", "dynamodb:GetItem")) {
-			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action)
-							.contains("FeatureTogglesTable"),
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
+							.anyMatch(resource -> resource.contains("FeatureTogglesTable")),
 					"Lambda phải được " + action + " trên bảng feature-toggles");
 		}
 		for (String action : List.of("dynamodb:UpdateItem", "dynamodb:PutItem",
@@ -571,6 +576,122 @@ class SecurityBoundaryTest {
 				"PutItem phải trỏ vào ARN của BẢNG chứ không phải index, thực tế: "
 						+ putOn.get(0));
 	}
+
+	/**
+	 * AP4 (ghi `summary`) + AP8 (đọc bài cần tóm tắt). Cùng một cặp action còn
+	 * được cấp trên hai bảng khác — `GetItem` trên `feature-toggles`,
+	 * `UpdateItem` trên `sources` — nên phải lọc theo bảng chứ không hỏi
+	 * "statement đầu tiên là gì".
+	 *
+	 * Vế `/index/` là vế đáng giá: cấp nhầm sang ARN index thì `cdk synth` vẫn
+	 * xanh, cdk-nag vẫn im, và mọi lượt summarize chết bằng AccessDenied trên
+	 * môi trường thật. Đây là lỗi copy dòng `Query` phía trên rồi đổi mỗi action,
+	 * và `lambda_ghi_duoc_vao_articles` đã canh đúng nó cho `PutItem`.
+	 */
+	@Test
+	void lambda_doc_ghi_summary_tren_arn_bang_articles() {
+		Template t = appStack();
+
+		for (String action : List.of("dynamodb:GetItem", "dynamodb:UpdateItem")) {
+			List<String> on = resourcesForAction(t, "FunctionRoleDefaultPolicy", action);
+			List<String> onArticles = on.stream()
+					.filter(resource -> resource.contains("ArticlesTable"))
+					.toList();
+
+			assertEquals(1, onArticles.size(),
+					action + " phải được cấp trên bảng articles đúng một lần, thực tế: "
+							+ on);
+			assertFalse(onArticles.get(0).contains("/index/"),
+					action + " phải trỏ ARN của BẢNG chứ không phải index, thực tế: "
+							+ onArticles.get(0));
+		}
+	}
+
+	/**
+	 * Secret ĐẦU TIÊN của chương trình (master §8.1), nên ranh giới quanh nó
+	 * được đặt một lần ở đây.
+	 *
+	 * `GetParametersByPath` trên `/news/*` đọc được cả image digest và mọi config
+	 * tương lai — quyền thừa mà không mua thêm gì, vì ta biết chính xác tên
+	 * parameter. `PutParameter` thì tệ hơn: nó cho Lambda tự ghi đè key của chính
+	 * mình, trong khi key là thứ người vận hành ghi bằng credential của họ
+	 * (TDD §17 #10).
+	 */
+	@Test
+	void lambda_chi_doc_dung_mot_ssm_parameter() {
+		Template t = appStack();
+
+		List<String> readOn = resourcesForAction(t, "FunctionRoleDefaultPolicy",
+				"ssm:GetParameter");
+		assertEquals(1, readOn.size(),
+				"ssm:GetParameter phải được cấp trên đúng một parameter, thực tế: "
+						+ readOn);
+		assertTrue(readOn.get(0).contains("gemini-api-key"),
+				"resource phải ghim tên parameter, thực tế: " + readOn.get(0));
+		assertFalse(readOn.get(0).contains("*"),
+				"resource KHÔNG được chứa wildcard, thực tế: " + readOn.get(0));
+
+		for (String action : List.of("ssm:GetParametersByPath", "ssm:PutParameter")) {
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
+					"Lambda KHÔNG được cấp " + action);
+		}
+	}
+
+	/**
+	 * Hai thứ phải nói CÙNG một tên parameter: env var mà ứng dụng đọc
+	 * (`news.summarization.key-parameter`) và ARN trong statement
+	 * `ssm:GetParameter`. Lệch nhau thì Lambda đi đọc một parameter nó không có
+	 * quyền, và triệu chứng là AccessDenied ở lượt summarize ĐẦU TIÊN trên môi
+	 * trường thật — hai repo không thấy nhau nên compiler không bắt được.
+	 *
+	 * Khẳng định chúng khớp NHAU chứ không chép literal vào hai chỗ: chép hai
+	 * lần thì sửa một chỗ quên chỗ kia vẫn xanh.
+	 *
+	 * KHÔNG khẳng định `NEWS_SUMMARIZATION_MODEL` ở đây: giá trị nó đặt trùng
+	 * đúng default trong `application.yaml`, nên xoá env var đó không đổi hành vi
+	 * gì — một assertion cho nó sẽ chỉ chép lại code chứ không canh gì.
+	 */
+	@Test
+	void ten_parameter_trong_env_khop_arn_duoc_cap_quyen() {
+		Template t = appStack();
+		String keyParameter = "/news/dev/gemini-api-key";
+
+		t.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"Environment", Match.objectLike(Map.of(
+						"Variables", Match.objectLike(Map.of(
+								"NEWS_GEMINI_KEY_PARAMETER", keyParameter)))))));
+
+		assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", "ssm:GetParameter")
+						.endsWith(":parameter" + keyParameter),
+				"ARN được cấp quyền phải trỏ đúng parameter mà env var chỉ tới, thực tế: "
+						+ resourceForAction(t, "FunctionRoleDefaultPolicy",
+						"ssm:GetParameter"));
+	}
+
+	/**
+	 * `kms:Decrypt` là quyền dễ để rộng nhất và khó nhìn thấy nhất khi đã rộng:
+	 * trên `Resource: *` thì execution role giải mã được MỌI thứ được mã hoá
+	 * trong account, và không có triệu chứng nào cho tới ngày có sự cố.
+	 *
+	 * SecureString của SSM dùng khoá quản lý `alias/aws/ssm`, nên ghim đúng vào
+	 * đó là đủ hẹp mà vẫn chạy.
+	 */
+	@Test
+	void kms_decrypt_ghim_ve_khoa_cua_ssm() {
+		List<String> decryptOn = resourcesForAction(appStack(),
+				"FunctionRoleDefaultPolicy", "kms:Decrypt");
+
+		assertEquals(1, decryptOn.size(),
+				"kms:Decrypt phải được cấp đúng một lần, thực tế: " + decryptOn);
+		assertTrue(decryptOn.get(0).contains("alias/aws/ssm"),
+				"kms:Decrypt phải ghim về khoá quản lý của SSM, thực tế: "
+						+ decryptOn.get(0));
+	}
+	// KHÔNG thêm một vế `assertFalse(resource.equals("*"))` ở đây: `Resource: *`
+	// đã làm vế `contains("alias/aws/ssm")` phía trên đỏ rồi, nên vế đó không
+	// bao giờ tự nổ — nó là một assertion CHẾT trông y hệt một assertion đang
+	// canh. Khác với `ssm` bên trên, nơi `…/gemini-api-key*` lọt qua vế "đúng
+	// tên" nên vế wildcard ở đó là vế thật.
 
 	/**
 	 * `Scan` xuất hiện lần đầu trong chương trình và CHỈ trên `sources` — bảng bị
@@ -614,9 +735,12 @@ class SecurityBoundaryTest {
 	void lambda_chi_cap_nhat_trang_thai_bang_sources() {
 		Template t = appStack();
 
+		// `resourcesForAction` chứ KHÔNG phải `resourceForAction`: từ Phase 3,
+		// `UpdateItem` được cấp trên HAI bảng (sources và articles) — xem lý do ở
+		// `lambda_chi_doc_bang_feature_toggles`.
 		for (String action : List.of("dynamodb:Scan", "dynamodb:UpdateItem")) {
-			assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", action)
-							.contains("SourcesTable"),
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
+							.anyMatch(resource -> resource.contains("SourcesTable")),
 					"Lambda phải được " + action + " trên bảng sources");
 		}
 		for (String action : List.of("dynamodb:PutItem", "dynamodb:DeleteItem")) {
