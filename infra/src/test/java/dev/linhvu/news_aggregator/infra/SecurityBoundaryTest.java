@@ -2,6 +2,7 @@ package dev.linhvu.news_aggregator.infra;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1285,5 +1286,87 @@ class SecurityBoundaryTest {
 
 		assertFalse(iam.contains("SummarizeDlq"),
 				"execution role không được có quyền nào trên DLQ");
+	}
+
+	/**
+	 * TẬP ĐÓNG — trả nợ Phase 3 §20B #2.
+	 *
+	 * Mọi test khác trong file này hỏi *"quyền X có bị khoá đúng phạm vi không?"*.
+	 * Không cái nào hỏi *"ở đây có quyền nào chưa ai viết test cho nó không?"* —
+	 * nên bộ quyền là TẬP MỞ, và một dòng `addToPolicy` thêm ở Phase 5 lọt qua
+	 * cả 54 test còn lại.
+	 *
+	 * Món nợ thật không phải "role có 13 nhóm quyền" mà là **"role lớn lên mà
+	 * không ai phải quyết định gì"**. Test này không làm role nhỏ đi một chút nào;
+	 * nó biến việc role lớn lên thành một HÀNH VI CÓ Ý THỨC.
+	 *
+	 * ⚠️ KHI TEST NÀY ĐỎ: thêm action mới vào danh sách dưới đây **kèm một dòng
+	 * nói ai dùng nó và ở đường code nào**. TUYỆT ĐỐI KHÔNG xoá assertion, không
+	 * đổi thành `containsAll`, không thêm wildcard. Nới nó là vứt đúng thứ nó
+	 * sinh ra để giữ.
+	 *
+	 * Điểm tách Lambdalith chốt ở **Phase 7**, khi bảng `users` làm vỡ vế thứ nhất
+	 * của ADR-0013 §8 (*"ghi trên nhiều hơn hai bảng"* — nay đúng hai:
+	 * `articles`, `sources`) và PII đầu tiên vào hệ thống. Xem TDD §17 #7.
+	 */
+	@Test
+	void execution_role_khong_co_quyen_nao_ngoai_danh_sach() {
+		// Mỗi dòng: action → ai dùng, đường code nào.
+		Set<String> khaiBao = Set.of(
+				"logs:CreateLogStream",   // Lambda runtime ghi log
+				"logs:PutLogEvents",      // Lambda runtime ghi log
+				"dynamodb:Query",         // ArticleRepository.findRecent — đường ĐỌC
+				"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
+				"dynamodb:GetItem",       // Togglz đọc flag; catalog.findSummarizable
+				"dynamodb:PutItem",       // catalog ghi article mới
+				"dynamodb:UpdateItem",    // catalog gắn summary; sources cập nhật etag
+				"dynamodb:Scan",          // SourceRepository liệt kê nguồn (chỉ `sources`)
+				"sqs:SendMessage",             // enqueue summarize; onFailure ghi IngestDlq
+				"sqs:ReceiveMessage",          // ESM (addEventSource → grantConsumeMessages)
+				"sqs:DeleteMessage",           // ESM
+				"sqs:ChangeMessageVisibility", // ESM — grantConsumeMessages cấp cả cái này
+				"sqs:GetQueueAttributes",      // đi kèm MỌI grant SQS, cả hai queue
+				"sqs:GetQueueUrl",             // đi kèm MỌI grant SQS, cả hai queue
+				"ssm:GetParameter",            // GeminiKeyProvider đọc SecureString
+				"kms:Decrypt"                  // giải mã SecureString bằng alias/aws/ssm
+		);
+
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Set<String> thucTe = actionsOf(appStack(cfg), "FunctionRoleDefaultPolicy");
+			Set<String> ngoaiDanhSach = new java.util.TreeSet<>(thucTe);
+			ngoaiDanhSach.removeAll(khaiBao);
+
+			assertTrue(ngoaiDanhSach.isEmpty(),
+					"[" + cfg.name() + "] execution role có quyền KHÔNG khai báo: "
+							+ ngoaiDanhSach
+							+ " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
+		}
+	}
+
+	/**
+	 * Đọc toàn bộ action của một policy từ template đã synth. Trả về tập phẳng,
+	 * không quan tâm statement nào — câu hỏi ở đây là *"có action nào lạ không"*,
+	 * không phải *"action nào ở statement nào"*.
+	 */
+	@SuppressWarnings("unchecked")
+	private Set<String> actionsOf(Template template, String policyLogicalIdPrefix) {
+		Set<String> actions = new java.util.TreeSet<>();
+		template.findResources("AWS::IAM::Policy").forEach((logicalId, resource) -> {
+			if (!logicalId.startsWith(policyLogicalIdPrefix)) {
+				return;
+			}
+			Map<String, Object> props = (Map<String, Object>) resource.get("Properties");
+			Map<String, Object> doc = (Map<String, Object>) props.get("PolicyDocument");
+			for (Object stmt : (List<Object>) doc.get("Statement")) {
+				Object action = ((Map<String, Object>) stmt).get("Action");
+				if (action instanceof String s) {
+					actions.add(s);
+				}
+				else if (action instanceof List<?> list) {
+					list.forEach(a -> actions.add(String.valueOf(a)));
+				}
+			}
+		});
+		return actions;
 	}
 }
