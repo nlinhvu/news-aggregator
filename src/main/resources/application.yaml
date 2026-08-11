@@ -47,6 +47,10 @@ news:
     temperature: 0.2
     call-timeout: 25s
     max-summary-chars: 400
+    # Thứ thay thế circuit breaker (TDD §17 #8). Gemini hỏng hàng loạt thì 10 bài
+    # × 25s timeout vượt 120s function timeout, invoke chết trước khi kịp trả
+    # `batchItemFailures`, và CẢ batch quay lại — kể cả bài đã tóm tắt xong.
+    consecutive-failure-limit: 3
 
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature

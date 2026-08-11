@@ -12,6 +12,7 @@ import dev.linhvu.news_aggregator.summarization.events.ArticleSummarized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,8 @@ class SummarizeHandler implements EventJobHandler {
 
 	private final ApplicationEventPublisher events;
 
+	private final int consecutiveFailureLimit;
+
 	// `@Lazy` phải ở ĐIỂM INJECT, không chỉ trên class `Summarizer`. Handler này
 	// bị dựng EAGER dù không có `@Lazy` nào sai: `EventsController` là
 	// `@RestController` và nhận `List<EventJobHandler>`, mà dựng một `List` thì
@@ -37,11 +40,17 @@ class SummarizeHandler implements EventJobHandler {
 	// Client → apiKey()` chạy lúc khởi động: mỗi cold start của người ĐỌC cũng
 	// trả một lời gọi SSM, và `NewsAggregatorApplicationTests#contextLoads` đỏ
 	// bằng `SdkClientException` khi không có credential.
+	//
+	// Constructor vẫn chỉ có MỘT nên KHÔNG cần `@Autowired` — khác `SweepHandler`
+	// và `Summarizer`, hai chỗ có constructor thứ hai cho test.
 	SummarizeHandler(ArticleCatalog catalog, @Lazy Summarizer summarizer,
-			ApplicationEventPublisher events) {
+			ApplicationEventPublisher events,
+			@Value("${news.summarization.consecutive-failure-limit}")
+			int consecutiveFailureLimit) {
 		this.catalog = catalog;
 		this.summarizer = summarizer;
 		this.events = events;
+		this.consecutiveFailureLimit = consecutiveFailureLimit;
 	}
 
 	@Override
@@ -61,8 +70,19 @@ class SummarizeHandler implements EventJobHandler {
 		List<String> failed = new ArrayList<>();
 		int summarized = 0;
 		int skipped = 0;
+		int consecutiveFailures = 0;
+		boolean aborted = false;
 
 		for (SqsBatch.Message message : messages) {
+			if (aborted) {
+				// Phần còn lại KHÔNG được gọi model, nhưng vẫn phải vào
+				// batchItemFailures — chúng chưa được xử lý, nên ACK chúng là mất
+				// bài. SQS giao lại sau visibility timeout, lúc đó Gemini có thể
+				// đã hồi phục.
+				failed.add(message.messageId());
+				continue;
+			}
+
 			// CHỐT CHẶN IDEMPOTENT. Rỗng nghĩa là article đã có summary, không có
 			// excerpt, hoặc excerpt quá ngắn — cả ba đều là "không có việc để
 			// làm", và ACK message là đúng: nó đã hoàn thành mục đích, chỉ là bởi
@@ -71,6 +91,9 @@ class SummarizeHandler implements EventJobHandler {
 					catalog.findSummarizable(message.articleId());
 			if (article.isEmpty()) {
 				skipped++;
+				// KHÔNG reset `consecutiveFailures`: bỏ qua không phải bằng chứng
+				// model đã hồi phục. Reset ở đây thì một batch xen kẽ hỏng/bỏ-qua
+				// không bao giờ chạm ngưỡng.
 				log.debug("bỏ qua {} — không có việc để làm", message.articleId());
 				continue;
 			}
@@ -78,8 +101,21 @@ class SummarizeHandler implements EventJobHandler {
 			Optional<String> summary = summarizer.summarize(article.get());
 			if (summary.isEmpty()) {
 				failed.add(message.messageId());
+				consecutiveFailures++;
+				if (consecutiveFailures >= consecutiveFailureLimit) {
+					// Thứ thay thế circuit breaker (TDD §17 #8). Không có nó thì
+					// 10 bài × 25s timeout vượt 120s function timeout, invoke chết,
+					// batchItemFailures không kịp trả, và CẢ batch quay lại — kể cả
+					// bài đã xong.
+					log.warn("{} lời gọi model hỏng liên tiếp — bỏ phần còn lại "
+							+ "của batch", consecutiveFailures);
+					aborted = true;
+				}
 				continue;
 			}
+			// Thành công là bằng chứng DUY NHẤT model còn sống, nên nó là chỗ DUY
+			// NHẤT được reset bộ đếm.
+			consecutiveFailures = 0;
 			events.publishEvent(new ArticleSummarized(
 					message.articleId(), summary.get()));
 			summarized++;
