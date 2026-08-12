@@ -6,6 +6,46 @@ spring:
       region:
         static: us-east-1
 
+management:
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Boot 4.1 KHÔNG có endpoint mặc định. Không set thì bean
+          # `OtlpTracingConnectionDetails` không được dựng (`@ConditionalOnProperty`
+          # trên chính key này), kéo theo không có exporter — span sinh ra rồi chết
+          # trong bộ nhớ, không một dòng log nào nói ra. Mặc định trỏ local để
+          # `./gradlew bootRun` chạy được ngay trên host; compose và prod đè bằng
+          # env var (Task 16).
+          #
+          # TÊN KEY: bản Boot 3 là `management.otlp.tracing.endpoint`, đã deprecate
+          # ở mức `error` — viết tên cũ thì cấu hình bị BỎ QUA lặng lẽ, tức rơi
+          # đúng vào chế độ hỏng vừa tả.
+          endpoint: http://localhost:4318/v1/traces
+  otlp:
+    metrics:
+      export:
+        # Starter kéo theo `micrometer-registry-otlp`, và registry đó BẬT SẴN với
+        # url mặc định `localhost:4318/v1/metrics` — mỗi phút một POST vào chỗ
+        # không tồn tại khi chạy trên Lambda. Metric của hệ này đi bằng metric
+        # filter trên log (Task 11), không đi bằng OTLP.
+        enabled: false
+  logging:
+    export:
+      otlp:
+        # Cùng lý do: log đi stdout dạng ECS JSON rồi vào CloudWatch. Dòng này còn
+        # là chốt chặn cho env var `OTEL_EXPORTER_OTLP_ENDPOINT` dạng CHUNG —
+        # Boot 4.1 map nó vào cả ba endpoint trace/metric/log cùng lúc.
+        enabled: false
+  tracing:
+    sampling:
+      # 100%, VIẾT RA TƯỜNG MINH chứ không để mặc định trôi vào (mặc định của Boot
+      # là 0.1). Ở khối lượng này (~3.000 trace/tháng trên free tier 100.000) đây
+      # là lựa chọn đúng; ở mọi khối lượng lớn hơn nó SAI, và tài liệu ADOT gọi
+      # mặc định `parentbased_always_on` là bẫy hoá đơn ("up to 20x higher
+      # ingestion volume"). Ngưỡng hạ xuống 5–10%: ~8.000 trace/tháng.
+      probability: 1.0
+
 news:
   commit-sha: ${NEWS_COMMIT_SHA:local}
   platform:

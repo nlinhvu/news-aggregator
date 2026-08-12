@@ -11,6 +11,18 @@ services:
       timeout: 3s
       retries: 20
 
+  otel-lgtm:
+    image: 'grafana/otel-lgtm:latest'
+    ports:
+      - '3000:3000'   # Grafana UI
+      - '4317:4317'   # OTLP gRPC
+      - '4318:4318'   # OTLP HTTP
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/health']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   app:
     profiles: ['lambda']
     build: .
@@ -22,6 +34,10 @@ services:
       # application-local.yaml trỏ localhost:4566 để ./gradlew bootRun chạy được trên host.
       # Trong compose, localhost là chính container app — phải trỏ sang service floci.
       - 'SPRING_CLOUD_AWS_ENDPOINT=http://floci:4566'
+      # Cùng lý do như dòng trên, cho endpoint OTLP trong application.yaml.
+      - 'MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://otel-lgtm:4318/v1/traces'
     depends_on:
       floci:
+        condition: service_healthy
+      otel-lgtm:
         condition: service_healthy
