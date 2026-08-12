@@ -1144,6 +1144,56 @@ class SecurityBoundaryTest {
 		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::Logs::MetricFilter", 0);
 	}
 
+	/**
+	 * Budget CHỈ THÔNG BÁO, không có `action`. Budget có action tính $0,10/ngày
+	 * sau hai cái đầu; budget chỉ thông báo thì MIỄN PHÍ KHÔNG GIỚI HẠN. Đây là
+	 * khác biệt dễ nhầm nhất trong bảng giá của Budgets.
+	 *
+	 * Và nó gửi email THẲNG, không qua SNS — Budgets làm được, CloudWatch alarm
+	 * thì không. Bớt được một mắt xích, tức bớt một chỗ có thể im lặng.
+	 */
+	@Test
+	void moi_moi_truong_mot_budget_chi_thong_bao() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Template t = observabilityStack(cfg);
+			t.resourceCountIs("AWS::Budgets::Budget", 1);
+			String json = t.toJSON().toString();
+			assertFalse(json.contains("ActionType"),
+					"[" + cfg.name() + "] budget phải là loại chỉ-thông-báo: budget "
+							+ "có action tính $0,10/ngày sau hai cái đầu");
+		}
+	}
+
+	/**
+	 * Cost Anomaly Detection bắt được thứ budget không bắt: DynamoDB nhảy từ
+	 * $0,002 lên $0,20 là 100× nhưng tổng vẫn dưới ngưỡng, nên budget im lặng.
+	 * Master §8.3: *"vượt trần mà khối lượng chưa tăng là tín hiệu sai kiến
+	 * trúc"* — thay đổi HÌNH DẠNG đáng lo hơn thay đổi TỔNG. Miễn phí.
+	 */
+	@Test
+	void moi_moi_truong_co_cost_anomaly_monitor() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Template t = observabilityStack(cfg);
+			t.resourceCountIs("AWS::CE::AnomalyMonitor", 1);
+			t.resourceCountIs("AWS::CE::AnomalySubscription", 1);
+		}
+	}
+
+	/**
+	 * ĐÚNG MỘT dashboard, chỉ ở prod. $3,00/dashboard/tháng (AWS Pricing API,
+	 * 2026-08-11), free tier 3 cái TÍNH THEO ORG. Một cái mỗi môi trường là tiêu
+	 * sạch pool và không chừa gì cho project khác trong org.
+	 *
+	 * `dev` và `qa` là nơi ta LÀM VIỆC (Logs Insights, console); `prod` là nơi ta
+	 * LIẾC NHÌN.
+	 */
+	@Test
+	void dung_mot_dashboard_va_chi_o_prod() {
+		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Dashboard", 0);
+		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Dashboard", 0);
+	}
+
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
 	void log_retention_toi_da_14_ngay() {

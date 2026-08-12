@@ -6,8 +6,13 @@ import java.util.Map;
 import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
+import software.amazon.awscdk.services.budgets.CfnBudget;
+import software.amazon.awscdk.services.ce.CfnAnomalyMonitor;
+import software.amazon.awscdk.services.ce.CfnAnomalySubscription;
 import software.amazon.awscdk.services.cloudwatch.Alarm;
 import software.amazon.awscdk.services.cloudwatch.ComparisonOperator;
+import software.amazon.awscdk.services.cloudwatch.Dashboard;
+import software.amazon.awscdk.services.cloudwatch.GraphWidget;
 import software.amazon.awscdk.services.cloudwatch.MetricOptions;
 import software.amazon.awscdk.services.cloudwatch.TreatMissingData;
 import software.amazon.awscdk.services.cloudwatch.actions.SnsAction;
@@ -99,6 +104,68 @@ public class ObservabilityStack extends Stack {
 		// đâu. Đây là cạm bẫy cùng họ với món nợ §20B #1, và chốt chặn duy nhất là
 		// bước QA `list-subscriptions-by-topic` ở walkthrough slice 1.
 		this.alerts.addSubscription(new EmailSubscription(EnvConfig.OPERATOR_EMAIL));
+
+		// CHỈ THÔNG BÁO, không `action`: budget có action tính $0,10/ngày sau hai
+		// cái đầu, budget thông báo thì miễn phí KHÔNG GIỚI HẠN. Và nó gửi email
+		// THẲNG — bớt một mắt xích so với đường qua SNS, tức bớt một chỗ có thể
+		// im lặng (và đường qua SNS đã im lặng thật một lần, 2026-08-11).
+		//
+		// Ngưỡng $3: trần chương trình là $5 (master §8.3) và Phase 4 thêm $0, nên
+		// $3 cho MỘT môi trường là biên báo động rộng rãi. Route 53 một mình đã
+		// ~$0,50/môi trường.
+		//
+		// Dựng ở CẢ BA môi trường, trước cả chỗ `qa` return: chi phí là thứ duy
+		// nhất trong stack này mà `qa` vẫn sinh ra được dù không có lượt chạy nền
+		// nào — một bug làm rò tiền ở qa vẫn là tiền thật.
+		CfnBudget.Builder.create(this, "MonthlyBudget")
+				.budget(CfnBudget.BudgetDataProperty.builder()
+						.budgetName("na-" + cfg.tagPrefix() + "-monthly")
+						.budgetType("COST")
+						.timeUnit("MONTHLY")
+						.budgetLimit(CfnBudget.SpendProperty.builder()
+								.amount(3).unit("USD").build())
+						.build())
+				.notificationsWithSubscribers(List.of(
+						CfnBudget.NotificationWithSubscribersProperty.builder()
+								.notification(CfnBudget.NotificationProperty.builder()
+										.notificationType("ACTUAL")
+										.comparisonOperator("GREATER_THAN")
+										.threshold(80)
+										.thresholdType("PERCENTAGE")
+										.build())
+								.subscribers(List.of(CfnBudget.SubscriberProperty.builder()
+										.subscriptionType("EMAIL")
+										.address(EnvConfig.OPERATOR_EMAIL)
+										.build()))
+								.build()))
+				.build();
+
+		// Bắt được thứ budget KHÔNG bắt: một service bình thường $0,002 nhảy lên
+		// $0,20 là 100× nhưng tổng vẫn dưới ngưỡng. Master §8.3 nói *"vượt trần mà
+		// khối lượng chưa tăng là tín hiệu sai kiến trúc"* — thay đổi HÌNH DẠNG
+		// đáng lo hơn thay đổi TỔNG. Miễn phí.
+		CfnAnomalyMonitor monitor = CfnAnomalyMonitor.Builder.create(this, "CostAnomaly")
+				.monitorName("na-" + cfg.tagPrefix() + "-cost-anomaly")
+				.monitorType("DIMENSIONAL")
+				.monitorDimension("SERVICE")
+				.build();
+
+		// `thresholdExpression` chứ không phải `threshold`: property `Threshold`
+		// đã deprecated và CloudFormation TỪ CHỐI template chỉ có nó.
+		//
+		// Ngưỡng $1 tuyệt đối, không phải phần trăm: ở quy mô $0,00x thì mọi thay
+		// đổi đều là vài trăm phần trăm, nên ngưỡng tương đối biến subscription
+		// này thành máy sinh thư rác.
+		CfnAnomalySubscription.Builder.create(this, "CostAnomalyEmail")
+				.subscriptionName("na" + cfg.tagPrefix() + "costanomaly")
+				.frequency("DAILY")
+				.monitorArnList(List.of(monitor.getAttrMonitorArn()))
+				.subscribers(List.of(CfnAnomalySubscription.SubscriberProperty.builder()
+						.type("EMAIL").address(EnvConfig.OPERATOR_EMAIL).build()))
+				.thresholdExpression("{\"Dimensions\":{\"Key\":"
+						+ "\"ANOMALY_TOTAL_IMPACT_ABSOLUTE\",\"MatchOptions\":"
+						+ "[\"GREATER_THAN_OR_EQUAL\"],\"Values\":[\"1\"]}}")
+				.build();
 
 		// `qa` không có alarm nào: nó không có Schedule (EnvConfig.QA để null cả
 		// hai) nên không có lượt chạy nền để hỏng, và lưu lượng duy nhất là smoke
@@ -192,6 +259,47 @@ public class ObservabilityStack extends Stack {
 					.treatMissingData(TreatMissingData.BREACHING)
 					.build();
 			heartbeatAlarm.addAlarmAction(new SnsAction(this.alerts));
+
+			// MỘT trang, toàn metric AWS cấp miễn phí. $3,00/dashboard/tháng (AWS
+			// Pricing API, 2026-08-11) với free tier 3 cái TÍNH THEO ORG — một cái
+			// mỗi môi trường là tiêu sạch pool, không chừa gì cho project khác.
+			// `dev`/`qa` là nơi ta LÀM VIỆC (Logs Insights, console); `prod` là nơi
+			// ta LIẾC NHÌN.
+			//
+			// KHÔNG có widget CloudFront và DynamoDB, và đó là điều đã cân nhắc chứ
+			// không phải bỏ sót. `DistributionId` sống ở `EdgeStack`, tên bảng ở
+			// `DataStack`; đưa chúng vào đây cần thêm tham số constructor và đảo thứ
+			// tự dựng stack trong `AppStage` — một thay đổi có thật, thuộc về task
+			// riêng của nó. Vế "đường đọc có sao không?" tạm thời do
+			// `function.metricErrors()` gánh: ADR-0015 §6 map 5xx của LWA thành
+			// invoke error, nên lỗi tầng ứng dụng trên đường đọc VẪN hiện ở đây.
+			// Thứ còn thiếu là lỗi tầng EDGE (origin không tới được, 403 của OAC) —
+			// đúng lớp sự cố đã ngốn trọn buổi debug Task 14.
+			// MỘT hàng, hai widget rộng 12 — không phải hai hàng. Mặc định của
+			// `GraphWidget` là `width` 6 trên lưới 24, nên để nguyên thì dashboard
+			// ra một cột hẹp bằng 1/4 màn hình và phải cuộn để thấy widget thứ hai.
+			// Một trang "liếc nhìn trong 10 giây" mà phải cuộn thì không còn là
+			// trang liếc nhìn.
+			Dashboard.Builder.create(this, "Ops")
+					.dashboardName("na-" + cfg.tagPrefix() + "-ops")
+					.widgets(List.of(List.of(
+							GraphWidget.Builder.create()
+									.title("Lambda — invocations / errors / duration")
+									.width(12)
+									.left(List.of(function.metricInvocations(),
+											function.metricErrors()))
+									.right(List.of(function.metricDuration()))
+									.build(),
+							GraphWidget.Builder.create()
+									.title("Độ sâu hàng đợi")
+									.width(12)
+									.left(List.of(
+											scheduleDlq
+													.metricApproximateNumberOfMessagesVisible(),
+											summarizeDlq
+													.metricApproximateNumberOfMessagesVisible()))
+									.build())))
+					.build();
 		}
 	}
 
