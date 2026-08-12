@@ -228,7 +228,16 @@ public class AppStack extends Stack {
 		// `AWS::Lambda::Function` không nằm trong đó), nên truyền tham chiếu là
 		// cách DUY NHẤT giữ được cả audit lẫn xoay key không cần redeploy.
 		env.put("NEWS_GEMINI_KEY_PARAMETER", keyParameterName);
-		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-2.5-flash-lite");
+		// Ghim phiên bản, KHÔNG dùng alias `gemini-flash-lite-latest`: một alias đổi
+		// model mà không có commit nào, nên độ dài đầu ra và tỉ lệ chạm trần 500 ký
+		// tự có thể đổi giữa hai lượt chạy mà không ai truy được lý do.
+		//
+		// Cái giá của việc ghim là model sẽ bị Google ngưng — và nó ĐÃ xảy ra:
+		// `gemini-2.5-flash-lite` trả 404 "no longer available to new users" trong
+		// khoảng 15:09Z–18:08Z ngày 2026-08-11, làm mọi lượt summarize hỏng cho tới
+		// khi đổi dòng này. Đổi model là một commit có diff đọc được, và lưới cảnh
+		// báo bắt được sự cố đó trong ~40 phút.
+		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)
