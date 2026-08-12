@@ -200,20 +200,31 @@ public class AppStack extends Stack {
 						+ ":alias/aws/ssm"))
 				.build());
 
-		// X-Ray OTLP endpoint. `PutSpans` chứ KHÔNG phải `PutTraceSegments`: cái sau
-		// nhận segment document của X-Ray SDK/daemon, còn OTLP endpoint authorize
-		// bằng `PutSpans` ("upload OpenTelemetry spans to AWS X-Ray" — service
-		// authorization reference). Cấp nhầm thì `cdk synth` vẫn xanh và mọi span
-		// chết bằng AccessDenied lúc runtime.
+		// X-Ray OTLP endpoint. `PutTraceSegments` — con số này đo bằng RUNTIME, không
+		// suy ra từ tài liệu, và đó là cả bài học.
 		//
-		// KHÔNG gắn managed policy `AWSXrayWriteOnlyAccess` dù tài liệu ADOT bảo
-		// thế: đọc policy thật thì nó chỉ có `PutTraceSegments`/`PutTelemetryRecords`
-		// — tức vừa THIẾU quyền ta cần vừa THỪA quyền ta không dùng.
+		// Hai trang tài liệu AWS nói khác nhau. Service authorization reference mô tả
+		// `PutSpans` là *"upload OpenTelemetry spans to AWS X-Ray"* — câu khớp hoàn
+		// hảo với đường này, và bản đầu của dòng code này đã chốt theo nó. Nhưng
+		// trang collector-less ADOT SDK (đúng kịch bản ở đây: SDK bắn thẳng vào OTLP
+		// endpoint, không collector) bảo gắn `AWSXrayWriteOnlyPolicy`, policy chỉ
+		// chứa `PutTraceSegments`. Endpoint thật phân xử:
+		//
+		//   ...FunctionRole... is not authorized to perform: xray:PutTraceSegments
+		//   because no identity-based policy allows the xray:PutTraceSegments action
+		//
+		// KHÔNG gắn managed policy đó dù tài liệu bảo thế: nó kèm
+		// `PutTelemetryRecords`, quyền của X-Ray daemon — mà ở đây không có daemon.
+		//
+		// Cấp nhầm KHÔNG có triệu chứng ở tầng nào ta kiểm được: `cdk synth` xanh,
+		// cdk-nag im, cả 57 test xanh, alarm không nổ (span rơi là chuyện của
+		// BatchSpanProcessor, không phải lỗi invoke). Chốt chặn duy nhất là một lượt
+		// export THẬT — xem plan Task 16 Step 10.
 		//
 		// `Resource: "*"` là BẮT BUỘC — X-Ray không hỗ trợ resource-level permission
 		// cho action ghi trace. Entry cdk-nag cho nó phải CÓ THAM SỐ.
 		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("xray:PutSpans"))
+				.actions(List.of("xray:PutTraceSegments"))
 				.resources(List.of("*"))
 				.build());
 

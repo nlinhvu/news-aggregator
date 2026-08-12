@@ -89,7 +89,7 @@ class CdkNagTest {
 
 			"AwsSolutions-IAM5[Resource::*]", "X-Ray KHÔNG hỗ trợ resource-level "
 					+ "permission cho action ghi trace — `Resource: \"*\"` là hình "
-					+ "thức hẹp nhất tồn tại cho `xray:PutSpans`, không phải sự cẩu "
+					+ "thức hẹp nhất tồn tại cho `xray:PutTraceSegments`, không phải sự cẩu "
 					+ "thả. Entry CÓ THAM SỐ nên nó chỉ áp cho đúng resource này; "
 					+ "ĐỪNG nới thành `AwsSolutions-IAM5` trống, vì như thế là chấp "
 					+ "nhận mọi wildcard tương lai của mọi stack.",

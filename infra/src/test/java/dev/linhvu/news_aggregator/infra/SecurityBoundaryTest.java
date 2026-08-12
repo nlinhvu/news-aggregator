@@ -1438,16 +1438,20 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * `xray:PutSpans`, KHÔNG phải `xray:PutTraceSegments`. Hai action khác nhau cho
-	 * hai đường khác nhau: `PutTraceSegments` nhận segment document của X-Ray SDK /
-	 * daemon, còn OTLP endpoint (`https://xray.<region>.amazonaws.com/v1/traces`)
-	 * authorize bằng `PutSpans` — service authorization reference ghi đúng chữ
-	 * *"upload OpenTelemetry spans to AWS X-Ray"* và trỏ thẳng trang OTLP endpoint.
+	 * `xray:PutTraceSegments` — action mà OTLP endpoint
+	 * (`https://xray.<region>.amazonaws.com/v1/traces`) THẬT SỰ authorize, đo bằng
+	 * một lượt export thật chứ không suy từ tài liệu.
 	 *
-	 * Cấp nhầm thì `cdk synth` vẫn xanh, cdk-nag vẫn im, và mọi span chết bằng
-	 * AccessDenied ở runtime. Managed policy `AWSXrayWriteOnlyAccess` mà tài liệu
-	 * ADOT bảo gắn KHÔNG chứa `PutSpans` (đã đọc policy thật) — nên gắn managed
-	 * policy đó cũng rơi vào đúng cái bẫy này.
+	 * Bản đầu của test này ghim `xray:PutSpans` và ghim rất tự tin: service
+	 * authorization reference mô tả `PutSpans` đúng chữ *"upload OpenTelemetry spans
+	 * to AWS X-Ray"*, không câu nào khớp hơn thế. Nó vẫn sai. Trang collector-less
+	 * ADOT SDK — đúng kịch bản của ta — bảo gắn `AWSXrayWriteOnlyPolicy`, thứ chỉ
+	 * chứa `PutTraceSegments`, và endpoint trả 403 nêu đích danh action đó.
+	 *
+	 * Bài học phải giữ: cả TEST NÀY lẫn `cdk synth` lẫn cdk-nag đều XANH với action
+	 * sai. Không tầng tĩnh nào phân biệt được hai chuỗi ấy — chỉ AWS phân biệt được,
+	 * và nó chỉ nói khi có span thật đi qua dây. Một test ghim hằng số chỉ chứng
+	 * minh hằng số không đổi, không chứng minh hằng số ĐÚNG.
 	 *
 	 * X-Ray không hỗ trợ resource-level permission cho action ghi trace, nên
 	 * `Resource: "*"` là bắt buộc chứ không phải cẩu thả — và chính vì thế entry
@@ -1456,7 +1460,7 @@ class SecurityBoundaryTest {
 	@Test
 	void execution_role_ghi_duoc_trace_len_xray() {
 		List<String> on = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
-				"xray:PutSpans");
+				"xray:PutTraceSegments");
 		assertEquals(List.of("*"), on,
 				"X-Ray không có resource-level permission cho action ghi trace");
 	}
@@ -1535,7 +1539,7 @@ class SecurityBoundaryTest {
 				"sqs:GetQueueUrl",             // đi kèm MỌI grant SQS, cả hai queue
 				"ssm:GetParameter",            // GeminiKeyProvider đọc SecureString
 				"kms:Decrypt",                 // giải mã SecureString bằng alias/aws/ssm
-				"xray:PutSpans"                // exporter OTLP gửi span tới X-Ray endpoint
+				"xray:PutTraceSegments"        // exporter OTLP gửi span tới X-Ray endpoint
 		);
 
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
