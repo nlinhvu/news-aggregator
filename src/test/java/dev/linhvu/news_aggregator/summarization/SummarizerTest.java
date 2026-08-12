@@ -208,4 +208,57 @@ class SummarizerTest {
 				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
 		assertThat(logEvents()).noneMatch(m -> m.contains("quota"));
 	}
+
+	/**
+	 * CHUỖI EXCEPTION THẬT của production, không phải chuỗi rút gọn mà ba test
+	 * trên dùng — và khác biệt đó từng làm nhánh 429 thành CODE CHẾT suốt Phase 3.
+	 *
+	 * `GoogleGenAiChatModel#getContentResponse` (spring-ai-google-genai 2.0.0,
+	 * dòng 913) bắt MỌI exception của Google rồi ném lại
+	 * `new RuntimeException("Failed to generate content", e)` — message là HẰNG
+	 * SỐ. `CompletableFuture#get` bọc thêm một lớp `ExecutionException`. Kết quả:
+	 *
+	 *   ExecutionException → RuntimeException("Failed to generate content") → lỗi THẬT
+	 *
+	 * `Throwable#toString` chỉ ghép tên class với message của CHÍNH nó, và message
+	 * của `ExecutionException` là `cause.toString()` — tức đúng HAI lớp trên cùng.
+	 * Lỗi thật nằm ở lớp thứ ba nên `e.toString()` không bao giờ chạm tới nó.
+	 *
+	 * Ba test trên xanh vì fake ném thẳng `IllegalStateException("429 …")`, thiếu
+	 * đúng lớp bọc mà Spring AI chèn vào. Đó là lý do một fake phải bọc ĐÚNG BẰNG
+	 * production, không phải "gần giống".
+	 *
+	 * Đo trên prod 2026-08-11/12: 15 lượt thất bại liên tiếp đều ghi
+	 * `java.util.concurrent.ExecutionException: java.lang.RuntimeException: Failed
+	 * to generate content` — không một chữ nào nói vì sao.
+	 */
+	@Test
+	void nhan_ra_429_ngay_ca_khi_spring_ai_boc_bang_message_hang_so() {
+		FakeChatModel model = new FakeChatModel("", new RuntimeException(
+				"Failed to generate content",
+				new IllegalStateException("429 RESOURCE_EXHAUSTED")));
+
+		assertThat(new Summarizer(ChatClient.builder(model).build(),
+				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+		assertThat(logEvents()).anyMatch(m -> m.contains("quota"));
+	}
+
+	/**
+	 * Điều kiện cần để CHẨN ĐOÁN được, tách khỏi việc gán nhãn ở test trên.
+	 *
+	 * Với free tier 15 RPM / 1.000 RPD dùng chung cho bốn môi trường, "model hỏng"
+	 * và "hết quota" dẫn tới hai hành động khác hẳn nhau — nhưng dòng log chỉ nói
+	 * `Failed to generate content` thì không phân biệt được, và người trực phải
+	 * chờ lượt sweep kế tiếp (6 giờ) để đoán tiếp.
+	 */
+	@Test
+	void log_giu_nguyen_nhan_goc_chu_khong_chi_lop_boc() {
+		FakeChatModel model = new FakeChatModel("", new RuntimeException(
+				"Failed to generate content",
+				new IllegalStateException("503 UNAVAILABLE model overloaded")));
+
+		assertThat(new Summarizer(ChatClient.builder(model).build(),
+				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+		assertThat(logEvents()).anyMatch(m -> m.contains("503 UNAVAILABLE"));
+	}
 }

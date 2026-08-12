@@ -101,18 +101,21 @@ class Summarizer {
 			// lớn chạm trần RPM là chuyện có thật.
 			//
 			// Nhận diện bằng chuỗi vì Spring AI bọc lỗi provider vào nhiều lớp
-			// exception khác nhau và không expose status code ổn định; ở đây còn
-			// thêm một lớp `ExecutionException` của `CompletableFuture`. Thô, nhưng
+			// exception khác nhau và không expose status code ổn định. Thô, nhưng
 			// nó có test canh cả hai chiều — và chiều PHỦ ĐỊNH mới là chiều quan
 			// trọng: gán nhãn quota cho một lỗi không phải quota sẽ dẫn người vận
 			// hành đi hạ max-per-run trong khi thứ hỏng nằm ở chỗ khác.
-			String detail = e.toString();
+			//
+			// Chuỗi phải là CẢ chain, không phải `e.toString()`: xem
+			// `chuoiNguyenNhan`.
+			String detail = chuoiNguyenNhan(e);
 			if (detail.contains("429") || detail.contains("RESOURCE_EXHAUSTED")) {
 				log.warn("model từ chối vì quota cho article {}: {}",
-						article.articleId(), detail);
+						article.articleId(), rutGon(detail));
 			}
 			else {
-				log.warn("model hỏng cho article {}: {}", article.articleId(), detail);
+				log.warn("model hỏng cho article {}: {}",
+						article.articleId(), rutGon(detail));
 			}
 			return Optional.empty();
 		}
@@ -134,4 +137,42 @@ class Summarizer {
 		}
 		return Optional.of(trimmed);
 	}
+
+	/**
+	 * `Throwable#toString` chỉ ghép tên class với message của CHÍNH nó, và
+	 * message của `ExecutionException` là `cause.toString()` — nên `e.toString()`
+	 * nhìn thấy đúng HAI lớp trên cùng. Với Spring AI thì hai lớp đó là
+	 * `ExecutionException` và một `RuntimeException` có message HẰNG SỐ
+	 * `"Failed to generate content"` mà `GoogleGenAiChatModel#getContentResponse`
+	 * chèn vào; lỗi thật của Google nằm ở lớp thứ ba trở đi.
+	 *
+	 * Hệ quả trước khi có hàm này — đo trên prod 2026-08-11/12: 15 lượt thất bại
+	 * ghi đúng một dòng không có thông tin nào, và nhánh 429 ở trên là CODE CHẾT
+	 * vì chuỗi nó khớp không bao giờ xuất hiện.
+	 *
+	 * `MAX_LOP` chặn cả chuỗi cause quá dài lẫn cause tạo vòng. `MAX_KY_TU` chặn
+	 * một message khổng lồ (response JSON của provider chẳng hạn) đổ vào log —
+	 * cắt SAU khi phân loại xong, để một mã lỗi nằm sâu không bị cắt mất trước
+	 * khi kịp đọc.
+	 */
+	private static String chuoiNguyenNhan(Throwable e) {
+		StringBuilder chuoi = new StringBuilder();
+		Throwable t = e;
+		for (int lop = 0; t != null && lop < MAX_LOP; lop++, t = t.getCause()) {
+			if (lop > 0) {
+				chuoi.append(" ← ");
+			}
+			chuoi.append(t);
+		}
+		return chuoi.toString();
+	}
+
+	private static String rutGon(String detail) {
+		return detail.length() <= MAX_KY_TU ? detail
+				: detail.substring(0, MAX_KY_TU) + "…";
+	}
+
+	private static final int MAX_LOP = 5;
+
+	private static final int MAX_KY_TU = 600;
 }
