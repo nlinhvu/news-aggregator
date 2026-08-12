@@ -200,6 +200,23 @@ public class AppStack extends Stack {
 						+ ":alias/aws/ssm"))
 				.build());
 
+		// X-Ray OTLP endpoint. `PutSpans` chứ KHÔNG phải `PutTraceSegments`: cái sau
+		// nhận segment document của X-Ray SDK/daemon, còn OTLP endpoint authorize
+		// bằng `PutSpans` ("upload OpenTelemetry spans to AWS X-Ray" — service
+		// authorization reference). Cấp nhầm thì `cdk synth` vẫn xanh và mọi span
+		// chết bằng AccessDenied lúc runtime.
+		//
+		// KHÔNG gắn managed policy `AWSXrayWriteOnlyAccess` dù tài liệu ADOT bảo
+		// thế: đọc policy thật thì nó chỉ có `PutTraceSegments`/`PutTelemetryRecords`
+		// — tức vừa THIẾU quyền ta cần vừa THỪA quyền ta không dùng.
+		//
+		// `Resource: "*"` là BẮT BUỘC — X-Ray không hỗ trợ resource-level permission
+		// cho action ghi trace. Entry cdk-nag cho nó phải CÓ THAM SỐ.
+		executionRole.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("xray:PutSpans"))
+				.resources(List.of("*"))
+				.build());
+
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws");
 		env.put("NEWS_ENV", cfg.tagPrefix());
@@ -238,6 +255,27 @@ public class AppStack extends Stack {
 		// khi đổi dòng này. Đổi model là một commit có diff đọc được, và lưới cảnh
 		// báo bắt được sự cố đó trong ~40 phút.
 		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
+		// Tên service trong X-Ray. Boot 4.1 KHÔNG map biến này qua
+		// `OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`; đường vào là
+		// `OpenTelemetryResourceAttributes`, vốn đọc thẳng `OTEL_SERVICE_NAME` từ
+		// env (fallback `spring.application.name`). Hai đường cùng ra
+		// `news-aggregator`, nhưng viết ra ở đây thì tên service không đổi theo một
+		// lần sửa `spring.application.name` bên repo app.
+		env.put("OTEL_SERVICE_NAME", "news-aggregator");
+		// TRACES_ENDPOINT chứ KHÔNG phải `OTEL_EXPORTER_OTLP_ENDPOINT` dạng chung:
+		// Boot 4.1 map biến dạng chung vào CẢ BA endpoint trace/metric/log cùng
+		// lúc, mà X-Ray chỉ nhận trace. Task 14 đã tắt tường minh export metric và
+		// log trong `application.yaml` nên biến dạng chung cũng không gây hại hôm
+		// nay — nhưng biến signal-specific thì không phụ thuộc vào hai dòng
+		// `enabled: false` đó còn sống hay không, và nó cũng là biến mà chính tài
+		// liệu X-Ray OTLP dùng.
+		//
+		// ĐIỀU KIỆN TIÊN QUYẾT ngoài repo: Transaction Search phải BẬT ở account
+		// (`aws xray get-trace-segment-destination` trả `CloudWatchLogs`). Không có
+		// nó thì endpoint từ chối span, và triệu chứng là X-Ray rỗng chứ không phải
+		// một lỗi deploy nào. Lệnh bật nằm ở runbook Phase 4.
+		env.put("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+				"https://xray." + cfg.region() + ".amazonaws.com/v1/traces");
 
 		this.function = Function.Builder.create(this, "Function")
 				.role(executionRole)

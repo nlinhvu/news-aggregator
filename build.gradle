@@ -60,6 +60,11 @@ dependencies {
 	// ADR-0016 §1), cùng dòng họ ràng buộc đã loại SnapStart ở ADR-0008. X-Ray có
 	// OTLP endpoint nên export thẳng, không cần collector.
 	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
+	// CHỈ để compile được `OtlpHttpSpanExporterBuilderCustomizer` — chữ ký của nó
+	// nhận `OtlpHttpSpanExporterBuilder`, mà starter chỉ kéo jar này vào RUNTIME
+	// classpath. Không thêm gì vào image: artifact đã có sẵn ở đó. Version do BOM
+	// của Boot quản.
+	implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 //	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'

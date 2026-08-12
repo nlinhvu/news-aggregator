@@ -1438,6 +1438,63 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * `xray:PutSpans`, KHÔNG phải `xray:PutTraceSegments`. Hai action khác nhau cho
+	 * hai đường khác nhau: `PutTraceSegments` nhận segment document của X-Ray SDK /
+	 * daemon, còn OTLP endpoint (`https://xray.<region>.amazonaws.com/v1/traces`)
+	 * authorize bằng `PutSpans` — service authorization reference ghi đúng chữ
+	 * *"upload OpenTelemetry spans to AWS X-Ray"* và trỏ thẳng trang OTLP endpoint.
+	 *
+	 * Cấp nhầm thì `cdk synth` vẫn xanh, cdk-nag vẫn im, và mọi span chết bằng
+	 * AccessDenied ở runtime. Managed policy `AWSXrayWriteOnlyAccess` mà tài liệu
+	 * ADOT bảo gắn KHÔNG chứa `PutSpans` (đã đọc policy thật) — nên gắn managed
+	 * policy đó cũng rơi vào đúng cái bẫy này.
+	 *
+	 * X-Ray không hỗ trợ resource-level permission cho action ghi trace, nên
+	 * `Resource: "*"` là bắt buộc chứ không phải cẩu thả — và chính vì thế entry
+	 * cdk-nag phải CÓ THAM SỐ, không được để trống.
+	 */
+	@Test
+	void execution_role_ghi_duoc_trace_len_xray() {
+		List<String> on = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
+				"xray:PutSpans");
+		assertEquals(List.of("*"), on,
+				"X-Ray không có resource-level permission cho action ghi trace");
+	}
+
+	/**
+	 * Endpoint và service name đi qua env var chứ không hằng số trong code: local
+	 * trỏ `otel-lgtm`, prod trỏ X-Ray. CÙNG bộ instrumentation, khác exporter —
+	 * đúng chữ master §8.2.
+	 *
+	 * Tên biến là `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` — bản có SIGNAL. Biến dạng
+	 * chung `OTEL_EXPORTER_OTLP_ENDPOINT` được Boot 4.1 map vào cả ba endpoint
+	 * trace/metric/log cùng lúc, mà X-Ray chỉ nhận trace; đường metric và log khi
+	 * đó chỉ im lặng nhờ hai dòng `enabled: false` trong `application.yaml`, tức
+	 * một sửa đổi vô hại bên repo app cũng đủ làm nó gửi rác lên X-Ray.
+	 */
+	@Test
+	void env_var_otlp_tro_ve_xray() {
+		appStack().hasResourceProperties("AWS::Lambda::Function",
+				Match.objectLike(Map.of("Environment", Map.of("Variables",
+						Match.objectLike(Map.of(
+								"OTEL_SERVICE_NAME", "news-aggregator",
+								"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+								"https://xray.us-east-1.amazonaws.com/v1/traces"))))));
+	}
+
+	/**
+	 * Phủ định của test trên, và nó canh một chế độ hỏng KHÔNG có triệu chứng: biến
+	 * dạng chung vẫn làm trace chạy đúng, nên không ai phát hiện ra cho tới lúc đọc
+	 * hoá đơn hoặc tới lúc ai đó gỡ `enabled: false` bên app.
+	 */
+	@Test
+	void khong_dung_bien_otlp_dang_chung() {
+		String env = appStack().findResources("AWS::Lambda::Function").toString();
+		assertFalse(env.contains("OTEL_EXPORTER_OTLP_ENDPOINT"),
+				"dùng OTEL_EXPORTER_OTLP_TRACES_ENDPOINT — bản có signal");
+	}
+
+	/**
 	 * TẬP ĐÓNG — trả nợ Phase 3 §20B #2.
 	 *
 	 * Mọi test khác trong file này hỏi *"quyền X có bị khoá đúng phạm vi không?"*.
@@ -1477,7 +1534,8 @@ class SecurityBoundaryTest {
 				"sqs:GetQueueAttributes",      // đi kèm MỌI grant SQS, cả hai queue
 				"sqs:GetQueueUrl",             // đi kèm MỌI grant SQS, cả hai queue
 				"ssm:GetParameter",            // GeminiKeyProvider đọc SecureString
-				"kms:Decrypt"                  // giải mã SecureString bằng alias/aws/ssm
+				"kms:Decrypt",                 // giải mã SecureString bằng alias/aws/ssm
+				"xray:PutSpans"                // exporter OTLP gửi span tới X-Ray endpoint
 		);
 
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {

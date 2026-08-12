@@ -4,8 +4,11 @@ import java.util.concurrent.TimeUnit;
 
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import jakarta.servlet.Filter;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.regions.providers.AwsRegionProvider;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.otlp.OtlpHttpSpanExporterBuilderCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -66,5 +69,22 @@ public class ObservabilityConfig {
 		// chúng cũng nằm trong lô được flush.
 		registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
 		return registration;
+	}
+
+	/**
+	 * Cắm bộ gửi có ký SigV4 vào exporter OTLP của Boot. Không có bean này thì
+	 * exporter dùng bộ gửi OkHttp mặc định, và mọi request tới X-Ray trả 403 —
+	 * `BatchSpanProcessor` chỉ ghi một dòng WARN rồi vứt lô span, nên triệu chứng
+	 * ở phía người đọc là X-Ray RỖNG chứ không phải một lỗi nào.
+	 *
+	 * Bean nhận `ObjectProvider` cùng lý do như filter ở trên: khi
+	 * `management.opentelemetry.enabled=false` (ADR-0016 Option B) thì không có
+	 * exporter nào để tuỳ biến, nhưng bean này vẫn được dựng.
+	 */
+	@Bean
+	OtlpHttpSpanExporterBuilderCustomizer sigV4SpanSender(AwsCredentialsProvider credentials,
+			AwsRegionProvider regions) {
+		SigV4HttpSenderProvider sender = new SigV4HttpSenderProvider(credentials, regions);
+		return (builder) -> builder.setComponentLoader(sender.componentLoader());
 	}
 }

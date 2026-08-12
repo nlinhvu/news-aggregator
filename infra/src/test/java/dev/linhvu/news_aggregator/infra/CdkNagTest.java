@@ -87,6 +87,13 @@ class CdkNagTest {
 					+ "MỘT function; function này chưa có alias hay version nào. Entry có "
 					+ "tham số nên nó chỉ áp cho đúng resource này.",
 
+			"AwsSolutions-IAM5[Resource::*]", "X-Ray KHÔNG hỗ trợ resource-level "
+					+ "permission cho action ghi trace — `Resource: \"*\"` là hình "
+					+ "thức hẹp nhất tồn tại cho `xray:PutSpans`, không phải sự cẩu "
+					+ "thả. Entry CÓ THAM SỐ nên nó chỉ áp cho đúng resource này; "
+					+ "ĐỪNG nới thành `AwsSolutions-IAM5` trống, vì như thế là chấp "
+					+ "nhận mọi wildcard tương lai của mọi stack.",
+
 			// Hash 48E1059F là logical id CDK sinh cho `EdgeStack/SpaBucket`. Đổi tên
 			// construct đó sẽ làm entry này lệch và test đỏ — khi ấy đọc tên rule mới
 			// trong thông báo lỗi rồi cập nhật lại, ĐỪNG nới thành `AwsSolutions-IAM5`
