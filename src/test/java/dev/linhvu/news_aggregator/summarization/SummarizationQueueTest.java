@@ -1,11 +1,13 @@
 package dev.linhvu.news_aggregator.summarization;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.catalog.events.ArticleAdded;
 import dev.linhvu.news_aggregator.platform.NewsFeature;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import org.togglz.core.manager.FeatureManager;
 import org.togglz.junit5.AllEnabled;
 import org.togglz.testing.TestFeatureManagerProvider;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.PurgeQueueRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 
@@ -23,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 
+import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
@@ -50,6 +54,9 @@ class SummarizationQueueTest {
 
 	@Autowired
 	ApplicationEventPublisher publisher;
+
+	@Autowired
+	Tracer tracer;
 
 	@Value("${news.summarization.queue-url}")
 	String queueUrl;
@@ -99,6 +106,45 @@ class SummarizationQueueTest {
 				.waitTimeSeconds(1).build()).join().messages().size();
 	}
 
+	/**
+	 * `messageAttributeNames("All")` là BẮT BUỘC: mặc định `ReceiveMessage` KHÔNG
+	 * trả attribute nào cả. Thiếu nó thì mọi assertion về `traceparent` đỏ y hệt
+	 * như khi producer quên ghi — hai nguyên nhân rất khác nhau, cùng một triệu
+	 * chứng.
+	 */
+	private Message nhanMotMessage() {
+		List<Message> messages = sqs.receiveMessage(ReceiveMessageRequest.builder()
+				.queueUrl(queueUrl).maxNumberOfMessages(10)
+				.messageAttributeNames("All")
+				.waitTimeSeconds(1).build()).join().messages();
+		assertThat(messages).as("producer phải gửi đúng một message").hasSize(1);
+		return messages.getFirst();
+	}
+
+	/** Dựng lại hình dạng event Lambda giao cho handler, từ message SDK đọc được. */
+	private static Map<String, Object> nhuLambdaGiao(Message message) {
+		return Map.of("Records", List.of(Map.of(
+				"messageId", message.messageId(),
+				"eventSource", "aws:sqs",
+				"body", message.body(),
+				"messageAttributes", message.messageAttributes().entrySet().stream()
+						.collect(toMap(Map.Entry::getKey, e -> Map.of(
+								"stringValue", e.getValue().stringValue(),
+								"dataType", e.getValue().dataType()))))));
+	}
+
+	/** Trả về `traceId` của span bao quanh — thứ phải xuất hiện trong attribute. */
+	private String enqueueTrongMotSpan(String articleId) {
+		var span = tracer.nextSpan().name("ingest");
+		try (var ignored = tracer.withSpan(span.start())) {
+			queue.enqueue(articleId);
+			return span.context().traceId();
+		}
+		finally {
+			span.end();
+		}
+	}
+
 	@Test
 	@AllEnabled(NewsFeature.class)
 	void gui_message_khi_flag_bat() {
@@ -123,6 +169,65 @@ class SummarizationQueueTest {
 				"https://a.test/moi", "Tiêu đề", "2026-08-10T10:00:00Z"));
 
 		assertThat(soMessageTrongQueue()).isEqualTo(1);
+	}
+
+	/**
+	 * BODY KHÔNG ĐƯỢC ĐỔI. Phase 3 §17 #12 chốt nó chỉ chứa `articleId` vì *"id là
+	 * thứ duy nhất không bao giờ cũ"* — nhét `traceparent` vào body là mở lại
+	 * quyết định đó cho một nhu cầu không thuộc nghiệp vụ.
+	 */
+	@Test
+	@AllEnabled(NewsFeature.class)
+	void body_van_chi_chua_article_id() {
+		enqueueTrongMotSpan("abc");
+
+		assertThat(nhanMotMessage().body()).isEqualTo("{\"articleId\":\"abc\"}");
+	}
+
+	@Test
+	@AllEnabled(NewsFeature.class)
+	void ghi_traceparent_khi_dang_co_span() {
+		String traceId = enqueueTrongMotSpan("abc");
+
+		Message message = nhanMotMessage();
+		assertThat(message.messageAttributes()).containsKey("traceparent");
+		assertThat(message.messageAttributes().get("traceparent").stringValue())
+				.contains(traceId);
+	}
+
+	/**
+	 * Attribute chỉ được ghi khi ĐANG CÓ span. Enqueue ngoài mọi span — chẳng hạn
+	 * một lệnh chạy tay — không được sinh ra một `traceparent` vô nghĩa trỏ vào
+	 * hư vô.
+	 */
+	@Test
+	@AllEnabled(NewsFeature.class)
+	void khong_co_span_thi_khong_ghi_traceparent() {
+		queue.enqueue("abc");
+
+		assertThat(nhanMotMessage().messageAttributes()).isEmpty();
+	}
+
+	/**
+	 * Chỗ DUY NHẤT kiểm được cả hai chiều của hợp đồng cùng lúc: producer ghi
+	 * (Task 20) và consumer đọc (Task 19), qua một SQS thật.
+	 *
+	 * Hai đầu nằm ở hai lớp không thấy nhau, nối bằng một chuỗi tên — `traceparent`
+	 * và `stringValue`. Gõ lệch một chữ ở một đầu thì cả `SqsBatchTest` lẫn
+	 * `ghi_traceparent_khi_dang_co_span` vẫn xanh, vì mỗi bên tự nhất quán với
+	 * fixture của chính mình.
+	 */
+	@Test
+	@AllEnabled(NewsFeature.class)
+	void consumer_doc_lai_dung_thu_producer_ghi() {
+		String traceId = enqueueTrongMotSpan("abc");
+
+		List<SqsBatch.Message> parsed = SqsBatch.parse(nhuLambdaGiao(nhanMotMessage()));
+
+		assertThat(parsed).singleElement().satisfies(m -> {
+			assertThat(m.articleId()).isEqualTo("abc");
+			assertThat(m.traceparent()).contains(traceId);
+		});
 	}
 
 	/**

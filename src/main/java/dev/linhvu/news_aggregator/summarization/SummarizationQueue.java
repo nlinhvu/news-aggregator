@@ -1,11 +1,16 @@
 package dev.linhvu.news_aggregator.summarization;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import dev.linhvu.news_aggregator.platform.NewsFeature;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -31,15 +36,22 @@ class SummarizationQueue {
 
 	private final SummarizationRunMetrics metrics;
 
+	private final Tracer tracer;
+
+	private final Propagator propagator;
+
 	private final String queueUrl;
 
 	private final int maxPerRun;
 
 	SummarizationQueue(SqsAsyncClient sqs, SummarizationRunMetrics metrics,
+			Tracer tracer, Propagator propagator,
 			@Value("${news.summarization.queue-url}") String queueUrl,
 			@Value("${news.summarization.max-per-run}") int maxPerRun) {
 		this.sqs = sqs;
 		this.metrics = metrics;
+		this.tracer = tracer;
+		this.propagator = propagator;
 		this.queueUrl = queueUrl;
 		this.maxPerRun = maxPerRun;
 	}
@@ -65,6 +77,23 @@ class SummarizationQueue {
 			return false;
 		}
 
+		Map<String, MessageAttributeValue> attributes = new HashMap<>();
+		// W3C Trace Context sang ranh giới PROCESS. Consumer là một invoke KHÁC,
+		// có thể còn là execution environment khác, nên ThreadLocal không với tới —
+		// và `spring-modulith-observability` cũng không, vì nó bọc bean trong JVM
+		// (ADR-0016 §6).
+		//
+		// ATTRIBUTE chứ không body: body giữ nguyên đúng `{articleId}` như
+		// Phase 3 §17 #12 đã chốt.
+		//
+		// Không có span ⇒ `context()` trả `null` ⇒ `inject` không ghi gì và
+		// `attributes` rỗng. Đó là hành vi đúng: một `traceparent` trỏ vào hư vô
+		// còn tệ hơn không có.
+		propagator.inject(tracer.currentTraceContext().context(), attributes,
+				(carrier, key, value) -> carrier.put(key,
+						MessageAttributeValue.builder()
+								.dataType("String").stringValue(value).build()));
+
 		// `.join()` BẮT BUỘC, không phải chuyện phong cách: bỏ nó thì lời gọi chỉ
 		// là một CompletableFuture chưa hoàn thành, và Lambda ĐÓNG BĂNG execution
 		// environment ngay khi handler trả về. Message có thể không bao giờ rời
@@ -75,6 +104,7 @@ class SummarizationQueue {
 				// nó sẽ CŨ nếu article được sửa giữa chừng — id là thứ duy nhất
 				// không bao giờ cũ (TDD §17 #12).
 				.messageBody("{\"articleId\":\"%s\"}".formatted(articleId))
+				.messageAttributes(attributes)
 				.build()).join();
 		metrics.countEnqueued();
 		return true;
