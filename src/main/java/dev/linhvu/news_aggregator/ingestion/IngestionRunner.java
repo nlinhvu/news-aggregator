@@ -10,6 +10,7 @@ import java.util.concurrent.Semaphore;
 
 import dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered;
 import dev.linhvu.news_aggregator.platform.IngestionRunMetrics;
+import dev.linhvu.news_aggregator.platform.TracePropagation;
 import dev.linhvu.news_aggregator.sources.SourceCatalog;
 import dev.linhvu.news_aggregator.sources.api.SourceView;
 import org.slf4j.Logger;
@@ -32,16 +33,19 @@ class IngestionRunner {
 	private final FeedParser parser;
 	private final ApplicationEventPublisher events;
 	private final IngestionRunMetrics metrics;
+	private final TracePropagation tracePropagation;
 	private final int maxConcurrency;
 
 	IngestionRunner(SourceCatalog sources, FeedFetcher fetcher, FeedParser parser,
 			ApplicationEventPublisher events, IngestionRunMetrics metrics,
+			TracePropagation tracePropagation,
 			@Value("${news.ingestion.max-concurrency}") int maxConcurrency) {
 		this.sources = sources;
 		this.fetcher = fetcher;
 		this.parser = parser;
 		this.events = events;
 		this.metrics = metrics;
+		this.tracePropagation = tracePropagation;
 		this.maxConcurrency = maxConcurrency;
 	}
 
@@ -90,7 +94,12 @@ class IngestionRunner {
 	 */
 	private List<Integer> fetchAll(List<SourceView> enabled) {
 		Semaphore permits = new Semaphore(maxConcurrency);
-		try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+		// `wrap` là thứ giữ `trace_id` sống qua ranh giới thread. Bỏ nó ra thì
+		// mọi dòng log trong khối này mất trace id — kể cả `"nguồn … thất bại"`,
+		// dòng quan trọng nhất của lớp này. Không có gì đỏ ở tầng compile, và
+		// `log_trong_vong_fetch_song_song_mang_cung_trace_id` là chốt chặn duy nhất.
+		try (ExecutorService executor = tracePropagation.wrap(
+				Executors.newVirtualThreadPerTaskExecutor())) {
 			List<Future<Integer>> futures = enabled.stream()
 					.map(source -> executor.submit(() -> ingestOneIsolated(source, permits)))
 					.toList();

@@ -10,14 +10,21 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered;
 import dev.linhvu.news_aggregator.platform.IngestionRunMetrics;
+import dev.linhvu.news_aggregator.platform.TracePropagation;
 import dev.linhvu.news_aggregator.sources.SourceCatalog;
 import dev.linhvu.news_aggregator.sources.api.SourceView;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,7 +44,8 @@ class IngestionRunnerTest {
 	private final IngestionRunMetrics metrics = new IngestionRunMetrics();
 
 	private final IngestionRunner runner =
-			new IngestionRunner(catalog, fetcher, parser, events, metrics, 8);
+			new IngestionRunner(catalog, fetcher, parser, events, metrics,
+					new TracePropagation(), 8);
 
 	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
@@ -55,6 +63,11 @@ class IngestionRunnerTest {
 
 	private List<String> logEvents() {
 		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+	}
+
+	/** Đúng thứ `logging.structured.format.console: ecs` đọc để in trường `trace_id`. */
+	private List<String> traceIdsOfLogEvents() {
+		return logs.list.stream().map(e -> e.getMDCPropertyMap().get("traceId")).toList();
 	}
 
 	@Test
@@ -173,7 +186,8 @@ class IngestionRunnerTest {
 	@Test
 	void semaphore_chan_tren_so_luot_song_song() {
 		IngestionRunner tran2 =
-				new IngestionRunner(catalog, fetcher, parser, events, metrics, 2);
+				new IngestionRunner(catalog, fetcher, parser, events, metrics,
+						new TracePropagation(), 2);
 		AtomicInteger dangChay = new AtomicInteger();
 		AtomicInteger dinh = new AtomicInteger();
 		given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b"),
@@ -244,6 +258,73 @@ class IngestionRunnerTest {
 				.as("metric filter của heartbeat khớp tiền tố này — xem "
 						+ "ObservabilityStack.ingestHeartbeat")
 				.anyMatch(m -> m.startsWith("ingestion run xong:"));
+	}
+
+	/**
+	 * `Executors.newVirtualThreadPerTaskExecutor()` ở `IngestionRunner` là executor
+	 * TỰ VIẾT, không do Spring quản — nên `ContextPropagatingTaskDecorator` mà Boot
+	 * auto-config gắn cho `TaskExecutor` KHÔNG chạm tới nó.
+	 *
+	 * Hệ quả: mọi dòng log sinh bên trong vòng fetch song song — kể cả
+	 * `"nguồn {} thất bại"`, dòng log quan trọng nhất của `ingestion` — mất
+	 * `trace_id`. Vi phạm thẳng master §8.2 (*"mọi dòng log mang trace_id"*), và
+	 * mất đúng ở chỗ hay hỏng nhất.
+	 *
+	 * `spring-modulith-observability` KHÔNG giải được chuyện này: đây là hop TRONG
+	 * LÒNG một module, không qua ranh giới module nào. Xem ADR-0016 §3.
+	 *
+	 * Là `@SpringBootTest` chứ không phải unit test thuần vì cần `ObservationRegistry`
+	 * THẬT — xem lý do ở `log_trong_vong_fetch_song_song_mang_cung_trace_id`. Phần
+	 * còn lại của lớp ngoài vẫn chạy không cần Spring.
+	 */
+	@Nested
+	@SpringBootTest
+	class TraceContextSangVirtualThread {
+
+		@Autowired
+		ObservationRegistry observations;
+
+		@Autowired
+		Tracer tracer;
+
+		/**
+		 * Dựng context bằng OBSERVATION chứ không bằng `tracer.withSpan(...)`:
+		 * `ObservationThreadLocalAccessor` là `ThreadLocalAccessor` DUY NHẤT được
+		 * đăng ký (đo bằng `ContextRegistry.getInstance().getThreadLocalAccessors()`
+		 * — Boot 4.1 không đăng ký cái nào cho span trần), nên snapshot chụp được
+		 * observation mà KHÔNG chụp được một span mở tay. Test dựng bằng span trần
+		 * sẽ đỏ y hệt nhau trước và sau khi sửa, tức không đo gì cả.
+		 *
+		 * Đây cũng là hình dạng thật của production: mọi lượt chạy vào bằng
+		 * `POST /events`, nên `ServerHttpObservationFilter` đã mở observation trước
+		 * khi tới `IngestionRunner`.
+		 */
+		@Test
+		void log_trong_vong_fetch_song_song_mang_cung_trace_id() {
+			given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b")));
+			given(fetcher.fetch(source("a"))).willThrow(new RuntimeException("hỏng"));
+			given(fetcher.fetch(source("b"))).willReturn(body());
+			given(parser.parse(any())).willReturn(List.of());
+
+			String traceIdNgoai;
+			Observation ingest = Observation.start("ingest", observations);
+			try (var ignored = ingest.openScope()) {
+				traceIdNgoai = tracer.currentSpan().context().traceId();
+				runner.run();   // một nguồn cố ý hỏng ⇒ sinh dòng log "nguồn … thất bại"
+			}
+			finally {
+				ingest.stop();
+			}
+
+			assertThat(logEvents())
+					.as("dòng log sinh TRONG virtual thread phải thật sự có mặt, nếu "
+							+ "không assertion dưới chỉ soi các dòng của thread gọi")
+					.anyMatch(m -> m.startsWith("nguồn a thất bại"));
+			assertThat(traceIdsOfLogEvents())
+					.as("mọi dòng log của lượt chạy phải mang trace_id của lượt đó")
+					.isNotEmpty()
+					.allMatch(traceIdNgoai::equals);
+		}
 	}
 
 	private static FetchOutcome.Body body() {
