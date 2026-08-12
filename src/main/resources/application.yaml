@@ -44,6 +44,16 @@ management:
       # là lựa chọn đúng; ở mọi khối lượng lớn hơn nó SAI, và tài liệu ADOT gọi
       # mặc định `parentbased_always_on` là bẫy hoá đơn ("up to 20x higher
       # ingestion volume"). Ngưỡng hạ xuống 5–10%: ~8.000 trace/tháng.
+      #
+      # Đây là tầng lấy mẫu THỨ NHẤT trong hai tầng, và cả hai đều viết là `1.0`
+      # với ý nghĩa lệch nhau hai bậc độ lớn:
+      #   ở đây          `1.0` = 100%  (tỉ lệ)   ⇒ span vào `aws/spans`, Transaction
+      #                                            Search thấy TẤT CẢ
+      #   indexing rule  `1.0` = 1%    (phần trăm) ⇒ trace summary, X-Ray → Traces
+      #                                            và service map chỉ thấy 1%
+      # Nên "có span mà X-Ray Traces rỗng" là số học, không phải hỏng hóc — xem plan
+      # Phase 4 Task 16 Step 11. Hạ giá trị dưới đây là siết tầng MỘT; nó không đụng
+      # tới tầng hai, và ngược lại.
       probability: 1.0
 
 news:
