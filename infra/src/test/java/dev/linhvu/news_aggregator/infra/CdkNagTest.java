@@ -49,17 +49,32 @@ class CdkNagTest {
 			"AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
 					+ "tiền theo tháng và là chi phí cố định.",
 
-			"AwsSolutions-CFR3", "Access logging của CloudFront thuộc scope Phase 4 "
-					+ "(Observability & Cost Governance, master §7). Phase 1 chỉ quan sát "
-					+ "qua CloudWatch log của Lambda, retention 14 ngày.",
+			"AwsSolutions-CFR3", "Đã cân ở Phase 4 và LOẠI — đây là kết luận chung "
+					+ "cuộc, không phải hoãn tiếp. Access log của CloudFront trả lời "
+					+ "được per-URL, per-referrer, per-IP và chi tiết cache hit/miss; "
+					+ "site này có ĐÚNG MỘT trang và không có URL riêng cho từng "
+					+ "article, nên nó sẽ chỉ nói: request tới `/`, `/assets/*`, "
+					+ "`/api/articles`, `/api/health` — bốn dòng đã biết trước. Còn "
+					+ "*bao nhiêu người đọc* và *có ai đang quật site* thì `Requests`, "
+					+ "`4xxErrorRate`, `5xxErrorRate` của CloudFront đã cấp MIỄN PHÍ. "
+					+ "Cái giá không phải tiền mà là một bucket TÍCH LUỸ DỮ LIỆU VĨNH "
+					+ "VIỄN — đúng lý do đã dùng để suppress AwsSolutions-S1 ở ngay "
+					+ "trên trong chính bảng này; bật CFR3 mà vẫn giữ S1 là tự mâu "
+					+ "thuẫn. NGƯỠNG XEM LẠI: khi có URL riêng cho từng article (trang "
+					+ "chi tiết) — master §7 KHÔNG có phase nào hứa việc đó. Xem TDD "
+					+ "Phase 4 §17 #9.",
 
-			"AwsSolutions-SQS3", "Queue `IngestDlq` CHÍNH LÀ dead-letter queue của "
-					+ "IngestSchedule — cấp DLQ cho một DLQ là đệ quy vô hạn, và cdk-nag "
-					+ "3.x không có cách đánh dấu 'đây là DLQ'. Rule KHÔNG tham số nên "
-					+ "entry này nuốt luôn SQS3 của MỌI queue thêm sau vào bất kỳ stack "
-					+ "nào — Phase 3 sẽ thêm queue thật, và khi ấy phải tự viết test "
-					+ "canh DLQ cho nó. Chốt chặn hiện tại cho đường ingestion là "
-					+ "SecurityBoundaryTest#schedule_gioi_han_retry_va_co_dlq.",
+			"AwsSolutions-SQS3", "Hai queue bị rule này chạm — `IngestDlq` và "
+					+ "`SummarizeDlq` — và cả hai CHÍNH LÀ dead-letter queue: cấp DLQ "
+					+ "cho một DLQ là đệ quy vô hạn, còn cdk-nag 3.x không có cách đánh "
+					+ "dấu 'đây là DLQ'. `SummarizeQueue` KHÔNG nằm trong số đó, nó có "
+					+ "redrive policy thật. Rule KHÔNG tham số nên entry này nuốt luôn "
+					+ "SQS3 của MỌI queue thêm sau vào bất kỳ stack nào, kể cả queue "
+					+ "làm việc quên mất DLQ — mỗi queue mới phải tự mang theo một test "
+					+ "canh DLQ. Chốt chặn hiện có: "
+					+ "SecurityBoundaryTest#schedule_gioi_han_retry_va_co_dlq và "
+					+ "#sweep_schedule_co_retry_va_dlq cho ingestion, "
+					+ "#queue_summarize_co_dlq_voi_max_receive_count_3 cho summarization.",
 
 			// Hash 76856677 là logical id CDK sinh cho `AppStack/Function`. Cùng loại
 			// footgun với entry SpaBucket bên dưới: đổi tên construct đó là entry lệch.
