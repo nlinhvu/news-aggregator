@@ -4,13 +4,19 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 import dev.linhvu.news_aggregator.summarization.events.ArticleSummarized;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,8 +35,12 @@ class SummarizeHandlerTest {
 
 	private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-	private final SummarizeHandler handler =
-			new SummarizeHandler(catalog, summarizer, events, 3);
+	// `NOOP` chứ không phải mock: mọi test ở lớp ngoài đo hành vi batch, và một
+	// `Propagator` mock phải stub cả chuỗi `extract().name().start()` mới chạy
+	// được — công sức đó không mua thêm assertion nào. Phần tracing THẬT nằm ở
+	// `NoiTraceQuaSqs`.
+	private final SummarizeHandler handler = new SummarizeHandler(catalog, summarizer,
+			events, Tracer.NOOP, Propagator.NOOP, 3);
 
 	private static Map<String, Object> sqsPayload(String... articleIds) {
 		return Map.of("Records", Arrays.stream(articleIds)
@@ -215,5 +225,74 @@ class SummarizeHandlerTest {
 		handler.handle(sqsPayload("a1", "a2", "a3", "a4", "a5", "a6"));
 
 		verify(summarizer, times(3)).summarize(any());
+	}
+
+	/**
+	 * Chốt chặn DUY NHẤT cho việc `traceparent` được ĐỌC chứ không chỉ được parse.
+	 * `SqsBatchTest` chứng minh chuỗi đó tới được `Message`; chỗ nó có thể chết
+	 * lặng lẽ là ở đây — bỏ `propagator.extract(...)` mà chỉ `tracer.nextSpan()`
+	 * thì mọi test khác vẫn xanh, chỉ là X-Ray hiện HAI trace rời rạc thay vì một.
+	 *
+	 * Cần `Tracer` và `Propagator` THẬT nên là `@SpringBootTest`; `Propagator.NOOP`
+	 * không parse gì cả. Cùng khuôn với `IngestionRunnerTest.TraceContextSangVirtualThread`.
+	 */
+	@Nested
+	@SpringBootTest
+	class NoiTraceQuaSqs {
+
+		private static final String TRACEPARENT =
+				"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+		private static final String TRACE_ID_CHA = "0af7651916cd43dd8448eb211c80319c";
+
+		@Autowired
+		Tracer tracer;
+
+		@Autowired
+		Propagator propagator;
+
+		/** Đo TRONG lúc xử lý — sau khi `span.end()` thì không còn gì để hỏi. */
+		private AtomicReference<String> traceIdLucXuLy() {
+			AtomicReference<String> traceId = new AtomicReference<>();
+			given(summarizer.summarize(any())).willAnswer(inv -> {
+				traceId.set(tracer.currentSpan().context().traceId());
+				return Optional.of("Tóm tắt.");
+			});
+			return traceId;
+		}
+
+		private SummarizeHandler handlerThat() {
+			return new SummarizeHandler(catalog, summarizer, events, tracer, propagator, 3);
+		}
+
+		@Test
+		void span_summarize_nam_trong_trace_cua_luot_ingest() {
+			given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
+			AtomicReference<String> traceId = traceIdLucXuLy();
+
+			handlerThat().handle(Map.of("Records", List.of(Map.of(
+					"messageId", "msg-a1",
+					"eventSource", "aws:sqs",
+					"body", "{\"articleId\":\"a1\"}",
+					"messageAttributes", Map.of("traceparent", Map.of(
+							"stringValue", TRACEPARENT, "dataType", "String"))))));
+
+			assertThat(traceId).hasValue(TRACE_ID_CHA);
+		}
+
+		/**
+		 * Message cũ và message gửi tay không có `traceparent`. Chúng phải sinh ra
+		 * một trace MỚI — có span thật, chỉ là không nối vào đâu — chứ không phải
+		 * chạy ngoài mọi span, vì lúc đó dòng log của lượt xử lý mất `trace_id`.
+		 */
+		@Test
+		void khong_co_traceparent_thi_bat_dau_trace_moi() {
+			given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
+			AtomicReference<String> traceId = traceIdLucXuLy();
+
+			handlerThat().handle(sqsPayload("a1"));
+
+			assertThat(traceId.get()).isNotBlank().isNotEqualTo(TRACE_ID_CHA);
+		}
 	}
 }

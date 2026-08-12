@@ -19,7 +19,8 @@ final class SqsBatch {
 	private SqsBatch() {
 	}
 
-	record Message(String messageId, String articleId) {
+	/** `traceparent` có thể `null`: message cũ và message gửi tay không có nó. */
+	record Message(String messageId, String articleId, String traceparent) {
 	}
 
 	@SuppressWarnings("unchecked")
@@ -44,7 +45,17 @@ final class SqsBatch {
 					log.warn("message {} không có articleId — bỏ", messageId);
 					continue;
 				}
-				parsed.add(new Message(messageId, String.valueOf(articleId)));
+				// W3C Trace Context, đi bằng MESSAGE ATTRIBUTE chứ không trong body
+				// (Phase 3 §17 #12 giữ body ở đúng `{articleId}`). Vắng mặt là hợp
+				// lệ và phải chịu được — message cũ, và message gửi tay lúc kiểm
+				// thử, đều không có nó.
+				String traceparent = null;
+				if (record.get("messageAttributes") instanceof Map<?, ?> attrs
+						&& attrs.get("traceparent") instanceof Map<?, ?> tp) {
+					Object value = tp.get("stringValue");
+					traceparent = value == null ? null : String.valueOf(value);
+				}
+				parsed.add(new Message(messageId, String.valueOf(articleId), traceparent));
 			}
 			catch (RuntimeException e) {
 				log.warn("message {} không parse được body — bỏ", messageId);

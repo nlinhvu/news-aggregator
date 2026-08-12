@@ -9,6 +9,9 @@ import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 import dev.linhvu.news_aggregator.platform.EventJobHandler;
 import dev.linhvu.news_aggregator.summarization.events.ArticleSummarized;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +31,10 @@ class SummarizeHandler implements EventJobHandler {
 
 	private final ApplicationEventPublisher events;
 
+	private final Tracer tracer;
+
+	private final Propagator propagator;
+
 	private final int consecutiveFailureLimit;
 
 	// `@Lazy` phải ở ĐIỂM INJECT, không chỉ trên class `Summarizer`. Handler này
@@ -44,12 +51,14 @@ class SummarizeHandler implements EventJobHandler {
 	// Constructor vẫn chỉ có MỘT nên KHÔNG cần `@Autowired` — khác `SweepHandler`
 	// và `Summarizer`, hai chỗ có constructor thứ hai cho test.
 	SummarizeHandler(ArticleCatalog catalog, @Lazy Summarizer summarizer,
-			ApplicationEventPublisher events,
+			ApplicationEventPublisher events, Tracer tracer, Propagator propagator,
 			@Value("${news.summarization.consecutive-failure-limit}")
 			int consecutiveFailureLimit) {
 		this.catalog = catalog;
 		this.summarizer = summarizer;
 		this.events = events;
+		this.tracer = tracer;
+		this.propagator = propagator;
 		this.consecutiveFailureLimit = consecutiveFailureLimit;
 	}
 
@@ -83,42 +92,59 @@ class SummarizeHandler implements EventJobHandler {
 				continue;
 			}
 
-			// CHỐT CHẶN IDEMPOTENT. Rỗng nghĩa là article đã có summary, không có
-			// excerpt, hoặc excerpt quá ngắn — cả ba đều là "không có việc để
-			// làm", và ACK message là đúng: nó đã hoàn thành mục đích, chỉ là bởi
-			// một lượt khác.
-			Optional<SummarizableArticle> article =
-					catalog.findSummarizable(message.articleId());
-			if (article.isEmpty()) {
-				skipped++;
-				// KHÔNG reset `consecutiveFailures`: bỏ qua không phải bằng chứng
-				// model đã hồi phục. Reset ở đây thì một batch xen kẽ hỏng/bỏ-qua
-				// không bao giờ chạm ngưỡng.
-				log.debug("bỏ qua {} — không có việc để làm", message.articleId());
-				continue;
-			}
-
-			Optional<String> summary = summarizer.summarize(article.get());
-			if (summary.isEmpty()) {
-				failed.add(message.messageId());
-				consecutiveFailures++;
-				if (consecutiveFailures >= consecutiveFailureLimit) {
-					// Thứ thay thế circuit breaker (TDD §17 #8). Không có nó thì
-					// 10 bài × 25s timeout vượt 120s function timeout, invoke chết,
-					// batchItemFailures không kịp trả, và CẢ batch quay lại — kể cả
-					// bài đã xong.
-					log.warn("{} lời gọi model hỏng liên tiếp — bỏ phần còn lại "
-							+ "của batch", consecutiveFailures);
-					aborted = true;
+			// Nối lượt xử lý này vào trace của lượt ingest đã enqueue nó. Không có
+			// bước này thì X-Ray hiện HAI trace rời rạc, trong khi chuỗi
+			// *phát hiện → thêm → enqueue → tóm tắt* mới là distributed trace duy
+			// nhất hệ thống này có.
+			//
+			// `traceparent` null ⇒ `extract` trả về một context rỗng và span mới
+			// là gốc của trace mới. Đó là hành vi ĐÚNG, không phải fallback tạm.
+			Span span = propagator
+					.extract(message, (m, key) -> "traceparent".equals(key)
+							? m.traceparent() : null)
+					.name("summarize")
+					.start();
+			try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+				// CHỐT CHẶN IDEMPOTENT. Rỗng nghĩa là article đã có summary, không có
+				// excerpt, hoặc excerpt quá ngắn — cả ba đều là "không có việc để
+				// làm", và ACK message là đúng: nó đã hoàn thành mục đích, chỉ là bởi
+				// một lượt khác.
+				Optional<SummarizableArticle> article =
+						catalog.findSummarizable(message.articleId());
+				if (article.isEmpty()) {
+					skipped++;
+					// KHÔNG reset `consecutiveFailures`: bỏ qua không phải bằng chứng
+					// model đã hồi phục. Reset ở đây thì một batch xen kẽ hỏng/bỏ-qua
+					// không bao giờ chạm ngưỡng.
+					log.debug("bỏ qua {} — không có việc để làm", message.articleId());
+					continue;
 				}
-				continue;
+
+				Optional<String> summary = summarizer.summarize(article.get());
+				if (summary.isEmpty()) {
+					failed.add(message.messageId());
+					consecutiveFailures++;
+					if (consecutiveFailures >= consecutiveFailureLimit) {
+						// Thứ thay thế circuit breaker (TDD §17 #8). Không có nó thì
+						// 10 bài × 25s timeout vượt 120s function timeout, invoke chết,
+						// batchItemFailures không kịp trả, và CẢ batch quay lại — kể cả
+						// bài đã xong.
+						log.warn("{} lời gọi model hỏng liên tiếp — bỏ phần còn lại "
+								+ "của batch", consecutiveFailures);
+						aborted = true;
+					}
+					continue;
+				}
+				// Thành công là bằng chứng DUY NHẤT model còn sống, nên nó là chỗ DUY
+				// NHẤT được reset bộ đếm.
+				consecutiveFailures = 0;
+				events.publishEvent(new ArticleSummarized(
+						message.articleId(), summary.get()));
+				summarized++;
 			}
-			// Thành công là bằng chứng DUY NHẤT model còn sống, nên nó là chỗ DUY
-			// NHẤT được reset bộ đếm.
-			consecutiveFailures = 0;
-			events.publishEvent(new ArticleSummarized(
-					message.articleId(), summary.get()));
-			summarized++;
+			finally {
+				span.end();
+			}
 		}
 
 		log.info("summarize batch: summarized={} skipped={} failed={}",

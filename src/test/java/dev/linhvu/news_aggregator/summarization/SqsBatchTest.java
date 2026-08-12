@@ -20,8 +20,8 @@ class SqsBatchTest {
 				record("m2", "{\"articleId\":\"a2\"}")));
 
 		assertThat(SqsBatch.parse(payload))
-				.containsExactly(new SqsBatch.Message("m1", "a1"),
-						new SqsBatch.Message("m2", "a2"));
+				.containsExactly(new SqsBatch.Message("m1", "a1", null),
+						new SqsBatch.Message("m2", "a2", null));
 	}
 
 	/**
@@ -41,7 +41,48 @@ class SqsBatchTest {
 				record("m3", "{\"articleId\":\"a3\"}")));
 
 		assertThat(SqsBatch.parse(payload))
-				.containsExactly(new SqsBatch.Message("m3", "a3"));
+				.containsExactly(new SqsBatch.Message("m3", "a3", null));
+	}
+
+	/**
+	 * Message do bản code cũ tạo, và message gửi tay bằng `aws sqs send-message`
+	 * khi kiểm thử, đều KHÔNG có `traceparent`. Consumer phải chịu được điều đó —
+	 * bắt đầu một trace mới thay vì hỏng.
+	 *
+	 * Đây là mục quan trọng nhất của task này. Một consumer ném vì thiếu metadata
+	 * quan sát là một hệ thống mà observability tự nó thành nguồn sự cố.
+	 */
+	@Test
+	void message_khong_co_traceparent_van_parse_duoc() {
+		Map<String, Object> payload = Map.of("Records", List.of(
+				record("m1", "{\"articleId\":\"abc\"}")));
+
+		assertThat(SqsBatch.parse(payload)).singleElement().satisfies(m -> {
+			assertThat(m.articleId()).isEqualTo("abc");
+			assertThat(m.traceparent()).isNull();
+		});
+	}
+
+	/**
+	 * `traceparent` đi bằng MESSAGE ATTRIBUTE, không nằm trong body. Phase 3
+	 * §17 #12 chốt body chỉ chứa `articleId` vì *"id là thứ duy nhất không bao giờ
+	 * cũ"*; thêm trường vào body là mở lại quyết định đó cho một nhu cầu không
+	 * thuộc nghiệp vụ.
+	 */
+	@Test
+	void doc_duoc_traceparent_tu_message_attribute() {
+		Map<String, Object> payload = Map.of("Records", List.of(Map.of(
+				"messageId", "m1",
+				"eventSource", "aws:sqs",
+				"body", "{\"articleId\":\"abc\"}",
+				"messageAttributes", Map.of("traceparent", Map.of(
+						"stringValue", "00-0af7651916cd43dd8448eb211c80319c"
+								+ "-b7ad6b7169203331-01",
+						"dataType", "String")))));
+
+		assertThat(SqsBatch.parse(payload)).singleElement()
+				.extracting(SqsBatch.Message::traceparent)
+				.isEqualTo("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
 	}
 
 	/**
