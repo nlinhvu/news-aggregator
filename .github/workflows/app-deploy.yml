@@ -112,13 +112,23 @@ jobs:
           # Ghi digest TRƯỚC, để lần `cdk deploy` sau không kéo lùi phiên bản.
           aws ssm put-parameter --name /news/dev/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
+          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
+          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
+          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
+          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           # `-v2` CỐ Ý: waiter `function-updated` poll `GetFunctionConfiguration`,
           # còn `function-updated-v2` poll `GetFunction` — đúng action mà
           # AppDeployRole đã được cấp. Đổi tên waiter ở đây thì không phải nới
           # thêm quyền cho role (CicdStack).
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
@@ -127,7 +137,8 @@ jobs:
         with:
           environment: dev
           account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
+          ingest_function_name: ${{ vars.LAMBDA_INGEST_NAME }}
+          summarize_function_name: ${{ vars.LAMBDA_SUMMARIZE_NAME }}
   smoke-dev:
     needs: [build, dev]
     uses: ./.github/workflows/smoke.yml
@@ -163,9 +174,19 @@ jobs:
           export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
           aws ssm put-parameter --name /news/qa/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
+          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
+          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
+          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
+          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
@@ -174,7 +195,8 @@ jobs:
         with:
           environment: qa
           account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
+          ingest_function_name: ${{ vars.LAMBDA_INGEST_NAME }}
+          summarize_function_name: ${{ vars.LAMBDA_SUMMARIZE_NAME }}
   smoke-qa:
     needs: [ build, qa ]
     uses: ./.github/workflows/smoke.yml
@@ -210,9 +232,19 @@ jobs:
           export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
           aws ssm put-parameter --name /news/prod/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
+          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
+          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
+          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
+          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
@@ -221,7 +253,8 @@ jobs:
         with:
           environment: prod
           account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          function_name: ${{ vars.LAMBDA_NAME }}
+          ingest_function_name: ${{ vars.LAMBDA_INGEST_NAME }}
+          summarize_function_name: ${{ vars.LAMBDA_SUMMARIZE_NAME }}
   smoke-prod:
     needs: [ build, prod ]
     uses: ./.github/workflows/smoke.yml

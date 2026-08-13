@@ -30,8 +30,11 @@ inputs:
   account_id:
     description: Account của môi trường, để dựng ARN của SmokeRole
     required: true
-  function_name:
-    description: Tên function cần invoke
+  ingest_function_name:
+    description: Tên function `ingest` — nhận payload `ingest-feeds`
+    required: true
+  summarize_function_name:
+    description: Tên function `summarize` — nhận payload `summarize-sweep`
     required: true
 
 runs:
@@ -44,8 +47,10 @@ runs:
 
         [ -n "${{ inputs.account_id }}" ] || {
           echo "::error::[${{ inputs.environment }}] account_id rỗng — environment '${{ inputs.environment }}' thiếu vars.AWS_ACCOUNT_ID"; exit 1; }
-        [ -n "${{ inputs.function_name }}" ] || {
-          echo "::error::[${{ inputs.environment }}] function_name rỗng — environment '${{ inputs.environment }}' thiếu vars.LAMBDA_NAME"; exit 1; }
+        [ -n "${{ inputs.ingest_function_name }}" ] || {
+          echo "::error::[${{ inputs.environment }}] ingest_function_name rỗng — environment '${{ inputs.environment }}' thiếu vars.LAMBDA_INGEST_NAME"; exit 1; }
+        [ -n "${{ inputs.summarize_function_name }}" ] || {
+          echo "::error::[${{ inputs.environment }}] summarize_function_name rỗng — environment '${{ inputs.environment }}' thiếu vars.LAMBDA_SUMMARIZE_NAME"; exit 1; }
 
         # ARN dựng tại chỗ từ account id, KHÔNG lấy từ một biến riêng: mỗi môi
         # trường là một account, nên account id là phần DUY NHẤT thay đổi. Đúng
@@ -67,18 +72,43 @@ runs:
         export AWS_SECRET_ACCESS_KEY=$(jq -r .SecretAccessKey <<<"$creds")
         export AWS_SESSION_TOKEN=$(jq -r .SessionToken <<<"$creds")
 
+        # HAI function, HAI payload kể từ ADR-0020. Bản trước invoke `vars.LAMBDA_NAME`
+        # — tức `web` — và nó hỏng ngay lần deploy app đầu tiên sau khi tách, vì
+        # Task 3 đã cố ý gỡ `web` khỏi quyền invoke của SmokeRole. Kể cả còn quyền
+        # thì nó vẫn hỏng: `EventsController` nay là `@Profile("ingest | summarize")`
+        # nên `web` không có `/events` nữa.
         aws lambda invoke \
-          --function-name "${{ inputs.function_name }}" \
+          --function-name "${{ inputs.ingest_function_name }}" \
           --cli-binary-format raw-in-base64-out \
           --payload '{"job":"ingest-feeds"}' \
-          /tmp/ingest.json > /tmp/meta.json
-        cat /tmp/meta.json
+          /tmp/ingest.json > /tmp/ingest-meta.json
+        cat /tmp/ingest-meta.json
         cat /tmp/ingest.json
 
         # FunctionError xuất hiện khi hàm ném exception. Lambda vẫn trả HTTP 200
         # cho lời gọi invoke, nên KHÔNG kiểm được bằng exit code của aws-cli.
-        if grep -q FunctionError /tmp/meta.json; then
+        if grep -q FunctionError /tmp/ingest-meta.json; then
           echo "::error::[${{ inputs.environment }}] lượt ingestion ném lỗi"; exit 1
         fi
         jq -e 'has("discovered") and has("added") and has("failed")' /tmp/ingest.json \
           || { echo "::error::[${{ inputs.environment }}] response không đúng hình dạng IngestResult"; exit 1; }
+
+        aws lambda invoke \
+          --function-name "${{ inputs.summarize_function_name }}" \
+          --cli-binary-format raw-in-base64-out \
+          --payload '{"job":"summarize-sweep"}' \
+          /tmp/sweep.json > /tmp/sweep-meta.json
+        cat /tmp/sweep-meta.json
+        cat /tmp/sweep.json
+
+        # File riêng cho mỗi lượt (`ingest-meta` / `sweep-meta`): dùng chung
+        # `/tmp/meta.json` thì lượt sau ghi đè lượt trước và một lỗi ở lượt đầu
+        # biến mất khỏi log ngay khi lượt sau chạy.
+        if grep -q FunctionError /tmp/sweep-meta.json; then
+          echo "::error::[${{ inputs.environment }}] lượt sweep ném lỗi"; exit 1
+        fi
+        # Hình dạng `SweepResult`, không phải `IngestResult` — hai job khác nhau
+        # trả hai record khác nhau. Dùng nhầm khoá ở đây sẽ làm step xanh/đỏ vì
+        # một lý do không liên quan gì tới sweep.
+        jq -e 'has("scanned") and has("enqueued")' /tmp/sweep.json \
+          || { echo "::error::[${{ inputs.environment }}] response không đúng hình dạng SweepResult"; exit 1; }
