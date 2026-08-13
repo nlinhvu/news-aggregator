@@ -55,10 +55,8 @@ public class IdentityStack extends Stack {
 				.terminationProtection(true)   // MỌI môi trường — xem javadoc
 				.build());
 
-		// Một chỗ duy nhất: prefix này vừa là domain của managed login, vừa là
-		// relying party ID của passkey. Hai nơi viết rời cùng một chuỗi thì lệch
-		// nhau lúc nào không hay, và hậu quả là passkey hỏng trên thiết bị thật
-		// trong khi mọi thứ khác xanh.
+		// Prefix của managed login: `<prefix>.auth.<region>.amazoncognito.com` là
+		// URL người dùng thấy lúc đăng nhập, và là gốc của `getLogoutUri()`.
 		String domainPrefix = "na-" + cfg.tagPrefix() + "-auth";
 
 		this.userPool = UserPool.Builder.create(this, "UserPool")
@@ -111,12 +109,25 @@ public class IdentityStack extends Stack {
 						.requireDigits(true)
 						.requireSymbols(true)
 						.build())
-				// Relying party ID của WebAuthn phải là origin nơi người dùng ĐĂNG KÝ
-				// passkey. Luồng của ta đăng ký trên managed login, tức domain Cognito
-				// — KHÔNG phải `news.linhvu.dev`. Đặt sai thì email OTP vẫn chạy hoàn
-				// hảo và chỉ riêng passkey hỏng, trên thiết bị thật.
-				.passkeyRelyingPartyId(domainPrefix + ".auth." + cfg.region()
-						+ ".amazoncognito.com")
+				// KHÔNG khai `passkeyRelyingPartyId`, và đó là kết luận đã trả giá
+				// bằng một lượt deploy (2026-08-13): đặt nó bằng domain Cognito thì
+				// synth xanh và deploy chết —
+				//
+				//   "RelyingPartyId cannot be reserved domain other than User Pool's
+				//    prefix domain"
+				//
+				// Giá trị `*.amazoncognito.com` chỉ hợp lệ khi nó LÀ prefix domain
+				// của chính pool, mà `UserPoolDomain` là resource RIÊNG tạo SAU pool
+				// (nó cần pool id). Tại thời điểm pool ra đời, pool chưa có domain
+				// nào để giá trị đó khớp — không thứ tự nào trong một lượt deploy
+				// sửa được.
+				//
+				// Bỏ trống là hợp lệ: CDK ghi default "No authentication domain", và
+				// AWS chỉ BẮT BUỘC khai RP ID khi pool có CUSTOM DOMAIN — thứ phase
+				// này cố ý không dùng (xem javadoc của class).
+				//
+				// Xem `SecurityBoundaryTest#pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc`
+				// về đường sửa nếu QA passkey cho thấy Cognito không tự suy RP ID.
 				.build();
 
 		// Nhóm `ops` — toàn bộ mô hình phân quyền của chương trình (TDD §14.1).

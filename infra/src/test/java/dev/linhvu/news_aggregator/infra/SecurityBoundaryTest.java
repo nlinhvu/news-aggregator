@@ -1934,26 +1934,45 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * Passkey (WEB_AUTHN) chỉ chạy khi relying party ID khớp origin nơi người
-	 * dùng đăng ký nó — với managed login thì đó là domain Cognito, không phải
-	 * `news.linhvu.dev`. Sai giá trị này thì email OTP vẫn chạy hoàn hảo và chỉ
-	 * riêng passkey hỏng, trên thiết bị thật, ở đúng bước cuối.
+	 * Pool KHÔNG khai `passkeyRelyingPartyId`, và đây là khẳng định PHỦ ĐỊNH có
+	 * chủ ý — nó chặn việc thêm lại một field trông rất hợp lý mà **không deploy
+	 * được ở lần create đầu**.
 	 *
-	 * Ghim CẢ HAI nửa vào cùng một khẳng định vì chúng phải soi gương nhau:
-	 * `DomainPrefix` sinh ra RP ID, nên đổi prefix mà quên RP ID là lệch câm.
+	 * Đã trả giá thật (2026-08-13). Đặt RP ID = domain Cognito
+	 * (`na-dev-auth.auth.us-east-1.amazoncognito.com`) synth xanh và chết ở deploy:
+	 *
+	 * <pre>
+	 * "RelyingPartyId cannot be reserved domain other than User Pool's prefix
+	 *  domain" (Status Code: 400)
+	 * </pre>
+	 *
+	 * Cơ chế: giá trị `*.amazoncognito.com` chỉ hợp lệ khi nó LÀ prefix domain
+	 * của chính pool, mà `AWS::Cognito::UserPoolDomain` là resource RIÊNG tạo SAU
+	 * pool — nên tại thời điểm pool ra đời, pool chưa có domain nào để giá trị đó
+	 * khớp. Không thứ tự nào trong một lượt deploy sửa được: domain cần pool id.
+	 *
+	 * Bỏ trống là hợp lệ và đúng cho ta: CDK ghi default *"No authentication
+	 * domain"*, và AWS chỉ BẮT BUỘC khai RP ID khi pool có **custom domain** —
+	 * thứ phase này cố ý không dùng (spec §10).
+	 *
+	 * Còn mở, và chỉ trả lời được ở QA passkey (thiết bị thật, spec §"ngoài phạm
+	 * vi" của test tự động): nếu Cognito KHÔNG tự suy RP ID từ prefix domain thì
+	 * đăng ký passkey sẽ hỏng, và đường sửa là một lượt deploy THỨ HAI đặt RP ID
+	 * sau khi domain đã tồn tại — không phải nhét lại vào lần create đầu.
 	 */
 	@Test
-	void passkey_relying_party_khop_domain_cognito() {
+	void pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc() {
 		Template template = identityStack(EnvConfig.DEV);
 
+		// Domain prefix vẫn được ghim: nó là URL của managed login và là thứ
+		// `getLogoutUri()` dựng nên.
 		template.hasResourceProperties("AWS::Cognito::UserPoolDomain",
 				Match.objectLike(Map.of("Domain", "na-dev-auth")));
 		// `WebAuthnRelyingPartyID` — chữ D HOA ở cuối. CDK L2 nhận
 		// `passkeyRelyingPartyId` (chữ d thường) rồi render ra tên khác, nên viết
 		// theo trực giác là một assertion không bao giờ khớp.
 		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
-				Map.of("WebAuthnRelyingPartyID",
-						"na-dev-auth.auth.us-east-1.amazoncognito.com")));
+				Map.of("WebAuthnRelyingPartyID", Match.absent())));
 	}
 
 	@Test
