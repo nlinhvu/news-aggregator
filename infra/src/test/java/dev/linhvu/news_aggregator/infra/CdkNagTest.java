@@ -54,16 +54,20 @@ class CdkNagTest {
 			Map.entry("AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
 					+ "tiền theo tháng và là chi phí cố định."),
 
-			Map.entry("AwsSolutions-COG1", "Rule đòi CHÍNH SÁCH MẬT KHẨU cho một pool KHÔNG CÓ "
-					+ "mật khẩu: `AllowedFirstAuthFactors` là [EMAIL_OTP, WEB_AUTHN] "
-					+ "(ADR-0017). Đặt một password policy ở đây là mô tả một thứ không "
-					+ "tồn tại. Rule KHÔNG tham số nên entry này nuốt luôn COG1 của mọi "
-					+ "pool thêm sau vào stack; chốt chặn thật cho vế 'không mật khẩu' là "
-					+ "SecurityBoundaryTest#user_pool_dung_tier_essentials_va_passwordless. "
-					+ "NGƯỠNG XEM LẠI — QUAN TRỌNG: danh sách đó do `addPropertyOverride` "
-					+ "ghi ra vì CDK L2 cưỡng chế `password: true`. Nếu Cognito TỪ CHỐI nó "
-					+ "lúc deploy và ta buộc phải nhận PASSWORD, thì mật khẩu có thật trong "
-					+ "hệ thống, rule này có nghĩa trở lại, và entry NÀY PHẢI BỊ XOÁ."),
+			// KHÔNG có entry cho `AwsSolutions-COG1`, và chỗ trống này là một kết luận
+			// chứ không phải một thiếu sót.
+			//
+			// Bản đầu của Task 8 CÓ một entry ở đây, với lý do "pool này không có mật
+			// khẩu nên chính sách mật khẩu là mô tả một thứ không tồn tại", kèm một
+			// ngưỡng xem lại: *nếu Cognito từ chối danh sách không PASSWORD lúc deploy
+			// thì entry này phải bị xoá*. Cognito ĐÃ từ chối, ngày 2026-08-13:
+			// `Dev-IdentityStack` CREATE_FAILED với *"PASSWORD should be configured as
+			// one of the allowed first auth factors."*
+			//
+			// Nên cửa mật khẩu là thứ không đóng được, COG1 nói một điều CÓ THẬT, và
+			// cách trả lời đúng là dựng `passwordPolicy` thật chứ không phải giữ một
+			// ngoại lệ. Xem `IdentityStack` và
+			// SecurityBoundaryTest#chinh_sach_mat_khau_du_manh_cho_canh_cua_khong_dong_duoc.
 
 			Map.entry("AwsSolutions-COG2", "MFA bắt buộc và email OTP LOẠI TRỪ NHAU — đây là "
 					+ "mâu thuẫn kỹ thuật, không phải đánh đổi tiện lợi. AWS ghi rõ: "

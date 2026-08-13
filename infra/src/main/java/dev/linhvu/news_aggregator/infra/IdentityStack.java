@@ -7,11 +7,11 @@ import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.cognito.AllowedFirstAuthFactors;
-import software.amazon.awscdk.services.cognito.CfnUserPool;
 import software.amazon.awscdk.services.cognito.CfnUserPoolGroup;
 import software.amazon.awscdk.services.cognito.CognitoDomainOptions;
 import software.amazon.awscdk.services.cognito.FeaturePlan;
 import software.amazon.awscdk.services.cognito.OAuthFlows;
+import software.amazon.awscdk.services.cognito.PasswordPolicy;
 import software.amazon.awscdk.services.cognito.OAuthScope;
 import software.amazon.awscdk.services.cognito.OAuthSettings;
 import software.amazon.awscdk.services.cognito.SignInAliases;
@@ -71,17 +71,45 @@ public class IdentityStack extends Stack {
 						.build())
 				.removalPolicy(RemovalPolicy.RETAIN)
 				.featurePlan(FeaturePlan.ESSENTIALS)
+				// PASSWORD có mặt vì COGNITO BẮT BUỘC, không phải vì ta chọn. Bản
+				// trước dùng `addPropertyOverride` để ghi đè danh sách thành
+				// [EMAIL_OTP, WEB_AUTHN]; nó synth xanh và CHẾT trên môi trường
+				// thật (2026-08-13):
+				//
+				//   "Invalid request provided: PASSWORD should be configured as
+				//    one of the allowed first auth factors."
+				//
+				// Nghĩa là validation của L2 (`PasswordAuthenticationCannotDisabled`)
+				// chép đúng luật service, và escape hatch chỉ dời chỗ chết từ synth
+				// sang deploy. ADR-0017 vì thế đổi tầng chứ không đổi mục tiêu:
+				// pool PHẢI liệt kê PASSWORD, nhưng không người dùng nào phải có
+				// mật khẩu — Cognito cho phép đăng ký không mật khẩu khi pool có
+				// passwordless factor.
+				//
+				// smsOtp CỐ Ý để mặc định (false): SMS tốn tiền theo tin nhắn và
+				// đòi account được kích hoạt gửi SMS — xem spec §10.
 				.signInPolicy(SignInPolicy.builder()
-						// `password(true)` ở đây KHÔNG phải thứ đi vào template —
-						// dòng `addPropertyOverride` ngay dưới ghi đè nó. Nó có mặt
-						// vì L2 từ chối mọi giá trị khác: `password(false)` chết bằng
-						// `PasswordAuthenticationCannotDisabled`, bỏ trống chết bằng
-						// `password is required`. Cả hai đều lúc SYNTH, đã đo.
 						.allowedFirstAuthFactors(AllowedFirstAuthFactors.builder()
 								.password(true)
 								.emailOtp(true)
 								.passkey(true)
 								.build())
+						.build())
+				// Hệ quả trực tiếp của dòng trên: cửa mật khẩu KHÔNG đóng được,
+				// nên nó phải được canh. Từ giây Cognito ép PASSWORD vào danh
+				// sách, "sẽ không ai đặt mật khẩu" là một Ý ĐỊNH chứ không phải
+				// ràng buộc kỹ thuật, và chính sách này là thứ duy nhất đứng giữa
+				// ý định đó với một tài khoản có mật khẩu `123456`.
+				//
+				// 12 ký tự chứ không phải 8 (mức tối thiểu `AwsSolutions-COG1`
+				// đòi): không ai trong luồng thiết kế phải GÕ mật khẩu này, nên
+				// độ dài không mua sự bất tiện nào.
+				.passwordPolicy(PasswordPolicy.builder()
+						.minLength(12)
+						.requireLowercase(true)
+						.requireUppercase(true)
+						.requireDigits(true)
+						.requireSymbols(true)
 						.build())
 				// Relying party ID của WebAuthn phải là origin nơi người dùng ĐĂNG KÝ
 				// passkey. Luồng của ta đăng ký trên managed login, tức domain Cognito
@@ -90,24 +118,6 @@ public class IdentityStack extends Stack {
 				.passkeyRelyingPartyId(domainPrefix + ".auth." + cfg.region()
 						+ ".amazoncognito.com")
 				.build();
-
-		// ESCAPE HATCH — không mật khẩu, và L2 không cho nói câu đó.
-		//
-		// ADR-0017 quyết định hệ thống không có mật khẩu; CDK L2 lại CƯỠNG CHẾ
-		// `password: true` trong `AllowedFirstAuthFactors`. Hai nguồn tài liệu của
-		// AWS thì KHÔNG đòi: cả `AWS::Cognito::UserPool SignInPolicy` (CFN) lẫn
-		// `SignInPolicyType` (Cognito API reference) đều ghi `Required: No`, tối
-		// thiểu 1 phần tử, không nói PASSWORD là bắt buộc. Luật này là của CDK.
-		//
-		// Cùng khuôn escape hatch với `Code.ImageUri` ở `AppStack.buildFunction`:
-		// L2 lo phần còn lại, ta ghi đè đúng một property mà nó hiểu sai.
-		//
-		// NGƯỠNG XEM LẠI: nếu Cognito TỪ CHỐI lúc deploy thì luật là của service
-		// chứ không của CDK, và khi đó phải mở lại ADR-0017 chứ không phải lách
-		// tiếp. Lần deploy `dev` đầu tiên là chỗ câu hỏi đó được trả lời.
-		CfnUserPool cfnUserPool = (CfnUserPool) userPool.getNode().getDefaultChild();
-		cfnUserPool.addPropertyOverride("Policies.SignInPolicy.AllowedFirstAuthFactors",
-				List.of("EMAIL_OTP", "WEB_AUTHN"));
 
 		// Nhóm `ops` — toàn bộ mô hình phân quyền của chương trình (TDD §14.1).
 		// Xuống token thành claim `cognito:groups`.

@@ -1862,9 +1862,32 @@ class SecurityBoundaryTest {
 	 * Ba tính chất của user pool, cả ba đều KHÔNG có triệu chứng khi sai — pool
 	 * vẫn tạo được, vẫn đăng nhập được bằng đường khác, chỉ là không đúng thứ đã
 	 * thiết kế.
+	 *
+	 * <p><b>PASSWORD nằm trong danh sách vì COGNITO BẮT BUỘC, không phải vì ta
+	 * chọn.</b> Bản trước của test này đòi đúng {@code [EMAIL_OTP, WEB_AUTHN]} và
+	 * XANH lúc synth — rồi `Dev-IdentityStack` CREATE_FAILED trên môi trường thật
+	 * (2026-08-13):
+	 *
+	 * <pre>
+	 * Resource handler returned message: "Invalid request provided: PASSWORD
+	 * should be configured as one of the allowed first auth factors."
+	 * (HandlerErrorCode: InvalidRequest)
+	 * </pre>
+	 *
+	 * <p>Nghĩa là validation của CDK L2 (`PasswordAuthenticationCannotDisabled`)
+	 * chép đúng luật của service, và escape hatch `addPropertyOverride` chỉ dời
+	 * được chỗ chết từ synth sang deploy. Đã gỡ.
+	 *
+	 * <p>Lời hứa "không mật khẩu" của ADR-0017 KHÔNG mất, nó chuyển tầng: pool
+	 * PHẢI liệt kê PASSWORD, nhưng không người dùng nào phải có mật khẩu — AWS:
+	 * *"Users can sign up without a password when your user pool supports
+	 * passwordless sign-in with email or SMS OTPs."* Chốt chặn cho vế đó là bước
+	 * QA của slice 2, không phải test này.
+	 *
+	 * <p><b>ĐỪNG gỡ PASSWORD ra lần nữa.</b> Nó sẽ xanh ở đây và đỏ ở prod.
 	 */
 	@Test
-	void user_pool_dung_tier_essentials_va_passwordless() {
+	void user_pool_dung_tier_essentials_va_du_ba_first_factor() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		// Essentials: điều kiện để `SignInPolicy` có hiệu lực. Ở Lite, khai
@@ -1872,25 +1895,42 @@ class SecurityBoundaryTest {
 		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
 				Map.of("UserPoolTier", "ESSENTIALS")));
 
-		// Passwordless: KHÔNG có PASSWORD trong danh sách. Có nó nghĩa là mật
-		// khẩu quay lại hệ thống, ngược với ADR-0017.
-		//
-		// `arrayEquals` chứ không `arrayWith` là toàn bộ giá trị của khẳng định
-		// này: vế "có chứa EMAIL_OTP" xanh nguyên vẹn khi PASSWORD nằm cạnh nó.
-		//
-		// Danh sách này do `addPropertyOverride` ghi ra chứ không phải L2 —
-		// `AllowedFirstAuthFactors.builder().password(false)` bị CDK từ chối
-		// bằng `PasswordAuthenticationCannotDisabled` lúc synth (đã đo). Test này
-		// vì thế canh luôn cả escape hatch: gỡ nó ra là danh sách có PASSWORD trở
-		// lại và test đỏ.
+		// `arrayEquals` chứ không `arrayWith`: vế "có chứa EMAIL_OTP" xanh nguyên
+		// vẹn cả khi SMS_OTP mọc thêm — mà SMS thì tốn tiền và cần account được
+		// kích hoạt gửi SMS. Thứ tự là thứ tự L2 sinh ra.
 		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
 				Map.of("Policies", Match.objectLike(Map.of("SignInPolicy", Map.of(
 						"AllowedFirstAuthFactors",
-						Match.arrayEquals(List.of("EMAIL_OTP", "WEB_AUTHN"))))))));
+						Match.arrayEquals(
+								List.of("PASSWORD", "EMAIL_OTP", "WEB_AUTHN"))))))));
 
 		// Nhóm `ops` là TOÀN BỘ mô hình phân quyền của chương trình.
 		template.hasResourceProperties("AWS::Cognito::UserPoolGroup", Match.objectLike(
 				Map.of("GroupName", "ops")));
+	}
+
+	/**
+	 * Cửa mật khẩu KHÔNG đóng được (xem test trên), nên nó phải được canh.
+	 *
+	 * Đây là hệ quả trực tiếp của việc Cognito ép PASSWORD vào danh sách: từ giây
+	 * đó, "sẽ không ai đặt mật khẩu" là một Ý ĐỊNH, không phải một ràng buộc kỹ
+	 * thuật. Một chính sách mật khẩu mạnh là thứ duy nhất còn lại đứng giữa ý
+	 * định đó và một tài khoản có mật khẩu `123456`.
+	 *
+	 * Nó cũng là lý do `AwsSolutions-COG1` KHÔNG còn nằm trong allowlist của
+	 * `CdkNagTest`: rule đó từng bị bỏ qua với lý do "pool này không có mật
+	 * khẩu", và lý do đó nay sai.
+	 */
+	@Test
+	void chinh_sach_mat_khau_du_manh_cho_canh_cua_khong_dong_duoc() {
+		identityStack(EnvConfig.DEV).hasResourceProperties("AWS::Cognito::UserPool",
+				Match.objectLike(Map.of("Policies", Match.objectLike(Map.of(
+						"PasswordPolicy", Match.objectLike(Map.of(
+								"MinimumLength", 12,
+								"RequireLowercase", true,
+								"RequireUppercase", true,
+								"RequireNumbers", true,
+								"RequireSymbols", true)))))));
 	}
 
 	/**
