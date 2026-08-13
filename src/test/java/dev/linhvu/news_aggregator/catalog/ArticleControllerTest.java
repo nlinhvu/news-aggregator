@@ -1,12 +1,14 @@
 package dev.linhvu.news_aggregator.catalog;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
+import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -14,6 +16,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(FlociTestConfiguration.class)
+// `ArticleController` nay là `@Profile(WEB)`. Không profile ⇒ không controller
+// ⇒ mọi assertion status 200 thành 404.
+@ActiveProfiles(RoleProfiles.WEB)
 class ArticleControllerTest {
 
 	@Autowired

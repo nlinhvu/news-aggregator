@@ -4,8 +4,10 @@ import java.util.List;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
 import dev.linhvu.news_aggregator.platform.NewsFeature;
+import dev.linhvu.news_aggregator.platform.RoleProfiles;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/articles")
+@Profile(RoleProfiles.WEB)
 class ArticleController {
 
 	private final ArticleRepository repository;

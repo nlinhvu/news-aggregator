@@ -11,6 +11,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -19,6 +20,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(EventsController.class)
 @Import(EventsControllerTest.Handlers.class)
+// `EventsController` nay là `@Profile(EVENT_DRIVEN)`. Test này dựng handler GIẢ
+// của riêng nó nên profile nào trong hai cái cũng được — lấy `ingest` cho cụ thể.
+@ActiveProfiles(RoleProfiles.INGEST)
 class EventsControllerTest {
 
 	@Autowired

@@ -6,6 +6,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -14,6 +15,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+// `web` không có `AWS_LWA_PASS_THROUGH_PATH`, nên endpoint này ở đó là một
+// đường vào không ai dùng.
+@Profile(RoleProfiles.EVENT_DRIVEN)
 class EventsController {
 
 	private static final Logger log = LoggerFactory.getLogger(EventsController.class);

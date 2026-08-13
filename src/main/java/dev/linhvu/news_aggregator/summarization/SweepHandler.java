@@ -7,12 +7,14 @@ import java.util.Map;
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 import dev.linhvu.news_aggregator.platform.EventJobHandler;
+import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.convert.DurationStyle;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,6 +27,10 @@ import org.springframework.stereotype.Component;
  * viễn sinh 48 message DLQ trong cửa sổ 48h và DLQ mất hẳn tác dụng làm tín hiệu.
  */
 @Component
+// Sweep chạy trên `summarize`, KHÔNG trên `ingest`, dù nó cũng do một
+// EventBridge Schedule đánh thức — ADR-0020 driver #2 cắt theo ranh giới
+// NGHIỆP VỤ chứ không theo nguồn kích hoạt.
+@Profile(RoleProfiles.SUMMARIZE)
 class SweepHandler implements EventJobHandler {
 
 	private static final Logger log = LoggerFactory.getLogger(SweepHandler.class);

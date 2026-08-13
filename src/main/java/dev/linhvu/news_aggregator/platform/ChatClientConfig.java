@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.retry.RetryTemplate;
 
 /**
@@ -22,6 +23,11 @@ import org.springframework.core.retry.RetryTemplate;
  * và một chat client cùng loại (TDD §17 #15).
  */
 @Configuration(proxyBeanMethods = false)
+// CHỈ `summarize` gọi model. Ba bean dưới đã `@Lazy` nên chúng không được dựng
+// lúc khởi động ở đâu cả; thứ `@Profile` mua thêm là ĐỊNH NGHĨA bean biến mất
+// hẳn khỏi ba context kia, nên một `getBean(ChatClient.class)` nhầm chỗ chết
+// bằng NoSuchBeanDefinitionException thay vì lặng lẽ đi gọi SSM.
+@Profile(RoleProfiles.SUMMARIZE)
 public class ChatClientConfig {
 
 	@Bean

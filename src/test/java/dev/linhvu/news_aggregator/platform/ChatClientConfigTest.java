@@ -7,6 +7,7 @@ import software.amazon.awssdk.services.ssm.SsmClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,6 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * đối tượng, và không test nào gọi model.
  */
 @SpringBootTest(properties = "news.summarization.api-key=key-gia-cho-test")
+// Cả chuỗi bean này nay là `@Profile(SUMMARIZE)` — chỉ function `summarize`
+// có đường tới model.
+@ActiveProfiles(RoleProfiles.SUMMARIZE)
 class ChatClientConfigTest {
 
 	@Autowired

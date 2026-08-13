@@ -1,8 +1,8 @@
 package dev.linhvu.news_aggregator.platform;
 
+import dev.linhvu.news_aggregator.ArticleFixtures;
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.catalog.Article;
-import dev.linhvu.news_aggregator.ArticleFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -28,6 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(FlociTestConfiguration.class)
+// Flag được kiểm QUA `GET /api/articles`, tức qua `ArticleController` —
+// `@Profile(WEB)`.
+@ActiveProfiles(RoleProfiles.WEB)
 class TogglzGateTest {
 
 	@Autowired

@@ -1,11 +1,13 @@
 package dev.linhvu.news_aggregator.summarization;
 
+import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,6 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * chia sẻ một Spring context thay vì dựng thêm một cái nữa.
  */
 @SpringBootTest(properties = "news.summarization.api-key=key-gia-cho-test")
+// `Summarizer` phụ thuộc `ChatClient`, nay `@Profile(SUMMARIZE)`.
+@ActiveProfiles(RoleProfiles.SUMMARIZE)
 class SummarizerWiringTest {
 
 	@Autowired

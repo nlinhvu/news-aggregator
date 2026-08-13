@@ -8,6 +8,7 @@ import java.util.Optional;
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 import dev.linhvu.news_aggregator.platform.EventJobHandler;
+import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import dev.linhvu.news_aggregator.summarization.events.ArticleSummarized;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -18,9 +19,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
+@Profile(RoleProfiles.SUMMARIZE)
 class SummarizeHandler implements EventJobHandler {
 
 	private static final Logger log = LoggerFactory.getLogger(SummarizeHandler.class);
