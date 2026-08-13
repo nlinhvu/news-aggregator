@@ -10,3 +10,14 @@ spring:
     aws:
       region:
         static: us-east-1
+
+news:
+  identity:
+    # Mọi môi trường AWS đều đứng sau CloudFront với `REDIRECT_TO_HTTPS`, nên
+    # cookie PHẢI có `Secure` — nếu không, một request `http://` vẫn tới
+    # CloudFront kèm cookie ở dạng plaintext rồi mới bị 301, và cookie phiên
+    # chính là credential của mô hình BFF (ADR-0018).
+    #
+    # Không suy ra được từ `request.isSecure()`: sau LWA thì request tới Tomcat
+    # là HTTP trần. Đo được trên prod 2026-08-13, chi tiết ở `CookieSecurityIT`.
+    secure-cookies: true

@@ -72,6 +72,13 @@ news:
     table-name: ${NEWS_SOURCES_TABLE:sources}
   identity:
     sessions-table: ${NEWS_SESSIONS_TABLE:sessions}
+    # `false` ở đây là cho LOCAL (`http://localhost`), nơi trình duyệt vứt bỏ
+    # cookie `Secure`. Trên AWS, `application-aws.yaml` bật nó lên `true` — và
+    # BẮT BUỘC phải bật tường minh như vậy: sau CloudFront → Function URL → LWA,
+    # request tới Tomcat là HTTP trần, nên cơ chế mặc định của Spring
+    # (`request.isSecure()`) kết luận "không HTTPS" và bỏ `Secure` đi. Đã đo trên
+    # prod 2026-08-13 — xem `CookieSecurityIT`.
+    secure-cookies: false
     # Domain CÔNG KHAI của site, và app KHÔNG suy ra được nó từ request:
     # CloudFront đi tới Function URL bằng `ALL_VIEWER_EXCEPT_HOST_HEADER`, tức
     # `Host` của viewer bị strip có chủ ý (SigV4 đòi Host của Function URL).

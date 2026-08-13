@@ -27,6 +27,8 @@ import org.springframework.security.web.session.DisableEncodeUrlFilter;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatchers;
 import org.springframework.session.config.annotation.web.http.EnableSpringHttpSession;
+import org.springframework.session.web.http.CookieSerializer;
+import org.springframework.session.web.http.DefaultCookieSerializer;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
@@ -49,7 +51,8 @@ class SecurityConfig {
 
 	@Bean
 	SecurityFilterChain filterChain(HttpSecurity http,
-			@Value("${news.identity.public-base-url}") String publicBaseUrl)
+			@Value("${news.identity.public-base-url}") String publicBaseUrl,
+			@Value("${news.identity.secure-cookies}") boolean secureCookies)
 			throws Exception {
 		http
 			.authorizeHttpRequests(auth -> auth
@@ -103,7 +106,7 @@ class SecurityConfig {
 					// httpOnly=false là CỐ Ý và chỉ cho cookie NÀY: SPA phải đọc
 					// được để gửi lại qua header `X-XSRF-TOKEN`. Cookie phiên thì
 					// ngược lại — httpOnly, và đó là toàn bộ giá trị của BFF.
-					.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+					.csrfTokenRepository(csrfTokenRepository(secureCookies))
 					.csrfTokenRequestHandler(csrfRequestHandler()))
 			// Bắt buộc đi kèm hai dòng trên, không phải trang trí. Xem
 			// `CsrfCookieFilter`.
@@ -114,6 +117,55 @@ class SecurityConfig {
 			.logout(logout -> logout.disable());   // đăng xuất do AuthController lo
 
 		return http.build();
+	}
+
+	/**
+	 * Cookie PHIÊN — `Secure` phải được BẬT TƯỜNG MINH, không suy ra từ request.
+	 *
+	 * `DefaultCookieSerializer` để `useSecureCookie = null`, tức rơi về
+	 * `request.isSecure()`. Sau CloudFront → Lambda Function URL → LWA, request
+	 * tới Tomcat là HTTP trần nên lời gọi đó trả `false` và thuộc tính `Secure`
+	 * BIẾN MẤT. Đo được trên prod 2026-08-13:
+	 *
+	 * <pre>
+	 *   set-cookie: SESSION=…; Path=/; HttpOnly; SameSite=Lax
+	 * </pre>
+	 *
+	 * `EdgeStack` dùng `REDIRECT_TO_HTTPS`, nghĩa là request `http://` VẪN tới
+	 * CloudFront kèm cookie plaintext rồi mới bị 301 — cookie đã lên đường trước
+	 * lúc redirect. Với mô hình BFF thì cookie phiên chính là credential.
+	 *
+	 * Chỉ gọi `setUseSecureCookie` khi bật: để `false` tường minh sẽ VÔ HIỆU cơ
+	 * chế mặc định, tức một lần chạy local qua HTTPS cũng mất `Secure`. Ngoài
+	 * AWS thì "theo request" vẫn là hành vi đúng.
+	 *
+	 * Mọi thuộc tính khác giữ nguyên mặc định của Spring Session —
+	 * `HttpOnly`, `SameSite=Lax` — và `CookieSecurityIT` canh cả cụm.
+	 */
+	@Bean
+	CookieSerializer cookieSerializer(
+			@Value("${news.identity.secure-cookies}") boolean secureCookies) {
+		DefaultCookieSerializer serializer = new DefaultCookieSerializer();
+		if (secureCookies) {
+			serializer.setUseSecureCookie(true);
+		}
+		return serializer;
+	}
+
+	/**
+	 * Cookie CSRF đi đường HOÀN TOÀN KHÁC cookie phiên — `CookieCsrfTokenRepository`
+	 * của Spring Security, không phải `CookieSerializer` của Spring Session — nên
+	 * nó cần lời sửa riêng. Sửa một đường rồi tưởng xong là cách bỏ sót đường kia.
+	 *
+	 * `httpOnly=false` giữ nguyên và vẫn CỐ Ý: SPA phải đọc được token để gửi
+	 * lại qua header `X-XSRF-TOKEN`.
+	 */
+	private static CookieCsrfTokenRepository csrfTokenRepository(boolean secureCookies) {
+		CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+		if (secureCookies) {
+			repository.setCookieCustomizer(cookie -> cookie.secure(true));
+		}
+		return repository;
 	}
 
 	/**
