@@ -6,7 +6,6 @@ import java.util.Map;
 
 import software.amazon.awscdk.CfnOutput;
 import software.amazon.awscdk.Duration;
-import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.dynamodb.ITable;
@@ -14,7 +13,6 @@ import software.amazon.awscdk.services.ecr.IRepository;
 import software.amazon.awscdk.services.ecr.Repository;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Role;
-import software.amazon.awscdk.services.iam.ServicePrincipal;
 import software.amazon.awscdk.services.lambda.Architecture;
 import software.amazon.awscdk.services.lambda.CfnFunction;
 import software.amazon.awscdk.services.lambda.Code;
@@ -29,7 +27,6 @@ import software.amazon.awscdk.services.lambda.Runtime;
 import software.amazon.awscdk.services.lambda.destinations.SqsDestination;
 import software.amazon.awscdk.services.lambda.eventsources.SqsEventSource;
 import software.amazon.awscdk.services.logs.LogGroup;
-import software.amazon.awscdk.services.logs.RetentionDays;
 import software.amazon.awscdk.services.scheduler.Schedule;
 import software.amazon.awscdk.services.scheduler.ScheduleExpression;
 import software.amazon.awscdk.services.scheduler.ScheduleTargetInput;
@@ -59,19 +56,13 @@ public class AppStack extends Stack {
 				"arn:aws:ecr:" + cfg.region() + ":" + EnvConfig.TOOLING_ACCOUNT
 						+ ":repository/news-aggregator");
 
-		this.logGroup = LogGroup.Builder.create(this, "LogGroup")
-				.retention(RetentionDays.TWO_WEEKS)
-				.removalPolicy(RemovalPolicy.DESTROY)
-				.build();
-
-		// Execution role viết TAY thay vì để CDK tự gắn AWSLambdaBasicExecutionRole.
-		// Managed policy đó cấp `logs:CreateLogGroup` trên `*` và cấp quyền ghi trên
-		// TOÀN BỘ `/aws/lambda/*` — cả hai đều thừa, vì log group ở trên do chính
-		// CloudFormation tạo. Role tự viết thu phạm vi về đúng một log group.
-		Role executionRole = Role.Builder.create(this, "FunctionRole")
-				.assumedBy(new ServicePrincipal("lambda.amazonaws.com"))
-				.build();
-		this.logGroup.grantWrite(executionRole);
+		// Logical id "Function" GIỮ NGUYÊN cho `web`: đổi nó là CloudFormation xoá
+		// function cũ và tạo function mới, kéo theo Function URL mới, kéo theo
+		// EdgeStack phải đổi origin, kéo theo một khoảng downtime không cần thiết.
+		// Hai function mới lấy id mới.
+		LambdaRole web = LambdaRole.create(this, "Function", cfg);
+		this.logGroup = web.logGroup();
+		Role executionRole = web.role();
 
 		// KHÔNG dùng `articlesTable.grantReadData()`. Nó cấp resource
 		// `<table>.Arn/index/*` trong khi bảng có ĐÚNG MỘT index; kèm theo
@@ -198,34 +189,6 @@ public class AppStack extends Stack {
 				.actions(List.of("kms:Decrypt"))
 				.resources(List.of("arn:aws:kms:" + cfg.region() + ":" + cfg.account()
 						+ ":alias/aws/ssm"))
-				.build());
-
-		// X-Ray OTLP endpoint. `PutTraceSegments` — con số này đo bằng RUNTIME, không
-		// suy ra từ tài liệu, và đó là cả bài học.
-		//
-		// Hai trang tài liệu AWS nói khác nhau. Service authorization reference mô tả
-		// `PutSpans` là *"upload OpenTelemetry spans to AWS X-Ray"* — câu khớp hoàn
-		// hảo với đường này, và bản đầu của dòng code này đã chốt theo nó. Nhưng
-		// trang collector-less ADOT SDK (đúng kịch bản ở đây: SDK bắn thẳng vào OTLP
-		// endpoint, không collector) bảo gắn `AWSXrayWriteOnlyPolicy`, policy chỉ
-		// chứa `PutTraceSegments`. Endpoint thật phân xử:
-		//
-		//   ...FunctionRole... is not authorized to perform: xray:PutTraceSegments
-		//   because no identity-based policy allows the xray:PutTraceSegments action
-		//
-		// KHÔNG gắn managed policy đó dù tài liệu bảo thế: nó kèm
-		// `PutTelemetryRecords`, quyền của X-Ray daemon — mà ở đây không có daemon.
-		//
-		// Cấp nhầm KHÔNG có triệu chứng ở tầng nào ta kiểm được: `cdk synth` xanh,
-		// cdk-nag im, cả 57 test xanh, alarm không nổ (span rơi là chuyện của
-		// BatchSpanProcessor, không phải lỗi invoke). Chốt chặn duy nhất là một lượt
-		// export THẬT — xem plan Task 16 Step 10.
-		//
-		// `Resource: "*"` là BẮT BUỘC — X-Ray không hỗ trợ resource-level permission
-		// cho action ghi trace. Entry cdk-nag cho nó phải CÓ THAM SỐ.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("xray:PutTraceSegments"))
-				.resources(List.of("*"))
 				.build());
 
 		Map<String, String> env = new HashMap<>();

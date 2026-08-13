@@ -1554,6 +1554,73 @@ class SecurityBoundaryTest {
 		}
 	}
 
+	@Test
+	void role_chi_ghi_duoc_vao_log_group_cua_chinh_no() {
+		// Chốt chặn cho việc role KHÔNG bao giờ được cấp `logs:` trên `*`: managed
+		// policy AWSLambdaBasicExecutionRole làm đúng thế, và `LambdaRole` cố ý
+		// không dùng nó — nó tự dựng log group rồi `grantWrite` vào đúng cái đó.
+		//
+		// Test này XANH cả TRƯỚC lẫn SAU khi trích `LambdaRole`, và đó là điều nó
+		// phải làm: trích helper không đổi hành vi, nên thứ cần canh là "phạm vi
+		// quyền không bị nới ra trong lúc dời code", không phải một hành vi mới.
+		//
+		// Vế "MỖI function một log group riêng" cần ba function mới kiểm được, nên
+		// nó nằm ở `ba_function_ba_role_ba_bo_trigger` chứ không phải ở đây.
+		Template template = appStack(EnvConfig.DEV);
+
+		for (Map<String, Object> policy
+				: template.findResources("AWS::IAM::Policy").values()) {
+			for (Map<String, Object> statement : statementsOf(policy)) {
+				if (actionsOf(statement).stream().noneMatch(a -> a.startsWith("logs:"))) {
+					continue;
+				}
+				assertFalse(resourcesOf(statement).contains("*"),
+						"quyền logs không bao giờ được trỏ vào `*` — statement: "
+								+ statement);
+			}
+		}
+	}
+
+	/**
+	 * Statement của MỘT policy đã synth. Tách khỏi `actionsOf(Template, prefix)`
+	 * vì hai câu hỏi khác nhau: cái kia hỏi *"policy này có action nào"* nên làm
+	 * phẳng tất cả, còn từ Phase 7 phải hỏi được *"action này đi cùng resource
+	 * nào"* — cặp action/resource chỉ có nghĩa trong phạm vi một statement.
+	 */
+	@SuppressWarnings("unchecked")
+	private static List<Map<String, Object>> statementsOf(Map<String, Object> policy) {
+		Map<String, Object> props = (Map<String, Object>) policy.get("Properties");
+		Map<String, Object> doc = (Map<String, Object>) props.get("PolicyDocument");
+		return (List<Map<String, Object>>) doc.get("Statement");
+	}
+
+	private static List<String> actionsOf(Map<String, Object> statement) {
+		return stringsOf(statement.get("Action"));
+	}
+
+	private static List<String> resourcesOf(Map<String, Object> statement) {
+		return stringsOf(statement.get("Resource"));
+	}
+
+	/**
+	 * `Action` và `Resource` của CloudFormation nhận CẢ chuỗi lẻ LẪN mảng, nên
+	 * chỗ gọi không được phép giả định hình dạng nào.
+	 *
+	 * Phần tử không phải chuỗi (`{"Fn::GetAtt": …}`) đi qua `String.valueOf` chứ
+	 * KHÔNG bị bỏ: một statement trỏ ARN dạng token vẫn phải đếm được, và cái ta
+	 * so ở đây — `startsWith("logs:")`, `equals("*")` — không cần token resolve.
+	 * Bỏ chúng đi sẽ làm mọi assertion phủ định xanh một cách rỗng.
+	 */
+	private static List<String> stringsOf(Object value) {
+		if (value == null) {
+			return List.of();
+		}
+		if (value instanceof List<?> list) {
+			return list.stream().map(String::valueOf).toList();
+		}
+		return List.of(String.valueOf(value));
+	}
+
 	/**
 	 * Đọc toàn bộ action của một policy từ template đã synth. Trả về tập phẳng,
 	 * không quan tâm statement nào — câu hỏi ở đây là *"có action nào lạ không"*,
