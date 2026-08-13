@@ -1561,58 +1561,124 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * TẬP ĐÓNG — trả nợ Phase 3 §20B #2.
+	 * TẬP ĐÓNG — trả nợ Phase 3 §20B #2, nay nhân ba theo số execution role.
 	 *
 	 * Mọi test khác trong file này hỏi *"quyền X có bị khoá đúng phạm vi không?"*.
 	 * Không cái nào hỏi *"ở đây có quyền nào chưa ai viết test cho nó không?"* —
-	 * nên bộ quyền là TẬP MỞ, và một dòng `addToPolicy` thêm ở Phase 5 lọt qua
-	 * cả 54 test còn lại.
+	 * nên bộ quyền là TẬP MỞ, và một dòng `addToPolicy` thêm ở Phase 8 lọt qua cả
+	 * suite còn lại.
 	 *
-	 * Món nợ thật không phải "role có 13 nhóm quyền" mà là **"role lớn lên mà
-	 * không ai phải quyết định gì"**. Test này không làm role nhỏ đi một chút nào;
-	 * nó biến việc role lớn lên thành một HÀNH VI CÓ Ý THỨC.
+	 * Món nợ thật không phải "role có N nhóm quyền" mà là **"role lớn lên mà không
+	 * ai phải quyết định gì"**. Ba test này không làm role nào nhỏ đi; chúng biến
+	 * việc role lớn lên thành một HÀNH VI CÓ Ý THỨC.
 	 *
-	 * ⚠️ KHI TEST NÀY ĐỎ: thêm action mới vào danh sách dưới đây **kèm một dòng
-	 * nói ai dùng nó và ở đường code nào**. TUYỆT ĐỐI KHÔNG xoá assertion, không
-	 * đổi thành `containsAll`, không thêm wildcard. Nới nó là vứt đúng thứ nó
-	 * sinh ra để giữ.
+	 * Phase 7 thay MỘT tập đóng bằng BA. Bản một-role cũ hỏi `FunctionRoleDefault‐
+	 * Policy` với danh sách 17 action gộp của cả ba vai; sau khi tách, danh sách đó
+	 * vừa quá rộng cho `web` (nó chỉ còn 6) vừa mù với hai role mới. Và nó là phép
+	 * kiểm TẬP CON, nên một quyền BIẾN MẤT vẫn xanh — chính xác cái đã xảy ra khi
+	 * `web` mất `PutItem`.
 	 *
-	 * Điểm tách Lambdalith chốt ở **Phase 7**, khi bảng `users` làm vỡ vế thứ nhất
-	 * của ADR-0013 §8 (*"ghi trên nhiều hơn hai bảng"* — nay đúng hai:
-	 * `articles`, `sources`) và PII đầu tiên vào hệ thống. Xem TDD §17 #7.
+	 * ⚠️ KHI MỘT TRONG BA TEST NÀY ĐỎ: thêm action vào đúng danh sách của nó **kèm
+	 * một dòng nói ai dùng nó và ở đường code nào**. TUYỆT ĐỐI KHÔNG gộp ba danh
+	 * sách lại, không đổi sang phép kiểm tập con, không thêm wildcard. Nới nó là
+	 * vứt đúng thứ nó sinh ra để giữ.
 	 */
+	private static final Set<String> WEB_ACTIONS = Set.of(
+			"logs:CreateLogStream",   // Lambda runtime ghi log
+			"logs:PutLogEvents",      // Lambda runtime ghi log
+			"xray:PutTraceSegments",  // exporter OTLP gửi span tới X-Ray endpoint
+			"dynamodb:Query",         // ArticleRepository.findRecent — gsi-recent-v2
+			"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
+			"dynamodb:GetItem");      // Togglz đọc flag (CHỈ feature-toggles)
+
+	private static final Set<String> INGEST_ACTIONS = Set.of(
+			"logs:CreateLogStream",
+			"logs:PutLogEvents",
+			"xray:PutTraceSegments",
+			"dynamodb:PutItem",       // catalog ghi article mới (articles)
+			"dynamodb:Scan",          // SourceRepository liệt kê nguồn (CHỈ sources)
+			"dynamodb:UpdateItem",    // SourceRepository.updateFetchState (sources)
+			"dynamodb:DescribeTable", // togglz
+			"dynamodb:GetItem",       // togglz
+			"sqs:SendMessage",        // enqueue summarize; và onFailure ghi IngestDlq
+			// Hai action dưới do `SqsDestination.bind()` TỰ cấp cho onFailure
+			// destination — không dòng code nào trong AppStack viết ra chúng. Có mặt
+			// ở đây là ghi nhận có ý thức, không phải bỏ sót.
+			"sqs:GetQueueAttributes",
+			"sqs:GetQueueUrl");
+
+	private static final Set<String> SUMMARIZE_ACTIONS = Set.of(
+			"logs:CreateLogStream",
+			"logs:PutLogEvents",
+			"xray:PutTraceSegments",
+			"dynamodb:GetItem",       // AP8 đọc bài cần tóm tắt; và togglz
+			"dynamodb:UpdateItem",    // AP4 gắn summary vào article
+			"dynamodb:Query",         // AP9 sweep trên gsi-recent-v2
+			"dynamodb:DescribeTable", // togglz
+			"sqs:SendMessage",        // sweep là PRODUCER; và onFailure ghi IngestDlq
+			"sqs:GetQueueAttributes", // ESM + SqsDestination
+			"sqs:GetQueueUrl",        // ESM + SqsDestination
+			// Ba action dưới do `addEventSource` tự cấp cho consumer.
+			"sqs:ReceiveMessage",
+			"sqs:DeleteMessage",
+			"sqs:ChangeMessageVisibility",
+			"ssm:GetParameter",       // GeminiKeyProvider đọc SecureString
+			"kms:Decrypt");           // giải mã SecureString bằng alias/aws/ssm
+
 	@Test
-	void execution_role_khong_co_quyen_nao_ngoai_danh_sach() {
-		// Mỗi dòng: action → ai dùng, đường code nào.
-		Set<String> khaiBao = Set.of(
-				"logs:CreateLogStream",   // Lambda runtime ghi log
-				"logs:PutLogEvents",      // Lambda runtime ghi log
-				"dynamodb:Query",         // ArticleRepository.findRecent — đường ĐỌC
-				"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
-				"dynamodb:GetItem",       // Togglz đọc flag; catalog.findSummarizable
-				"dynamodb:PutItem",       // catalog ghi article mới
-				"dynamodb:UpdateItem",    // catalog gắn summary; sources cập nhật etag
-				"dynamodb:Scan",          // SourceRepository liệt kê nguồn (chỉ `sources`)
-				"sqs:SendMessage",             // enqueue summarize; onFailure ghi IngestDlq
-				"sqs:ReceiveMessage",          // ESM (addEventSource → grantConsumeMessages)
-				"sqs:DeleteMessage",           // ESM
-				"sqs:ChangeMessageVisibility", // ESM — grantConsumeMessages cấp cả cái này
-				"sqs:GetQueueAttributes",      // đi kèm MỌI grant SQS, cả hai queue
-				"sqs:GetQueueUrl",             // đi kèm MỌI grant SQS, cả hai queue
-				"ssm:GetParameter",            // GeminiKeyProvider đọc SecureString
-				"kms:Decrypt",                 // giải mã SecureString bằng alias/aws/ssm
-				"xray:PutTraceSegments"        // exporter OTLP gửi span tới X-Ray endpoint
-		);
+	void tap_dong_quyen_cua_web() {
+		assertClosedActionSet("Function", WEB_ACTIONS);
+	}
 
+	@Test
+	void tap_dong_quyen_cua_ingest() {
+		assertClosedActionSet("IngestFunction", INGEST_ACTIONS);
+	}
+
+	@Test
+	void tap_dong_quyen_cua_summarize() {
+		assertClosedActionSet("SummarizeFunction", SUMMARIZE_ACTIONS);
+	}
+
+	/**
+	 * Kiểm trên CẢ BA môi trường, như bản một-role đã làm — một role phình ra chỉ
+	 * ở `prod` là đúng kịch bản mà tập đóng tồn tại để bắt.
+	 *
+	 * `dev` và `prod` kiểm BẰNG NHAU tuyệt đối. `qa` chỉ kiểm TẬP CON, và đó là
+	 * khác biệt có thật chứ không phải nới lỏng cho tiện: `qa` không có Schedule
+	 * nào (`EnvConfig.QA` để null cả `ingestionRate` lẫn `sweepRate`) nên không có
+	 * `configureAsyncInvoke`, nên `SqsDestination.bind()` không chạy và role
+	 * `ingest` của `qa` thiếu đúng `sqs:GetQueueAttributes` + `sqs:GetQueueUrl`.
+	 * Ép bằng nhau ở đó sẽ buộc phải khai một danh sách thứ tư chỉ để mô tả một
+	 * môi trường không chạy gì.
+	 */
+	private void assertClosedActionSet(String functionId, Set<String> khaiBao) {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
-			Set<String> thucTe = actionsOf(appStack(cfg), "FunctionRoleDefaultPolicy");
-			Set<String> ngoaiDanhSach = new java.util.TreeSet<>(thucTe);
-			ngoaiDanhSach.removeAll(khaiBao);
+			Set<String> thucTe = statementsOfRole(appStack(cfg), functionId).stream()
+					.flatMap(s -> actionsOf(s).stream())
+					.collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
 
-			assertTrue(ngoaiDanhSach.isEmpty(),
-					"[" + cfg.name() + "] execution role có quyền KHÔNG khai báo: "
-							+ ngoaiDanhSach
-							+ " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
+			// Không có dòng này thì mọi vế dưới xanh rỗng khi prefix tra sai —
+			// và một tập đóng rỗng trông y hệt một tập đóng sạch.
+			assertFalse(thucTe.isEmpty(),
+					"[" + cfg.name() + "] không đọc được action nào của role `"
+							+ functionId + "` — prefix tra sai?");
+
+			Set<String> thua = new java.util.TreeSet<>(thucTe);
+			thua.removeAll(khaiBao);
+			assertTrue(thua.isEmpty(),
+					"[" + cfg.name() + "] role `" + functionId + "` có quyền KHÔNG khai "
+							+ "báo: " + thua + " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
+
+			if (cfg == EnvConfig.QA) {
+				continue;
+			}
+			Set<String> thieu = new java.util.TreeSet<>(khaiBao);
+			thieu.removeAll(thucTe);
+			assertTrue(thieu.isEmpty(),
+					"[" + cfg.name() + "] danh sách khai `" + functionId + "` có quyền mà "
+							+ "role KHÔNG có: " + thieu + " — quyền đã bị gỡ khỏi AppStack "
+							+ "thì gỡ luôn khỏi đây, đừng để danh sách mô tả quá khứ.");
 		}
 	}
 
