@@ -1,6 +1,12 @@
 package dev.linhvu.news_aggregator.identity;
 
+import java.io.IOException;
+
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,7 +16,11 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.session.config.annotation.web.http.EnableSpringHttpSession;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Mô hình BFF ([ADR-0018]): backend là OAuth2 Client, trình duyệt chỉ có cookie.
@@ -59,9 +69,55 @@ class SecurityConfig {
 					// httpOnly=false là CỐ Ý và chỉ cho cookie NÀY: SPA phải đọc
 					// được để gửi lại qua header `X-XSRF-TOKEN`. Cookie phiên thì
 					// ngược lại — httpOnly, và đó là toàn bộ giá trị của BFF.
-					.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+					.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+					.csrfTokenRequestHandler(csrfRequestHandler()))
+			// Bắt buộc đi kèm hai dòng trên, không phải trang trí. Xem
+			// `CsrfCookieFilter`.
+			.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
 			.logout(logout -> logout.disable());   // đăng xuất do AuthController lo
 
 		return http.build();
+	}
+
+	/**
+	 * Tắt cơ chế nạp LƯỜI token của Spring Security 6+.
+	 *
+	 * Mặc định, token chỉ được sinh khi có ai đó ĐỌC nó trong lúc xử lý request.
+	 * Không chỗ nào trong hệ này đọc — ta không render form phía server — nên
+	 * cookie `XSRF-TOKEN` KHÔNG BAO GIỜ được phát, và SPA không có gì để gửi lại.
+	 * Hệ quả đo được ở `LoginFlowIT`: `POST /api/auth/logout` bị `CsrfFilter`
+	 * chặn, tức **nút đăng xuất không thể hoạt động từ trình duyệt**.
+	 *
+	 * Triệu chứng còn gây hiểu nhầm thêm một tầng: nó trả **401**, không phải
+	 * 403. `CsrfFilter` từ chối TRƯỚC khi `SecurityContext` kịp được nạp (cũng
+	 * lười), nên `ExceptionTranslationFilter` thấy một request ẩn danh và gọi
+	 * entry point. Nhìn vào 401 mà đi truy phiên hỏng là truy sai chỗ.
+	 */
+	private static CsrfTokenRequestAttributeHandler csrfRequestHandler() {
+		CsrfTokenRequestAttributeHandler handler = new CsrfTokenRequestAttributeHandler();
+		handler.setCsrfRequestAttributeName(null);
+		return handler;
+	}
+
+	/**
+	 * Đọc token ở MỌI request để `CookieCsrfTokenRepository` thực sự ghi cookie
+	 * ra response.
+	 *
+	 * `getToken()` trông như một lời gọi thừa — nó chính là việc cần làm: token
+	 * là một `Supplier` lười, và chỉ lời gọi này mới kích hoạt việc sinh cùng
+	 * việc phát cookie. Đây là khuôn Spring Security công bố cho SPA.
+	 */
+	private static final class CsrfCookieFilter extends OncePerRequestFilter {
+
+		@Override
+		protected void doFilterInternal(HttpServletRequest request,
+				HttpServletResponse response, FilterChain chain)
+				throws ServletException, IOException {
+			CsrfToken token = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+			if (token != null) {
+				token.getToken();
+			}
+			chain.doFilter(request, response);
+		}
 	}
 }

@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.ClientRegistrations;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.stereotype.Component;
@@ -87,11 +88,32 @@ class SsmClientRegistrationRepository implements ClientRegistrationRepository {
 	}
 
 	private ClientRegistration build() {
-		// `ClientRegistrations.fromIssuerLocation` gọi discovery endpoint —
-		// một lời gọi mạng nữa. Ở đây khai tường minh bốn URI vì chúng suy
-		// ra được từ issuer theo quy tắc cố định của Cognito, và một lời gọi
-		// mạng ít hơn ở đường đăng nhập là một lời gọi ít hỏng hơn.
-		return ClientRegistration.withRegistrationId(REGISTRATION_ID)
+		// DISCOVERY, không hardcode. Bản Task 10 tự dựng bốn URI từ issuer với lý
+		// do "chúng suy ra được theo quy tắc cố định của Cognito" — TIỀN ĐỀ ĐÓ
+		// SAI, và đã kiểm chứng bằng chính discovery document của pool dev:
+		//
+		//   issuer      https://cognito-idp.us-east-1.amazonaws.com/us-east-1_PdskR1W0U
+		//   authorize   https://na-dev-auth.auth.us-east-1.amazoncognito.com/oauth2/authorize
+		//   token       https://na-dev-auth.auth.us-east-1.amazoncognito.com/oauth2/token
+		//   userInfo    https://na-dev-auth.auth.us-east-1.amazoncognito.com/oauth2/userInfo
+		//   jwks        https://cognito-idp.us-east-1.amazonaws.com/…/.well-known/jwks.json
+		//
+		// BA trong bốn endpoint nằm trên MANAGED LOGIN DOMAIN, không trên host
+		// của issuer; chỉ `jwks_uri` là đoán đúng. Đăng nhập vì thế hỏng ngay ở
+		// bước redirect, và không log nào của ta nói ra.
+		//
+		// Giá phải trả: một GET tới `/.well-known/openid-configuration` ở lần
+		// đăng nhập ĐẦU TIÊN của mỗi execution environment — nằm trong `build()`
+		// nên vẫn LƯỜI, đường đọc ẩn danh không chạm tới, và kết quả được cache
+		// cùng `ClientRegistration`. So với chuỗi authorize → token → userinfo
+		// ngay sau đó thì nó là nhiễu.
+		//
+		// Lợi ích thứ hai, và nó mới là lợi ích lớn: local dùng CÙNG một cơ chế.
+		// `mock-oauth2-server` đặt endpoint ở `/cognito/authorize`, không phải
+		// `/cognito/oauth2/authorize`, nên với bản hardcode thì `LoginFlowIT`
+		// không thể chạy — tức đường đăng nhập vĩnh viễn không có test nào.
+		return ClientRegistrations.fromIssuerLocation(issuerUri)
+				.registrationId(REGISTRATION_ID)
 				.clientId(clientId)
 				.clientSecret(readSecret())
 				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
@@ -109,11 +131,9 @@ class SsmClientRegistrationRepository implements ClientRegistrationRepository {
 				// `callbackUrls`: một nguồn sự thật, nên hai bên không lệch được.
 				.redirectUri(publicBaseUrl + "/api/auth/callback/" + REGISTRATION_ID)
 				.scope(Set.of("openid", "email"))
-				.issuerUri(issuerUri)
-				.authorizationUri(issuerUri + "/oauth2/authorize")
-				.tokenUri(issuerUri + "/oauth2/token")
-				.jwkSetUri(issuerUri + "/.well-known/jwks.json")
-				.userInfoUri(issuerUri + "/oauth2/userInfo")
+				// `issuerUri`, `authorizationUri`, `tokenUri`, `jwkSetUri` và
+				// `userInfoUri` KHÔNG khai ở đây — discovery đã điền đúng cả năm.
+				// Khai đè lại là quay về đúng chỗ vừa sai.
 				.userNameAttributeName("sub")
 				.clientName("News Aggregator")
 				.build();

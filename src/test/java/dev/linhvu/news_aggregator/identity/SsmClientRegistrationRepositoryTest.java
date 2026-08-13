@@ -29,7 +29,7 @@ class SsmClientRegistrationRepositoryTest {
 		SsmClient ssm = mock(SsmClient.class);
 
 		new SsmClientRegistrationRepository(ssm, "/news/test/cognito-client-secret",
-				"https://issuer.example/pool", "client-abc", "https://news.example");
+				MockOAuth2ServerConfiguration.issuerUri(), "client-abc", "https://news.example");
 
 		verifyNoInteractions(ssm);
 	}
@@ -44,7 +44,7 @@ class SsmClientRegistrationRepositoryTest {
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
 				ssm, "/news/test/cognito-client-secret",
-				"https://issuer.example/pool", "client-abc", "https://news.example");
+				MockOAuth2ServerConfiguration.issuerUri(), "client-abc", "https://news.example");
 
 		ClientRegistration first = repo.findByRegistrationId("cognito");
 		ClientRegistration second = repo.findByRegistrationId("cognito");
@@ -64,7 +64,7 @@ class SsmClientRegistrationRepositoryTest {
 				.thenReturn(GetParameterResponse.builder()
 						.parameter(Parameter.builder().value("s").build()).build());
 
-		new SsmClientRegistrationRepository(ssm, "/p", "https://issuer.example/pool",
+		new SsmClientRegistrationRepository(ssm, "/p", MockOAuth2ServerConfiguration.issuerUri(),
 				"client-abc", "https://news.example").findByRegistrationId("cognito");
 
 		verify(ssm).getParameter(GetParameterRequest.builder()
@@ -82,7 +82,7 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s").build()).build());
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
-				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				ssm, "/p", MockOAuth2ServerConfiguration.issuerUri(), "client-abc",
 				"https://news.example");
 		ClientRegistration reg = repo.findByRegistrationId("cognito");
 
@@ -110,7 +110,7 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s").build()).build());
 
 		ClientRegistration reg = new SsmClientRegistrationRepository(
-				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				ssm, "/p", MockOAuth2ServerConfiguration.issuerUri(), "client-abc",
 				"https://news.example").findByRegistrationId("cognito");
 
 		assertThat(reg.getRedirectUri())
@@ -118,6 +118,39 @@ class SsmClientRegistrationRepositoryTest {
 						+ "thứ SAI sau CloudFront")
 				.doesNotContain("{").doesNotContain("}")
 				.startsWith("https://news.example/");
+	}
+
+	@Test
+	void bon_endpoint_den_TU_DISCOVERY_khong_tu_noi_chuoi() {
+		// Chốt chặn cho lỗi nặng nhất của Phase 7, tìm ra ở Task 12.
+		//
+		// Bản Task 10 tự dựng `issuer + "/oauth2/authorize"` với lý do "quy tắc
+		// cố định của Cognito". Discovery document THẬT của pool dev nói ngược:
+		//   issuer     https://cognito-idp.us-east-1.amazonaws.com/us-east-1_PdskR1W0U
+		//   authorize  https://na-dev-auth.auth.us-east-1.amazoncognito.com/oauth2/authorize
+		// BA trong bốn endpoint nằm trên managed login domain; chỉ `jwks_uri` là
+		// đoán đúng. Đăng nhập vì thế hỏng ngay bước redirect.
+		//
+		// Mock server đặt endpoint ở `<issuer>/authorize`, KHÔNG phải
+		// `<issuer>/oauth2/authorize`. Nên assertion này đỏ ngay nếu ai đó quay
+		// về nối chuỗi — bất kể họ nối theo quy ước nào.
+		SsmClient ssm = mock(SsmClient.class);
+		when(ssm.getParameter(any(GetParameterRequest.class)))
+				.thenReturn(GetParameterResponse.builder()
+						.parameter(Parameter.builder().value("s").build()).build());
+		String issuer = MockOAuth2ServerConfiguration.issuerUri();
+
+		ClientRegistration reg = new SsmClientRegistrationRepository(
+				ssm, "/p", issuer, "client-abc", "https://news.example")
+				.findByRegistrationId("cognito");
+
+		assertThat(reg.getProviderDetails().getAuthorizationUri())
+				.as("phải lấy từ discovery document, không phải issuer + hằng chuỗi")
+				.isEqualTo(issuer + "/authorize");
+		assertThat(reg.getProviderDetails().getTokenUri()).isEqualTo(issuer + "/token");
+		assertThat(reg.getProviderDetails().getUserInfoEndpoint().getUri())
+				.isEqualTo(issuer + "/userinfo");
+		assertThat(reg.getProviderDetails().getJwkSetUri()).isEqualTo(issuer + "/jwks");
 	}
 
 	@Test
@@ -132,7 +165,7 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s3cr3t").build()).build());
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
-				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				ssm, "/p", MockOAuth2ServerConfiguration.issuerUri(), "client-abc",
 				"https://news.example");
 
 		assertThatThrownBy(() -> repo.findByRegistrationId("cognito"))

@@ -161,7 +161,12 @@ dependencies {
 //	testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-opentelemetry-test'
-//	testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
+	// Mở ở Phase 7 cho `LoginFlowIT`: nó cần `TestRestTemplate` để đi trọn luồng
+	// authorization code trên một server THẬT. MockMvc không thay được — luồng
+	// này gồm ba chặng 302 xuyên qua IdP và một lượt đổi code lấy token bằng
+	// HTTP thật. Ở Boot 4 class đó nằm ở `org.springframework.boot.resttestclient`,
+	// không còn ở `org.springframework.boot.test.web.client`.
+	testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 //	testImplementation 'org.springframework.boot:spring-boot-starter-websocket-test'

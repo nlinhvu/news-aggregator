@@ -7,3 +7,19 @@ spring:
       credentials:
         access-key: test
         secret-key: test
+
+news:
+  identity:
+    cognito:
+      # `./gradlew bootRun` trên host: mock-oauth2-server publish ra cổng 8090.
+      # Trong compose thì `NEWS_COGNITO_ISSUER_URI` đè lên bằng tên service.
+      issuer-uri: http://localhost:8090/cognito
+      client-id: news-local
+      # Ở local không có SSM thật. Parameter này phải TỒN TẠI trong Floci —
+      # `SsmClientRegistrationRepository` đọc nó bằng SsmClient thật. Mock server
+      # không kiểm secret nên giá trị chỉ cần khác rỗng:
+      #   aws --endpoint-url http://localhost:4566 ssm put-parameter \
+      #       --name /news/local/cognito-client-secret --type SecureString \
+      #       --value local-secret --overwrite
+      secret-parameter: /news/local/cognito-client-secret
+      logout-uri: http://localhost:8090/cognito/endsession

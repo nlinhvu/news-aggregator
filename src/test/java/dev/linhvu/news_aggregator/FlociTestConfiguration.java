@@ -40,7 +40,14 @@ public class FlociTestConfiguration {
 		return new FlociContainer("floci/floci:latest")
 				.disableAllServices()
 				.withDynamoDbConfig(b -> b.enabled(true))
-				.withSqsConfig(b -> b.enabled(true));
+				.withSqsConfig(b -> b.enabled(true))
+				// SSM bật từ Phase 7: `SsmClientRegistrationRepository` đọc client
+				// secret của Cognito bằng `SsmClient` THẬT. Chỉ BẬT DỊCH VỤ ở đây,
+				// KHÔNG seed parameter — parameter nằm trong
+				// `MockOAuth2ServerConfiguration`, thứ chỉ test đăng nhập mới
+				// import. Seed ở đây sẽ tạo một lời gọi `SsmClient` lúc khởi động
+				// mọi context và làm hỏng `AnonymousReadTest#verifyNoInteractions`.
+				.withSsmConfig(b -> b.enabled(true));
 	}
 
 	/**
