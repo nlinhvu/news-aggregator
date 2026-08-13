@@ -191,9 +191,19 @@ class LoginFlowIT {
 		// `.failureUrl("/?login=failed")` CŨNG là 302, nên chỉ kiểm status là để
 		// lọt mọi thất bại. Phải kiểm ĐÍCH ĐẾN.
 		assertThat(afterCallback.getStatusCode()).isEqualTo(HttpStatus.FOUND);
-		assertThat(afterCallback.getHeaders().getLocation().toString())
+		String successLocation = afterCallback.getHeaders().getLocation().toString();
+		assertThat(successLocation)
 				.as("callback phải đổi code lấy token THÀNH CÔNG, không rơi vào failureUrl")
 				.doesNotContain("login=failed");
+		// Đích sau đăng nhập phải TUYỆT ĐỐI theo `public-base-url`, không phải
+		// đường dẫn tương đối. Đã trả giá bằng QA tay trên dev 2026-08-13: người
+		// dùng đăng nhập xong nhận `{"Message":"Forbidden"}`, vì
+		// `defaultSuccessUrl("/")` được container ghép với host của REQUEST — sau
+		// CloudFront đó là Function URL `AuthType=AWS_IAM`, thứ trình duyệt không
+		// ký nổi. Đăng nhập THÀNH CÔNG mà người dùng vẫn không vào được.
+		assertThat(successLocation)
+				.as("đích sau đăng nhập phải tuyệt đối theo public-base-url")
+				.startsWith("http://localhost:8080/");
 		return sessionCookie;
 	}
 

@@ -8,6 +8,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -41,7 +42,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 class SecurityConfig {
 
 	@Bean
-	SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain filterChain(HttpSecurity http,
+			@Value("${news.identity.public-base-url}") String publicBaseUrl)
+			throws Exception {
 		http
 			.authorizeHttpRequests(auth -> auth
 					// Đường đọc ẩn danh — liệt kê TƯỜNG MINH, không dựa vào thứ
@@ -59,8 +62,18 @@ class SecurityConfig {
 					// sẽ route chúng sang bucket SPA và trả 404 (TDD §7).
 					.authorizationEndpoint(e -> e.baseUri("/api/auth/login"))
 					.redirectionEndpoint(e -> e.baseUri("/api/auth/callback/*"))
-					.defaultSuccessUrl("/", true)
-					.failureUrl("/?login=failed"))
+					// TUYỆT ĐỐI, cùng lý do với `AuthController.login()` — và đây
+					// là chỗ Task 11.5 SỬA SÓT, phải trả giá bằng một lượt QA tay:
+					// người dùng đăng nhập xong nhận `{"Message":"Forbidden"}`.
+					//
+					// Đường dẫn tương đối được servlet container biến thành tuyệt
+					// đối bằng host của REQUEST, mà sau CloudFront host đó là
+					// Function URL với `AuthType=AWS_IAM`. Trình duyệt không ký
+					// SigV4 được nên Function URL trả đúng câu đó — một thông báo
+					// không hề nhắc tới OAuth, redirect hay host, trong khi đăng
+					// nhập ĐÃ THÀNH CÔNG ở phía server.
+					.defaultSuccessUrl(publicBaseUrl + "/", true)
+					.failureUrl(publicBaseUrl + "/?login=failed"))
 			// 401 chứ KHÔNG 302 cho mọi request chưa xác thực. SPA gọi bằng
 			// `fetch`; một redirect sang HTML là thứ nó không xử lý được.
 			.exceptionHandling(e -> e.authenticationEntryPoint(
