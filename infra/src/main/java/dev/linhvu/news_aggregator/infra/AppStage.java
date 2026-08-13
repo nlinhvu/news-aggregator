@@ -15,7 +15,7 @@ public class AppStage extends Stage {
 		DataStack data = new DataStack(this, "DataStack", cfg);
 		AppStack appStack = new AppStack(this, "AppStack", cfg,
 				data.getArticlesTable(), data.getFeatureTogglesTable(),
-				data.getSourcesTable());
+				data.getSourcesTable(), data.getSessionsTable());
 		new ObservabilityStack(this, "ObservabilityStack", cfg,
 				appStack.getWebFunction(), appStack.getSummarizeFunction(),
 				appStack.getLogGroup(),

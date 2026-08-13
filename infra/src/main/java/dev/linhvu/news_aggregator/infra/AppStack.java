@@ -48,7 +48,7 @@ public class AppStack extends Stack {
 
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
 			final ITable articlesTable, final ITable featureTogglesTable,
-			final ITable sourcesTable) {
+			final ITable sourcesTable, final ITable sessionsTable) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -109,8 +109,19 @@ public class AppStack extends Stack {
 				.build());
 		grantReadFeatureToggles(webRole.role(), featureTogglesTable);
 
+		// Đường GHI đầu tiên của function phục vụ Internet, và nó chỉ chạm bảng
+		// của CHÍNH người đang đăng nhập. `DeleteItem` là cho đăng xuất — thiếu
+		// nó thì nút đăng xuất xoá được cookie nhưng không xoá được phiên, tức là
+		// nó nói dối người dùng.
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:GetItem", "dynamodb:PutItem",
+						"dynamodb:UpdateItem", "dynamodb:DeleteItem"))
+				.resources(List.of(sessionsTable.getTableArn()))
+				.build());
+
 		this.webFunction = buildFunction("Function", webRole, repo, imageDigest,
-				baseEnv(cfg, "web", articlesTable, featureTogglesTable, sourcesTable));
+				baseEnv(cfg, "web", articlesTable, featureTogglesTable, sourcesTable,
+						sessionsTable));
 
 		// Quyền cho CloudFront gọi Function URL này KHÔNG nằm ở đây — hai
 		// `AWS::Lambda::Permission` (`lambda:InvokeFunctionUrl` +
@@ -150,7 +161,7 @@ public class AppStack extends Stack {
 				.build());
 
 		Map<String, String> ingestEnv = baseEnv(cfg, "ingest",
-				articlesTable, featureTogglesTable, sourcesTable);
+				articlesTable, featureTogglesTable, sourcesTable, sessionsTable);
 		// CHỈ hai function nhận payload không-HTTP mới có biến này. Phải khớp
 		// `news.platform.pass-through-path` bên repo app; hai bên không thấy nhau
 		// nên compiler không bắt được lệch.
@@ -206,7 +217,7 @@ public class AppStack extends Stack {
 				.build());
 
 		Map<String, String> summarizeEnv = baseEnv(cfg, "summarize",
-				articlesTable, featureTogglesTable, sourcesTable);
+				articlesTable, featureTogglesTable, sourcesTable, sessionsTable);
 		summarizeEnv.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
 		summarizeEnv.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
 		// Chỉ TÊN parameter đi qua đây, không phải giá trị: key nằm nguyên trong
@@ -359,13 +370,19 @@ public class AppStack extends Stack {
 	 * không ai dùng.
 	 */
 	private Map<String, String> baseEnv(EnvConfig cfg, String profile,
-			ITable articlesTable, ITable featureTogglesTable, ITable sourcesTable) {
+			ITable articlesTable, ITable featureTogglesTable, ITable sourcesTable,
+			ITable sessionsTable) {
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws," + profile);
 		env.put("NEWS_ENV", cfg.tagPrefix());
 		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
 		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
 		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
+		// TÊN bảng đi cho cả ba function, QUYỀN thì không — chỉ `web` được cấp
+		// action nào trên bảng này. Đi theo đúng lối `NEWS_SOURCES_TABLE`: một cái
+		// tên không mở được cửa nào, còn giữ `baseEnv` là một danh mục đầy đủ thì
+		// "function này thấy bảng nào" đọc được thay vì phải suy luận.
+		env.put("NEWS_SESSIONS_TABLE", sessionsTable.getTableName());
 		// ADR-0015. Không có dòng này, LWA trả HTTP status trong BODY và Lambda
 		// coi mọi response là thành công — kể cả 500.
 		//

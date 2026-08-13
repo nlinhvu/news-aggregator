@@ -229,4 +229,52 @@ class DataStackTest {
 									"PointInTimeRecoveryEnabled", e.getValue()))));
 		}
 	}
+
+	/**
+	 * TTL là thứ giữ bảng `sessions` không lớn vô hạn, và nó KHÔNG có triệu chứng
+	 * khi cấu hình sai: phiên vẫn hoạt động, chỉ là không bao giờ hết hạn và bảng
+	 * phình ra âm thầm. Tên attribute phải khớp hằng số bên app (Task 9).
+	 *
+	 * Ghim đích danh bằng `KeySchema`, đúng lý do đã ghi ở
+	 * `pitr_cua_bang_toggles_...`: `hasResourceProperties` xanh khi CÓ MỘT
+	 * resource khớp, nên một khẳng định chỉ nêu `TimeToLiveSpecification` sẽ
+	 * không nói được nó thuộc bảng nào.
+	 */
+	@Test
+	void bang_sessions_co_ttl_tren_dung_attribute_expiresAt() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"KeySchema", List.of(Map.of(
+								"AttributeName", "sessionId",
+								"KeyType", "HASH")),
+						"TimeToLiveSpecification", Map.of(
+								"AttributeName", "expiresAt",
+								"Enabled", true))));
+	}
+
+	/**
+	 * `sessions` là bảng DUY NHẤT không có PITR, kể cả ở prod — ngược hẳn ba bảng
+	 * trên, và đó là quyết định CÓ CHỦ Ý chứ không phải bỏ sót.
+	 *
+	 * Bảng này giữ trạng thái PHÙ DU có TTL: khôi phục nó về một thời điểm trong
+	 * quá khứ là hồi sinh những phiên đã đăng xuất — một tính năng CHỐNG bảo mật.
+	 *
+	 * Chốt chặn phải nằm ở đây vì không tầng nào khác canh: cdk-nag đã allowlist
+	 * `AwsSolutions-DDB3` cho toàn bộ DataStack (rule KHÔNG tham số), và bật PITR
+	 * lên thì mọi thứ vẫn chạy y hệt — chỉ khác ở hoá đơn và ở một cánh cửa khôi
+	 * phục lẽ ra không nên tồn tại. Kiểm CẢ prod: bản dev-only sẽ xanh nguyên vẹn
+	 * khi ai đó chép dòng `pointInTimeRecoverySpecification(...)` của ba bảng kia
+	 * sang, vì công thức chung là `cfg.terminationProtection()`.
+	 */
+	@Test
+	void sessions_khong_bao_gio_bat_pitr_ke_ca_o_prod() {
+		for (EnvConfig cfg : List.of(EnvConfig.PROD, EnvConfig.DEV)) {
+			dataStack(cfg).hasResourceProperties("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"KeySchema", List.of(Map.of(
+									"AttributeName", "sessionId",
+									"KeyType", "HASH")),
+							"PointInTimeRecoverySpecification", Match.absent())));
+		}
+	}
 }

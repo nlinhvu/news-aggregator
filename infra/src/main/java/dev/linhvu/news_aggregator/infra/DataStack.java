@@ -41,6 +41,7 @@ public class DataStack extends Stack {
 	private final Table articlesTable;
 	private final Table featureTogglesTable;
 	private final Table sourcesTable;
+	private final Table sessionsTable;
 
 	public DataStack(final Construct scope, final String id, final EnvConfig cfg) {
 		super(scope, id, StackProps.builder()
@@ -129,6 +130,30 @@ public class DataStack extends Stack {
 
 		CfnOutput.Builder.create(this, "SourcesTableName")
 				.value(sourcesTable.getTableName()).build();
+
+		// Session store của mô hình BFF ([ADR-0018]). Item chứa token của Cognito,
+		// mã hoá tại chỗ nghỉ bằng khoá AWS-owned — mặc định của DynamoDB, miễn
+		// phí, và đủ: khoá tự quản chỉ đổi ai giữ chìa, không đổi bề mặt tấn công
+		// thật ở đây (một execution role bị chiếm vẫn đọc được qua API).
+		//
+		// KHÔNG GSI: đúng một access pattern (AP12 — tra theo `sessionId`).
+		//
+		// PITR TẮT kể cả ở prod, và đây là khác biệt CÓ CHỦ Ý với ba bảng trên.
+		// Bảng này chứa trạng thái PHÙ DU có TTL: khôi phục nó về một thời điểm
+		// trong quá khứ nghĩa là hồi sinh những phiên đã đăng xuất — một tính
+		// năng chống bảo mật. Mất bảng này là mọi người phải đăng nhập lại, hết.
+		// Khác biệt không có triệu chứng nên nó có chốt chặn riêng:
+		// `DataStackTest#sessions_khong_bao_gio_bat_pitr_ke_ca_o_prod`.
+		this.sessionsTable = Table.Builder.create(this, "SessionsTable")
+				.partitionKey(Attribute.builder()
+						.name("sessionId").type(AttributeType.STRING).build())
+				.timeToLiveAttribute("expiresAt")
+				.billingMode(BillingMode.PAY_PER_REQUEST)
+				.removalPolicy(cfg.removalPolicy())
+				.build();
+
+		CfnOutput.Builder.create(this, "SessionsTableName")
+				.value(sessionsTable.getTableName()).build();
 	}
 
 	public Table getArticlesTable() {
@@ -141,5 +166,9 @@ public class DataStack extends Stack {
 
 	public Table getSourcesTable() {
 		return sourcesTable;
+	}
+
+	public Table getSessionsTable() {
+		return sessionsTable;
 	}
 }

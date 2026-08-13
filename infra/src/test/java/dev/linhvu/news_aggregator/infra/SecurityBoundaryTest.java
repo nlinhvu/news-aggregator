@@ -1589,7 +1589,15 @@ class SecurityBoundaryTest {
 			"xray:PutTraceSegments",  // exporter OTLP gửi span tới X-Ray endpoint
 			"dynamodb:Query",         // ArticleRepository.findRecent — gsi-recent-v2
 			"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
-			"dynamodb:GetItem");      // Togglz đọc flag (CHỈ feature-toggles)
+			// Togglz đọc flag (feature-toggles) VÀ phân giải cookie → phiên
+			// (sessions, AP12). Cùng một action trên hai bảng: phạm vi theo BẢNG
+			// được canh ở `web_khong_ghi_duoc_articles_khong_goi_duoc_gemini`.
+			"dynamodb:GetItem",
+			// Ba action ghi dưới đây CHỈ trên bảng `sessions` — đường ghi đầu tiên
+			// của function phục vụ Internet, mở ở Task 7 slice 2.
+			"dynamodb:PutItem",       // DynamoDbSessionRepository lưu phiên mới
+			"dynamodb:UpdateItem",    // trượt TTL `expiresAt` mỗi lần dùng
+			"dynamodb:DeleteItem");   // đăng xuất — xoá phiên, không chỉ xoá cookie
 
 	private static final Set<String> INGEST_ACTIONS = Set.of(
 			"logs:CreateLogStream",
@@ -1724,11 +1732,28 @@ class SecurityBoundaryTest {
 		assertFalse(statements.isEmpty(),
 				"không đọc được statement nào của role `web` — prefix tra sai?");
 
+		// Từ Task 7, `web` CÓ action ghi — nên câu hỏi đổi từ "có ghi không" sang
+		// "ghi ở ĐÂU". Vế cũ ("không action ghi nào") nay là câu sai, và giữ nó
+		// nghĩa là phải chọn giữa việc xoá nó đi hay nới nó thành vô nghĩa.
+		//
+		// Kiểm theo TỪNG statement chứ không gộp: `Resource` được phép là một
+		// DANH SÁCH ARN, nên một statement cấp `PutItem` trên cả `sessions` lẫn
+		// `articles` phải đỏ — cặp action/resource chỉ có nghĩa trong phạm vi một
+		// statement (xem `statementsOf`).
 		Set<String> ghiDynamo = Set.of("dynamodb:PutItem", "dynamodb:UpdateItem",
 				"dynamodb:DeleteItem", "dynamodb:BatchWriteItem");
-		assertTrue(statements.stream().noneMatch(
-						s -> actionsOf(s).stream().anyMatch(ghiDynamo::contains)),
-				"`web` không được có action ghi nào trên DynamoDB — " + statements);
+		for (Map<String, Object> statement : statements) {
+			if (actionsOf(statement).stream().noneMatch(ghiDynamo::contains)) {
+				continue;
+			}
+			for (String resource : resourcesOf(statement)) {
+				assertTrue(resource.contains("SessionsTable")
+								|| resource.contains("PreferencesTable"),
+						"`web` chỉ được ghi trên `sessions` và (từ slice 4) "
+								+ "`user-preferences` — không bao giờ trên articles/sources, "
+								+ "thực tế: " + statement);
+			}
+		}
 
 		assertTrue(statements.stream().noneMatch(
 						s -> resourcesOf(s).stream().anyMatch(r -> r.contains("gemini-api-key"))),
