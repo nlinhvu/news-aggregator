@@ -48,7 +48,8 @@ public class AppStack extends Stack {
 
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
 			final ITable articlesTable, final ITable featureTogglesTable,
-			final ITable sourcesTable, final ITable sessionsTable) {
+			final ITable sourcesTable, final ITable sessionsTable,
+			final IdentityStack identity) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -119,9 +120,34 @@ public class AppStack extends Stack {
 				.resources(List.of(sessionsTable.getTableArn()))
 				.build());
 
-		this.webFunction = buildFunction("Function", webRole, repo, imageDigest,
-				baseEnv(cfg, "web", articlesTable, featureTogglesTable, sourcesTable,
-						sessionsTable));
+		// Client secret của Cognito — secret THỨ HAI của chương trình, và nó đi
+		// theo đúng khuôn của gemini key ở `summarize`: chỉ TÊN parameter đi qua
+		// env var, giá trị nằm nguyên trong SSM SecureString và chỉ được giải mã
+		// lúc runtime. Người vận hành ghi nó bằng credential của chính họ, nên
+		// KHÔNG có `ssm:PutParameter` ở đây.
+		String secretParameterName = "/news/" + cfg.tagPrefix() + "/cognito-client-secret";
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("ssm:GetParameter"))
+				.resources(List.of("arn:aws:ssm:" + cfg.region() + ":" + cfg.account()
+						+ ":parameter" + secretParameterName))
+				.build());
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("kms:Decrypt"))
+				.resources(List.of("arn:aws:kms:" + cfg.region() + ":" + cfg.account()
+						+ ":alias/aws/ssm"))
+				.build());
+
+		Map<String, String> webEnv = baseEnv(cfg, "web", articlesTable,
+				featureTogglesTable, sourcesTable, sessionsTable);
+		// Bốn biến này CHỈ ở `web` (và sau này `admin`), không nằm trong `baseEnv`:
+		// `ingest`/`summarize` không có bề mặt đăng nhập nào, nên với chúng đây là
+		// cấu hình chết — và cấu hình chết là thứ lần audit sau phải truy nguyên.
+		webEnv.put("NEWS_COGNITO_ISSUER_URI", identity.getIssuerUri());
+		webEnv.put("NEWS_COGNITO_CLIENT_ID", identity.getClient().getUserPoolClientId());
+		webEnv.put("NEWS_COGNITO_LOGOUT_URI", identity.getLogoutUri());
+		webEnv.put("NEWS_COGNITO_SECRET_PARAMETER", secretParameterName);
+
+		this.webFunction = buildFunction("Function", webRole, repo, imageDigest, webEnv);
 
 		// Quyền cho CloudFront gọi Function URL này KHÔNG nằm ở đây — hai
 		// `AWS::Lambda::Permission` (`lambda:InvokeFunctionUrl` +

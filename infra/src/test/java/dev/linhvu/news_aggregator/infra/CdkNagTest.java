@@ -54,6 +54,38 @@ class CdkNagTest {
 			Map.entry("AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
 					+ "tiền theo tháng và là chi phí cố định."),
 
+			Map.entry("AwsSolutions-COG1", "Rule đòi CHÍNH SÁCH MẬT KHẨU cho một pool KHÔNG CÓ "
+					+ "mật khẩu: `AllowedFirstAuthFactors` là [EMAIL_OTP, WEB_AUTHN] "
+					+ "(ADR-0017). Đặt một password policy ở đây là mô tả một thứ không "
+					+ "tồn tại. Rule KHÔNG tham số nên entry này nuốt luôn COG1 của mọi "
+					+ "pool thêm sau vào stack; chốt chặn thật cho vế 'không mật khẩu' là "
+					+ "SecurityBoundaryTest#user_pool_dung_tier_essentials_va_passwordless. "
+					+ "NGƯỠNG XEM LẠI — QUAN TRỌNG: danh sách đó do `addPropertyOverride` "
+					+ "ghi ra vì CDK L2 cưỡng chế `password: true`. Nếu Cognito TỪ CHỐI nó "
+					+ "lúc deploy và ta buộc phải nhận PASSWORD, thì mật khẩu có thật trong "
+					+ "hệ thống, rule này có nghĩa trở lại, và entry NÀY PHẢI BỊ XOÁ."),
+
+			Map.entry("AwsSolutions-COG2", "MFA bắt buộc và email OTP LOẠI TRỪ NHAU — đây là "
+					+ "mâu thuẫn kỹ thuật, không phải đánh đổi tiện lợi. AWS ghi rõ: "
+					+ "*\"One-time password (OTP) authentication flows aren't compatible "
+					+ "with required multi-factor authentication (MFA) in your user pool\"* "
+					+ "(Cognito dev guide, Authentication flows). Bật MFA bắt buộc là tắt "
+					+ "đúng đường đăng nhập mà walkthrough slice 2 dùng làm tiêu chí "
+					+ "nghiệm thu. Và tinh thần của rule vẫn được giữ theo cách khác: cả "
+					+ "hai first factor đều là yếu tố SỞ HỮU (hộp thư, thiết bị có "
+					+ "passkey), không phải một thứ thuộc-về-trí-nhớ đứng một mình."),
+
+			Map.entry("AwsSolutions-COG8", "Plus tier bán ADVANCED SECURITY, mà phần lõi của "
+					+ "nó — phát hiện credential bị lộ, chấm điểm rủi ro đăng nhập bằng "
+					+ "mật khẩu — nói về một thứ pool này không có. Giá đã tra bằng AWS "
+					+ "Pricing API (us-east-1, hiệu lực 2026-06-01): Essentials "
+					+ "$0,015/MAU, Plus $0,020/MAU — đắt hơn 33% để mua bảo vệ cho mật "
+					+ "khẩu không tồn tại. Essentials là mức TỐI THIỂU bắt buộc để có "
+					+ "choice-based auth, nên đây không phải chọn rẻ nhất mà là chọn đúng "
+					+ "cái cần. NGƯỠNG XEM LẠI: khi có mặt phẳng /admin trên Internet với "
+					+ "người dùng thật ngoài chủ dự án (Task 26 mở nó, nhưng sau nhóm "
+					+ "`ops` chỉ có một người)."),
+
 			Map.entry("AwsSolutions-CFR3", "Đã cân ở Phase 4 và LOẠI — đây là kết luận chung "
 					+ "cuộc, không phải hoãn tiếp. Access log của CloudFront trả lời "
 					+ "được per-URL, per-referrer, per-IP và chi tiết cache hit/miss; "
@@ -176,8 +208,8 @@ class CdkNagTest {
 		AppStage stage = new AppStage(app, EnvConfig.DEV);
 
 		List<String> unexpected = new ArrayList<>();
-		for (String stackId : List.of("DnsStack", "DataStack", "AppStack", "EdgeStack",
-				"CicdStack", "ObservabilityStack")) {
+		for (String stackId : List.of("DnsStack", "DataStack", "IdentityStack", "AppStack",
+				"EdgeStack", "CicdStack", "ObservabilityStack")) {
 			Stack stack = (Stack) stage.getNode().findChild(stackId);
 			PolicyValidationPluginReport report =
 					new AwsSolutionsChecks().validateScope(stack);

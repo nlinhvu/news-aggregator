@@ -62,6 +62,13 @@ class SecurityBoundaryTest {
 				stage.getNode().findChild("ObservabilityStack"));
 	}
 
+	private Template identityStack(EnvConfig cfg) {
+		App app = new App();
+		AppStage stage = new AppStage(app, cfg);
+		return Template.fromStack((software.amazon.awscdk.Stack)
+				stage.getNode().findChild("IdentityStack"));
+	}
+
 	/**
 	 * Bốn role, KHÔNG phải một. Với một hub role duy nhất, trust policy buộc
 	 * phải chấp nhận cả ba giá trị `environment`; và vì claim `environment`
@@ -1597,7 +1604,11 @@ class SecurityBoundaryTest {
 			// của function phục vụ Internet, mở ở Task 7 slice 2.
 			"dynamodb:PutItem",       // DynamoDbSessionRepository lưu phiên mới
 			"dynamodb:UpdateItem",    // trượt TTL `expiresAt` mỗi lần dùng
-			"dynamodb:DeleteItem");   // đăng xuất — xoá phiên, không chỉ xoá cookie
+			"dynamodb:DeleteItem",    // đăng xuất — xoá phiên, không chỉ xoá cookie
+			// Hai action dưới là secret THỨ HAI của chương trình (Task 8): client
+			// secret của Cognito, đọc LƯỜI ở Task 10 — chỉ khi có người đăng nhập.
+			"ssm:GetParameter",       // SsmClientRegistrationRepository
+			"kms:Decrypt");           // giải mã SecureString bằng alias/aws/ssm
 
 	private static final Set<String> INGEST_ACTIONS = Set.of(
 			"logs:CreateLogStream",
@@ -1764,6 +1775,193 @@ class SecurityBoundaryTest {
 						s -> actionsOf(s).stream().anyMatch(a -> a.startsWith("sqs:Send"))),
 				"`web` không được gửi SQS — nó không kích hoạt việc tốn tiền — "
 						+ statements);
+	}
+
+	/**
+	 * Secret THỨ HAI của chương trình, và ranh giới quanh nó phải hẹp y như
+	 * secret thứ nhất — `summarize_chi_doc_dung_mot_ssm_parameter` là bản gốc
+	 * của khẳng định này, đây là bản cho `web`.
+	 *
+	 * Vế đáng giá nhất là "ĐÚNG MỘT": `web` nay là function phục vụ Internet CÓ
+	 * quyền đọc SecureString, nên câu hỏi không còn là "nó đọc được secret không"
+	 * mà là "nó đọc được BAO NHIÊU secret". Một wildcard `/news/dev/*` ở đây là
+	 * đường từ Internet tới gemini key — và nó không tạo ra triệu chứng nào.
+	 */
+	@Test
+	void web_chi_doc_dung_client_secret_cua_cognito() {
+		Template t = appStack();
+
+		List<String> readOn = resourcesForAction(t, "FunctionRoleDefaultPolicy",
+				"ssm:GetParameter");
+		assertEquals(1, readOn.size(),
+				"`web` đọc đúng một SSM parameter, thực tế: " + readOn);
+		assertTrue(readOn.get(0).endsWith(":parameter/news/dev/cognito-client-secret"),
+				"resource phải ghim đúng tên parameter, thực tế: " + readOn.get(0));
+		assertFalse(readOn.get(0).contains("gemini"),
+				"`web` KHÔNG có đường nào tới gemini key — đó là của `summarize`, "
+						+ "thực tế: " + readOn.get(0));
+
+		List<String> decryptOn = resourcesForAction(t, "FunctionRoleDefaultPolicy",
+				"kms:Decrypt");
+		assertEquals(1, decryptOn.size(),
+				"kms:Decrypt được cấp đúng một lần, thực tế: " + decryptOn);
+		assertTrue(decryptOn.get(0).contains("alias/aws/ssm"),
+				"kms:Decrypt phải ghim về khoá quản lý của SSM, thực tế: "
+						+ decryptOn.get(0));
+
+		for (String action : List.of("ssm:GetParametersByPath", "ssm:PutParameter")) {
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
+					"`web` KHÔNG được cấp " + action);
+		}
+	}
+
+	/**
+	 * Env var trỏ tới ĐÚNG parameter mà statement IAM mở khoá — khẳng định chúng
+	 * khớp NHAU chứ không chép literal vào hai chỗ, đúng lý do đã ghi ở
+	 * `ten_parameter_trong_env_khop_arn_duoc_cap_quyen` cho gemini key.
+	 */
+	@Test
+	void ten_client_secret_trong_env_khop_arn_duoc_cap_quyen() {
+		Template t = appStack();
+		String secretParameter = "/news/dev/cognito-client-secret";
+
+		t.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
+				"Environment", Match.objectLike(Map.of(
+						"Variables", Match.objectLike(Map.of(
+								"NEWS_COGNITO_SECRET_PARAMETER", secretParameter)))))));
+
+		assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", "ssm:GetParameter")
+						.endsWith(":parameter" + secretParameter),
+				"ARN được cấp quyền phải trỏ đúng parameter mà env var chỉ tới");
+	}
+
+	/**
+	 * `ingest` và `summarize` KHÔNG mang cấu hình danh tính.
+	 *
+	 * Bốn biến `NEWS_COGNITO_*` nằm ở khối `web` chứ không ở `baseEnv`, và khác
+	 * biệt đó vô hình: đưa chúng vào `baseEnv` thì mọi thứ chạy y hệt, chỉ là hai
+	 * function không có bề mặt đăng nhập bỗng mang theo issuer, client id và tên
+	 * một secret mà chúng không có quyền đọc.
+	 */
+	@Test
+	void chi_web_mang_cau_hinh_cognito() {
+		Map<String, Map<String, Object>> functions = appStack()
+				.findResources("AWS::Lambda::Function");
+
+		for (Map.Entry<String, Map<String, Object>> e : functions.entrySet()) {
+			if (e.getKey().startsWith("Function")) {
+				continue;   // `web` — logical id giữ nguyên từ bản Lambdalith
+			}
+			assertFalse(String.valueOf(e.getValue()).contains("NEWS_COGNITO_"),
+					"`" + e.getKey() + "` không được mang cấu hình Cognito: "
+							+ e.getValue());
+		}
+	}
+
+	/**
+	 * Ba tính chất của user pool, cả ba đều KHÔNG có triệu chứng khi sai — pool
+	 * vẫn tạo được, vẫn đăng nhập được bằng đường khác, chỉ là không đúng thứ đã
+	 * thiết kế.
+	 */
+	@Test
+	void user_pool_dung_tier_essentials_va_passwordless() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		// Essentials: điều kiện để `SignInPolicy` có hiệu lực. Ở Lite, khai
+		// AllowedFirstAuthFactors là lỗi deploy.
+		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
+				Map.of("UserPoolTier", "ESSENTIALS")));
+
+		// Passwordless: KHÔNG có PASSWORD trong danh sách. Có nó nghĩa là mật
+		// khẩu quay lại hệ thống, ngược với ADR-0017.
+		//
+		// `arrayEquals` chứ không `arrayWith` là toàn bộ giá trị của khẳng định
+		// này: vế "có chứa EMAIL_OTP" xanh nguyên vẹn khi PASSWORD nằm cạnh nó.
+		//
+		// Danh sách này do `addPropertyOverride` ghi ra chứ không phải L2 —
+		// `AllowedFirstAuthFactors.builder().password(false)` bị CDK từ chối
+		// bằng `PasswordAuthenticationCannotDisabled` lúc synth (đã đo). Test này
+		// vì thế canh luôn cả escape hatch: gỡ nó ra là danh sách có PASSWORD trở
+		// lại và test đỏ.
+		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
+				Map.of("Policies", Match.objectLike(Map.of("SignInPolicy", Map.of(
+						"AllowedFirstAuthFactors",
+						Match.arrayEquals(List.of("EMAIL_OTP", "WEB_AUTHN"))))))));
+
+		// Nhóm `ops` là TOÀN BỘ mô hình phân quyền của chương trình.
+		template.hasResourceProperties("AWS::Cognito::UserPoolGroup", Match.objectLike(
+				Map.of("GroupName", "ops")));
+	}
+
+	/**
+	 * Passkey (WEB_AUTHN) chỉ chạy khi relying party ID khớp origin nơi người
+	 * dùng đăng ký nó — với managed login thì đó là domain Cognito, không phải
+	 * `news.linhvu.dev`. Sai giá trị này thì email OTP vẫn chạy hoàn hảo và chỉ
+	 * riêng passkey hỏng, trên thiết bị thật, ở đúng bước cuối.
+	 *
+	 * Ghim CẢ HAI nửa vào cùng một khẳng định vì chúng phải soi gương nhau:
+	 * `DomainPrefix` sinh ra RP ID, nên đổi prefix mà quên RP ID là lệch câm.
+	 */
+	@Test
+	void passkey_relying_party_khop_domain_cognito() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		template.hasResourceProperties("AWS::Cognito::UserPoolDomain",
+				Match.objectLike(Map.of("Domain", "na-dev-auth")));
+		// `WebAuthnRelyingPartyID` — chữ D HOA ở cuối. CDK L2 nhận
+		// `passkeyRelyingPartyId` (chữ d thường) rồi render ra tên khác, nên viết
+		// theo trực giác là một assertion không bao giờ khớp.
+		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
+				Map.of("WebAuthnRelyingPartyID",
+						"na-dev-auth.auth.us-east-1.amazoncognito.com")));
+	}
+
+	@Test
+	void app_client_la_confidential_va_chi_nhan_authorization_code() {
+		identityStack(EnvConfig.DEV).hasResourceProperties(
+				"AWS::Cognito::UserPoolClient", Match.objectLike(Map.of(
+						"GenerateSecret", true,
+						"AllowedOAuthFlows", Match.arrayEquals(List.of("code")),
+						// `implicit` trả token thẳng vào URL trình duyệt — đúng thứ
+						// ADR-0018 tồn tại để ngăn. Không bao giờ bật.
+						"AllowedOAuthFlowsUserPoolClient", true)));
+	}
+
+	/**
+	 * Callback phải nằm TRONG `/api/*` và phải là HTTPS trên đúng domain của môi
+	 * trường. Cả ba vế đều hỏng-mà-vẫn-chạy theo kiểu riêng:
+	 *
+	 * - Sai domain: đăng nhập ở `dev` đá người dùng sang `prod`.
+	 * - Ngoài `/api/*`: CloudFront không route path đó tới Lambda origin, nên
+	 *   callback rơi vào SPA và trả về index.html kèm `?code=…` — trình duyệt
+	 *   hiện một trang trắng, không có lỗi nào ở đâu cả.
+	 * - `http`: Cognito từ chối lúc deploy, nhưng chỉ khi ai đó sửa tay.
+	 */
+	@Test
+	void callback_url_nam_trong_api_va_dung_domain_moi_truong() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			identityStack(cfg).hasResourceProperties("AWS::Cognito::UserPoolClient",
+					Match.objectLike(Map.of("CallbackURLs", Match.arrayEquals(List.of(
+							"https://" + cfg.appDomain() + "/api/auth/callback/cognito")))));
+		}
+	}
+
+	/**
+	 * Pool KHÔNG bao giờ bị xoá theo stack, ở MỌI môi trường — kể cả `dev`, nơi
+	 * ba bảng DynamoDB đều `Delete`.
+	 *
+	 * Khác biệt có chủ ý: xoá `DataStack` của dev là mất dữ liệu tái tạo được
+	 * bằng một lượt ingest, còn xoá pool là mất TÀI KHOẢN NGƯỜI DÙNG — Cognito
+	 * không có PITR, không có backup, không có đường về. Và vì `cfg.removalPolicy()`
+	 * là công thức chung của cả repo, dòng `RETAIN` cứng ở đây trông y hệt một
+	 * chỗ ai đó quên tham số hoá; test này là thứ nói rằng nó cố ý.
+	 */
+	@Test
+	void user_pool_giu_lai_o_moi_moi_truong() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			identityStack(cfg).hasResource("AWS::Cognito::UserPool",
+					Match.objectLike(Map.of("DeletionPolicy", "Retain")));
+		}
 	}
 
 	/**
