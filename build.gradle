@@ -65,9 +65,20 @@ dependencies {
 	// classpath. Không thêm gì vào image: artifact đã có sẵn ở đó. Version do BOM
 	// của Boot quản.
 	implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
+	// KHÔNG thêm `spring-boot-starter-oauth2-client` ở đây, dù plan Task 9 xếp nó
+	// chung với dòng dưới. Nó kéo Spring Security vào, và chain mặc định của
+	// Boot khoá `anyRequest().authenticated()` — ĐO ĐƯỢC: `/api/articles` và
+	// `/api/health` trả 401, 4 test MockMvc đỏ. `SecurityConfig` (thứ mở lại
+	// đường đọc ẩn danh) chỉ tới ở Task 11, nên đưa dòng đó vào sớm là hạ trang
+	// public trong suốt hai commit. Nó đi CÙNG COMMIT với `SecurityConfig`.
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 //	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	// CHỈ core: `SessionRepository` + `SessionRepositoryFilter` + `MapSession`.
+	// Backend DynamoDB tự viết — Spring Session không có module chính thức cho
+	// nó, và project bên thứ ba `spring-session-dynamodb` không rõ tình trạng
+	// với Boot 4 (TDD §19.1).
+	implementation 'org.springframework.session:spring-session-core'
 //	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 //	implementation 'org.flywaydb:flyway-database-postgresql'
 //	implementation 'org.jobrunr:jobrunr-spring-boot-4-starter:8.7.0'

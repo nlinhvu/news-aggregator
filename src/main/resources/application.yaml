@@ -70,6 +70,12 @@ news:
     table-name: ${NEWS_TOGGLES_TABLE:feature-toggles}
   sources:
     table-name: ${NEWS_SOURCES_TABLE:sources}
+  identity:
+    sessions-table: ${NEWS_SESSIONS_TABLE:sessions}
+    # 30 ngày, TRƯỢT theo mỗi lần dùng. Soi gương thời hạn mặc định của refresh
+    # token Cognito — hai con số lệch nhau nghĩa là phiên còn sống nhưng không
+    # làm mới được token, một trạng thái không ai gỡ được từ phía người dùng.
+    session-ttl: 30d
   ingestion:
     user-agent: ${NEWS_USER_AGENT:NewsAggregator/1.0 (+https://news.linhvu.dev)}
     connect-timeout: 5s

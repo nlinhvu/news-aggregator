@@ -167,6 +167,40 @@ public class FlociTestConfiguration {
 	}
 
 	/**
+	 * Bảng `sessions`, soi gương `DataStack.sessionsTable`.
+	 *
+	 * PK `sessionId`, KHÔNG GSI — đúng một access pattern (AP12, tra theo
+	 * `sessionId`).
+	 *
+	 * KHÔNG khai TTL, và đó là một khẳng định chứ không phải chỗ bỏ sót:
+	 * `DynamoDbSessionRepository` kiểm hạn Ở TẦNG ỨNG DỤNG bằng
+	 * `session.isExpired()`, vì TTL của DynamoDB là cơ chế DỌN DẸP chạy trễ tới
+	 * 48 giờ. Fixture có TTL sẽ làm
+	 * `phien_qua_han_khong_doc_duoc_du_item_van_con_trong_bang` xanh vì lý do
+	 * SAI — nó phải chứng minh việc kiểm hạn của ứng dụng, không phải việc dọn
+	 * dẹp của hạ tầng.
+	 */
+	@Bean
+	InitializingBean sessionsTableSchema(DynamoDbClient dynamoDbClient,
+			@Value("${news.identity.sessions-table}") String tableName) {
+		return () -> {
+			try {
+				dynamoDbClient.createTable(CreateTableRequest.builder()
+						.tableName(tableName)
+						.keySchema(KeySchemaElement.builder()
+								.attributeName("sessionId").keyType(KeyType.HASH).build())
+						.attributeDefinitions(
+								AttributeDefinition.builder().attributeName("sessionId")
+										.attributeType(ScalarAttributeType.S).build())
+						.billingMode(BillingMode.PAY_PER_REQUEST)
+						.build());
+			} catch (ResourceInUseException ignored) {
+				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
+	}
+
+	/**
 	 * Queue `summarize-queue` cho test T2, soi gương `AppStack.summarizeQueue`.
 	 *
 	 * Cùng lý do như ba bảng DynamoDB ở trên: ứng dụng KHÔNG tự tạo hạ tầng, nên
