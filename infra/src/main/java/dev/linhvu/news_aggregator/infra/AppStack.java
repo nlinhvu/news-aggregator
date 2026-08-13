@@ -38,7 +38,9 @@ import software.constructs.Construct;
 
 public class AppStack extends Stack {
 
-	private final Function function;
+	private final Function webFunction;
+	private final Function ingestFunction;
+	private final Function summarizeFunction;
 	private final FunctionUrl functionUrl;
 	private final LogGroup logGroup;
 	private final Queue scheduleDlq;
@@ -56,86 +58,14 @@ public class AppStack extends Stack {
 				"arn:aws:ecr:" + cfg.region() + ":" + EnvConfig.TOOLING_ACCOUNT
 						+ ":repository/news-aggregator");
 
-		// Logical id "Function" GIỮ NGUYÊN cho `web`: đổi nó là CloudFormation xoá
-		// function cũ và tạo function mới, kéo theo Function URL mới, kéo theo
-		// EdgeStack phải đổi origin, kéo theo một khoảng downtime không cần thiết.
-		// Hai function mới lấy id mới.
-		LambdaRole web = LambdaRole.create(this, "Function", cfg);
-		this.logGroup = web.logGroup();
-		Role executionRole = web.role();
-
-		// KHÔNG dùng `articlesTable.grantReadData()`. Nó cấp resource
-		// `<table>.Arn/index/*` trong khi bảng có ĐÚNG MỘT index; kèm theo
-		// `dynamodb:Scan` mà repository không bao giờ gọi (findRecent là Query —
-		// xem TDD §6), và cả `dynamodb:GetRecords`/`GetShardIterator` là quyền của
-		// DynamoDB Streams, thứ DataStack còn chưa bật. Wildcard resource đó chính
-		// là finding cdk-nag AwsSolutions-IAM5, và ở đây nó bắt đúng — cùng loại
-		// với `bucket.grantReadWrite()` đã bị thay ở CicdStack.
+		// Queue summarize + DLQ đứng TRƯỚC ba khối dựng function, vì `ingest` và
+		// `summarize` đều tham chiếu `summarizeQueue.getQueueArn()`. Đặt trong
+		// AppStack cùng lý do Schedule của Phase 2 (TDD §17 #2): đây là TRIGGER
+		// CỦA FUNCTION, tách ra thành stack riêng chỉ tạo một stack chứa một
+		// trigger trỏ ngược về stack bên cạnh.
 		//
-		// Lambda CHỈ đọc bảng này. Phase 1 thì đường ghi duy nhất là
-		// `SeedApplication` (người vận hành chạy bằng credential của chính họ);
-		// Phase 2 Task 7 xoá nó, và đường ghi của ingestion thật được cấp quyền
-		// tường minh ở task riêng — KHÔNG phải ở dòng này.
-		// Thêm operation mới cho Lambda thì phải thêm action ở ĐÂY một cách có ý thức.
-		//
-		// ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng: cấp `dynamodb:Query` trên
-		// `articlesTable.getTableArn()` trần là cấp luôn Query trên bảng, và
-		// `/index/*` là cấp trên mọi index tương lai. Cả hai đều làm mất tính chất
-		// "muốn thêm đường đọc thì phải sửa dòng này".
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("dynamodb:Query"))
-				.resources(List.of(articlesTable.getTableArn()
-						+ "/index/" + DataStack.RECENT_INDEX_V2_NAME))
-				.build());
-
-		// Bộ action dưới đây đọc ra từ bytecode của togglz-dynamodb 4.6.2, không
-		// phải từ tài liệu:
-		//   DynamoDBStateRepositoryBuilder.initializeTable() → describeTable
-		//   DynamoDBStateRepository.getFeatureState()        → getItem
-		//   DynamoDBStateRepository.setFeatureState()        → updateItem
-		//
-		// `DescribeTable` là cái dễ quên nhất và cũng chí mạng nhất: builder gọi nó
-		// ĐÚNG MỘT LẦN lúc dựng bean rồi ném RuntimeException nếu hỏng. Vì bean là
-		// @Lazy, lần chết đầu tiên rơi vào request đầu tiên chạm tới flag — trên
-		// môi trường thật, không phải lúc khởi động.
-		//
-		// KHÔNG cấp `UpdateItem`: đó là đường GHI, chỉ Togglz console dùng, mà console
-		// đang tắt. Lật flag là thao tác của người vận hành bằng credential của họ.
-		// KHÔNG cấp `Query`: repository không có đường code nào gọi tới nó — plan đề
-		// xuất `GetItem + Query`, và `Query` là quyền thừa đúng theo nghĩa mà
-		// `lambda_chi_query_dung_index_gsi_recent` đang canh ở bảng bên kia.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("dynamodb:DescribeTable", "dynamodb:GetItem"))
-				.resources(List.of(featureTogglesTable.getTableArn()))
-				.build());
-
-		// Đường GHI mở lần đầu trong chương trình. Đường HTTP không bao giờ dùng tới
-		// quyền này — đó là cái giá đã ghi nhận của ADR-0011 §7 khi từ chối phương án
-		// tách thành hai function.
-		//
-		// Resource là ARN của BẢNG, không phải của index như dòng `Query` phía trên.
-		// `PutItem` trên ARN index synth vẫn xanh và chỉ chết lúc runtime.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("dynamodb:PutItem"))
-				.resources(List.of(articlesTable.getTableArn()))
-				.build());
-
-		// AP5 + AP6. `Scan` chỉ trên bảng này — nó bị chặn trên ~30 dòng bởi master
-		// §2, trong khi `articles` tăng vô hạn và `Scan` tính tiền theo kích thước
-		// BẢNG chứ không theo số item trả về.
-		//
-		// `UpdateItem` chứ KHÔNG phải `PutItem`: `SourceRepository.updateFetchState`
-		// chỉ đụng ba attribute trạng thái bằng UpdateExpression. `PutItem` ghi đè cả
-		// item, tức xoá `name`/`feedUrl`/`enabled` — những thứ `sourcesSync` sở hữu và
-		// người vận hành ghi bằng credential của chính họ.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
-				.actions(List.of("dynamodb:Scan", "dynamodb:UpdateItem"))
-				.resources(List.of(sourcesTable.getTableArn()))
-				.build());
-
-		// Queue summarize + DLQ. Đặt trong AppStack cùng lý do Schedule của Phase 2
-		// (TDD §17 #2): đây là TRIGGER CỦA FUNCTION, tách ra thành stack riêng chỉ
-		// tạo một stack chứa một trigger trỏ ngược về stack bên cạnh.
+		// KHÔNG đổi construct id của hai queue: đổi là CloudFormation xoá queue cũ
+		// và VỨT MỌI MESSAGE đang chờ trong đó.
 		this.summarizeDlq = Queue.Builder.create(this, "SummarizeDlq")
 				.retentionPeriod(Duration.days(14))
 				.enforceSsl(true)
@@ -153,106 +83,251 @@ public class AppStack extends Stack {
 						.build())
 				.build();
 
-		// Producer. `SendMessage` trên ĐÚNG queue summarize — không wildcard,
-		// và KHÔNG có quyền nào trên DLQ: chỉ dịch vụ SQS ghi vào đó, và một bug
-		// có quyền xoá DLQ là một bug dọn được bằng chứng của chính nó.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
+		// ---------- web — chỉ ĐỌC, và là function duy nhất có Function URL ----------
+
+		// Logical id "Function" GIỮ NGUYÊN cho `web`: đổi nó là CloudFormation xoá
+		// function cũ và tạo function mới, kéo theo Function URL mới, kéo theo
+		// EdgeStack phải đổi origin, kéo theo một khoảng downtime không cần thiết.
+		// Hai function mới lấy id mới.
+		//
+		// Log group cũng GIỮ id cũ `LogGroup`, chứ KHÔNG lấy mặc định
+		// `FunctionLogGroup`. `ObservabilityStack` của prod import nó, và
+		// CloudFormation từ chối xoá một export đang được stack khác dùng — bản
+		// trước của dòng này đã làm `Prod-AppStack` rollback. Xem `LambdaRole`.
+		// Ích lợi kèm theo: log prod không mất.
+		LambdaRole webRole = LambdaRole.create(this, "Function", "LogGroup", cfg);
+		this.logGroup = webRole.logGroup();
+
+		// AP1. ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng — cấp `Query` trên ARN
+		// bảng trần là cấp luôn Query trên bảng, và `/index/*` là cấp trên mọi
+		// index tương lai (kể cả `gsi-by-source` của slice 4, thứ phải được cấp
+		// bằng một dòng CÓ Ý THỨC ở Task 19).
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Query"))
+				.resources(List.of(articlesTable.getTableArn()
+						+ "/index/" + DataStack.RECENT_INDEX_V2_NAME))
+				.build());
+		grantReadFeatureToggles(webRole.role(), featureTogglesTable);
+
+		this.webFunction = buildFunction("Function", webRole, repo, imageDigest,
+				baseEnv(cfg, "web", articlesTable, featureTogglesTable, sourcesTable));
+
+		// Quyền cho CloudFront gọi Function URL này KHÔNG nằm ở đây — hai
+		// `AWS::Lambda::Permission` (`lambda:InvokeFunctionUrl` +
+		// `lambda:InvokeFunction`) đều ở EdgeStack, vì `SourceArn` của chúng phải
+		// trỏ tới distribution. Đưa ngược về đây sẽ tạo circular dependency
+		// AppStack → EdgeStack → AppStack, trừ khi bỏ `SourceArn` — mà bỏ thì mọi
+		// distribution CloudFront đều gọi được.
+		this.functionUrl = this.webFunction.addFunctionUrl(FunctionUrlOptions.builder()
+				.authType(FunctionUrlAuthType.AWS_IAM)
+				.build());
+
+		CfnOutput.Builder.create(this, "FunctionUrl")
+				.value(this.functionUrl.getUrl()).build();
+
+		// ---------- ingest — ghi catalog, đọc/ghi sources, đẩy SQS ----------
+
+		LambdaRole ingestRole = LambdaRole.create(this, "IngestFunction", cfg);
+
+		// Đường GHI của catalog. Resource là ARN của BẢNG, không phải của index:
+		// `PutItem` trên ARN index synth vẫn xanh và chỉ chết lúc runtime.
+		ingestRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:PutItem"))
+				.resources(List.of(articlesTable.getTableArn()))
+				.build());
+		// AP5 + AP6. `Scan` chỉ trên bảng này — nó bị chặn trên ~30 dòng bởi
+		// master §2, trong khi `articles` tăng vô hạn. `UpdateItem` chứ KHÔNG
+		// `PutItem`: `SourceRepository.updateFetchState` chỉ đụng ba attribute
+		// trạng thái; `PutItem` sẽ xoá `name`/`feedUrl`/`enabled`.
+		ingestRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Scan", "dynamodb:UpdateItem"))
+				.resources(List.of(sourcesTable.getTableArn()))
+				.build());
+		grantReadFeatureToggles(ingestRole.role(), featureTogglesTable);
+		ingestRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("sqs:SendMessage"))
 				.resources(List.of(summarizeQueue.getQueueArn()))
 				.build());
 
-		// AP4 (ghi `summary`) + AP8 (đọc bài cần tóm tắt). Resource là ARN BẢNG,
-		// không phải ARN index — dòng `Query` ở trên trỏ index vì nó query GSI,
-		// còn hai action này đọc/ghi theo partition key. Cấp nhầm chiều thì synth
-		// vẫn xanh, cdk-nag vẫn im, và mọi lượt summarize chết bằng AccessDenied.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
+		Map<String, String> ingestEnv = baseEnv(cfg, "ingest",
+				articlesTable, featureTogglesTable, sourcesTable);
+		// CHỈ hai function nhận payload không-HTTP mới có biến này. Phải khớp
+		// `news.platform.pass-through-path` bên repo app; hai bên không thấy nhau
+		// nên compiler không bắt được lệch.
+		ingestEnv.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
+		ingestEnv.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
+
+		this.ingestFunction = buildFunction("IngestFunction", ingestRole, repo,
+				imageDigest, ingestEnv);
+
+		// ---------- summarize — đọc/ghi summary, gọi model, và NHẬN CẢ SWEEP ----------
+
+		LambdaRole summarizeRole = LambdaRole.create(this, "SummarizeFunction", cfg);
+
+		// AP4 (ghi `summary`) + AP8 (đọc bài cần tóm tắt). ARN BẢNG — dòng `Query`
+		// dưới trỏ index vì nó query GSI, còn hai action này đọc/ghi theo partition
+		// key. Cấp nhầm chiều thì synth vẫn xanh, cdk-nag vẫn im, và mọi lượt
+		// summarize chết bằng AccessDenied.
+		summarizeRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("dynamodb:GetItem", "dynamodb:UpdateItem"))
 				.resources(List.of(articlesTable.getTableArn()))
 				.build());
-
-		// Secret ĐẦU TIÊN và duy nhất của chương trình (master §8.1). Đọc đúng
-		// MỘT parameter — KHÔNG `GetParametersByPath`: ta biết chính xác tên, nên
-		// quyền quét cây là quyền thừa và nó với tới cả image digest lẫn mọi config
-		// tương lai. KHÔNG `PutParameter`: key do người vận hành ghi bằng credential
-		// của chính họ (TDD §17 #10).
+		// AP9 — sweep query trên gsi-recent-v2. ARN INDEX.
+		summarizeRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Query"))
+				.resources(List.of(articlesTable.getTableArn()
+						+ "/index/" + DataStack.RECENT_INDEX_V2_NAME))
+				.build());
+		grantReadFeatureToggles(summarizeRole.role(), featureTogglesTable);
+		// Sweep là PRODUCER: nó đẩy message vào chính queue mà nó tiêu thụ.
+		// Quên dòng này thì sweep chạy, log `enqueued=N`, và không message nào
+		// tới nơi — AccessDenied nằm trong một exception bị nuốt.
+		summarizeRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("sqs:SendMessage"))
+				.resources(List.of(summarizeQueue.getQueueArn()))
+				.build());
+		// Secret duy nhất mà function này chạm tới. Đọc đúng MỘT parameter —
+		// KHÔNG `GetParametersByPath`: ta biết chính xác tên, nên quyền quét cây
+		// là quyền thừa và nó với tới cả image digest lẫn mọi config tương lai.
+		// KHÔNG `PutParameter`: key do người vận hành ghi bằng credential của
+		// chính họ (Phase 3 TDD §17 #10).
 		String keyParameterName = "/news/" + cfg.tagPrefix() + "/gemini-api-key";
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
+		summarizeRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("ssm:GetParameter"))
 				.resources(List.of("arn:aws:ssm:" + cfg.region() + ":" + cfg.account()
 						+ ":parameter" + keyParameterName))
 				.build());
-
 		// SecureString dùng khoá quản lý `alias/aws/ssm`. Ghim về đúng khoá đó —
-		// để `Resource: *` thì execution role giải mã được MỌI thứ mã hoá trong
-		// account, và đó là quyền không ai để ý cho tới khi có sự cố.
-		executionRole.addToPolicy(PolicyStatement.Builder.create()
+		// để `Resource: *` thì role giải mã được MỌI thứ mã hoá trong account.
+		summarizeRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("kms:Decrypt"))
 				.resources(List.of("arn:aws:kms:" + cfg.region() + ":" + cfg.account()
 						+ ":alias/aws/ssm"))
 				.build());
 
-		Map<String, String> env = new HashMap<>();
-		env.put("SPRING_PROFILES_ACTIVE", "aws");
-		env.put("NEWS_ENV", cfg.tagPrefix());
-		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
-		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
-		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
-		// Khai TƯỜNG MINH dù trùng mặc định của LWA — để nó grep được và test
-		// được. Phải khớp `news.platform.pass-through-path` bên repo app (chỗ
-		// `EventsController` lấy path của nó); hai bên không thấy nhau nên
-		// compiler không bắt được lệch.
-		env.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
-		// ADR-0015. Không có dòng này, LWA trả HTTP status trong BODY và Lambda
-		// coi mọi response là thành công — kể cả 500. Đó là lý do
-		// `retryAttempts(2)` và DLQ của Schedule chưa bao giờ kích hoạt kể từ
-		// Phase 2, và Phase 3 §20B #1 đo được điều đó trên prod.
-		//
-		// CHỈ 5xx. Đưa 4xx vào là biến mỗi con bot quét 404 thành một "lỗi
-		// Lambda" và tự đầu độc alarm. Cái giá đã biết: `/events` phải tự trả
-		// 500 cho `job` lạ thay vì 400 — xem `EventsController#handleUnknown`.
-		env.put("AWS_LWA_ERROR_STATUS_CODES", "500-599");
-		env.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
+		Map<String, String> summarizeEnv = baseEnv(cfg, "summarize",
+				articlesTable, featureTogglesTable, sourcesTable);
+		summarizeEnv.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
+		summarizeEnv.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
 		// Chỉ TÊN parameter đi qua đây, không phải giá trị: key nằm nguyên trong
-		// SSM SecureString và chỉ được giải mã lúc runtime bằng đúng hai quyền ở
-		// trên. `ssm-secure` dynamic reference KHÔNG dùng được cho env var của
-		// Lambda (CloudFormation chỉ hỗ trợ nó trên 11 cặp resource/property, và
-		// `AWS::Lambda::Function` không nằm trong đó), nên truyền tham chiếu là
-		// cách DUY NHẤT giữ được cả audit lẫn xoay key không cần redeploy.
-		env.put("NEWS_GEMINI_KEY_PARAMETER", keyParameterName);
-		// Ghim phiên bản, KHÔNG dùng alias `gemini-flash-lite-latest`: một alias đổi
-		// model mà không có commit nào, nên độ dài đầu ra và tỉ lệ chạm trần 500 ký
-		// tự có thể đổi giữa hai lượt chạy mà không ai truy được lý do.
-		//
-		// Cái giá của việc ghim là model sẽ bị Google ngưng — và nó ĐÃ xảy ra:
-		// `gemini-2.5-flash-lite` trả 404 "no longer available to new users" trong
-		// khoảng 15:09Z–18:08Z ngày 2026-08-11, làm mọi lượt summarize hỏng cho tới
-		// khi đổi dòng này. Đổi model là một commit có diff đọc được, và lưới cảnh
-		// báo bắt được sự cố đó trong ~40 phút.
-		env.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
-		// Tên service trong X-Ray. Boot 4.1 KHÔNG map biến này qua
-		// `OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`; đường vào là
-		// `OpenTelemetryResourceAttributes`, vốn đọc thẳng `OTEL_SERVICE_NAME` từ
-		// env (fallback `spring.application.name`). Hai đường cùng ra
-		// `news-aggregator`, nhưng viết ra ở đây thì tên service không đổi theo một
-		// lần sửa `spring.application.name` bên repo app.
-		env.put("OTEL_SERVICE_NAME", "news-aggregator");
-		// TRACES_ENDPOINT chứ KHÔNG phải `OTEL_EXPORTER_OTLP_ENDPOINT` dạng chung:
-		// Boot 4.1 map biến dạng chung vào CẢ BA endpoint trace/metric/log cùng
-		// lúc, mà X-Ray chỉ nhận trace. Task 14 đã tắt tường minh export metric và
-		// log trong `application.yaml` nên biến dạng chung cũng không gây hại hôm
-		// nay — nhưng biến signal-specific thì không phụ thuộc vào hai dòng
-		// `enabled: false` đó còn sống hay không, và nó cũng là biến mà chính tài
-		// liệu X-Ray OTLP dùng.
-		//
-		// ĐIỀU KIỆN TIÊN QUYẾT ngoài repo: Transaction Search phải BẬT ở account
-		// (`aws xray get-trace-segment-destination` trả `CloudWatchLogs`). Không có
-		// nó thì endpoint từ chối span, và triệu chứng là X-Ray rỗng chứ không phải
-		// một lỗi deploy nào. Lệnh bật nằm ở runbook Phase 4.
-		env.put("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-				"https://xray." + cfg.region() + ".amazonaws.com/v1/traces");
+		// SSM SecureString và chỉ được giải mã lúc runtime. `ssm-secure` dynamic
+		// reference KHÔNG dùng được cho env var của Lambda, nên truyền tham chiếu
+		// là cách DUY NHẤT giữ được cả audit lẫn xoay key không cần redeploy.
+		summarizeEnv.put("NEWS_GEMINI_KEY_PARAMETER", keyParameterName);
+		// Ghim phiên bản, KHÔNG dùng alias `gemini-flash-lite-latest`: một alias
+		// đổi model mà không có commit nào. Cái giá của việc ghim là model sẽ bị
+		// Google ngưng — và nó ĐÃ xảy ra ngày 2026-08-11.
+		summarizeEnv.put("NEWS_SUMMARIZATION_MODEL", "gemini-3.5-flash-lite");
 
-		this.function = Function.Builder.create(this, "Function")
-				.role(executionRole)
+		this.summarizeFunction = buildFunction("SummarizeFunction", summarizeRole, repo,
+				imageDigest, summarizeEnv);
+
+		// Consumer. `addEventSource` tự cấp ReceiveMessage/DeleteMessage/
+		// GetQueueAttributes — KHÔNG viết tay lại, làm thế sẽ có hai policy chồng
+		// nhau và cdk-nag báo trùng.
+		//
+		// KHÔNG đặt maxConcurrency: nó tắt mất tối ưu hoá poll-khi-rỗng của Lambda
+		// và làm ESM gọi SQS nhiều hơn 24/7 (Phase 3 TDD §17 #9).
+		this.summarizeFunction.addEventSource(SqsEventSource.Builder.create(summarizeQueue)
+				.batchSize(10)
+				// Gom batch để né cold start: 45 bài mà mỗi bài một invoke thì
+				// riêng tiền boot Spring đã gấp mấy lần tiền model.
+				.maxBatchingWindow(Duration.seconds(60))
+				// BẮT BUỘC. Thiếu nó thì Lambda BỎ QUA `batchItemFailures` và coi
+				// cả batch là thành công — message hỏng biến mất im lặng.
+				.reportBatchItemFailures(true)
+				.build());
+
+		// ---------- hai Schedule, đấu vào ĐÚNG function ----------
+
+		// MỘT DLQ cho cả hai schedule. Tách ra hai hàng đợi chỉ làm người vận hành
+		// phải nhớ kiểm hai chỗ cho cùng một loại sự cố, trong khi payload trong
+		// message đã phân biệt được nguồn.
+		//
+		// Construct id giữ nguyên `IngestDlq` dù nay nó phục vụ cả sweep: đổi id là
+		// đổi logical ID, tức CloudFormation xoá queue cũ và tạo queue mới, vứt luôn
+		// message hỏng đang nằm trong đó — đúng thứ ta cần đọc nhất.
+		Queue scheduleDlq = null;
+		if (cfg.ingestionRate() != null || cfg.sweepRate() != null) {
+			scheduleDlq = Queue.Builder.create(this, "IngestDlq")
+					.retentionPeriod(Duration.days(14))
+					.enforceSsl(true)
+					.build();
+		}
+		this.scheduleDlq = scheduleDlq;
+
+		if (cfg.ingestionRate() != null) {
+			// TẦNG ② của ADR-0015, nay phải khai HAI LẦN vì có hai function chạy
+			// bất đồng bộ. Scheduler gọi Lambda BẤT ĐỒNG BỘ: nó trả `202 Accepted`
+			// ngay khi Lambda NHẬN sự kiện, và từ giây đó `retryAttempts(2)` + DLQ
+			// của Schedule không còn biết gì nữa. Chúng canh tầng ① (không giao
+			// được việc). Lỗi khi HÀM CHẠY rơi vào async retry rồi tới ĐÂY.
+			//
+			// `SqsDestination.bind()` tự gọi `queue.grantSendMessages(fn)`, nên
+			// KHÔNG viết tay `sqs:SendMessage` trên `IngestDlq` — thêm statement
+			// tay nữa chỉ tạo bản sao mà lần audit IAM sau phải truy nguyên.
+			this.ingestFunction.configureAsyncInvoke(EventInvokeConfigOptions.builder()
+					.onFailure(new SqsDestination(scheduleDlq))
+					.build());
+
+			Schedule.Builder.create(this, "IngestSchedule")
+					.schedule(ScheduleExpression.rate(cfg.ingestionRate()))
+					.description("Kích hoạt một lượt ingestion RSS/Atom")
+					.target(LambdaInvoke.Builder.create(this.ingestFunction)
+							// Payload là HỢP ĐỒNG, không phải mặc định của
+							// EventBridge: message SQS đổ vào cùng path /events nên
+							// cần một discriminator.
+							.input(ScheduleTargetInput.fromObject(
+									Map.of("job", "ingest-feeds")))
+							// MẶC ĐỊNH LÀ 185. Không set = một lỗi kéo dài thành
+							// 185 lần invoke.
+							.retryAttempts(2)
+							.maxEventAge(Duration.minutes(15))
+							.deadLetterQueue(scheduleDlq)
+							.build())
+					.build();
+		}
+
+		if (cfg.sweepRate() != null) {
+			// SWEEP CHẠY TRÊN `summarize`, KHÔNG TRÊN `ingest` — dù nó cũng là một
+			// EventBridge Schedule y hệt `ingest-feeds`. Đây là chỗ ADR-0020 driver
+			// #2 trở nên cụ thể: cắt theo ranh giới NGHIỆP VỤ nghĩa là mọi việc của
+			// module `summarization` ở cùng một chỗ, bất kể ai đánh thức nó.
+			//
+			// Thưa hơn ingest có chủ đích: đây là LƯỚI AN TOÀN, không phải đường
+			// chính. `ArticleAddedListener` đã lo bài mới trong vòng vài phút.
+			this.summarizeFunction.configureAsyncInvoke(EventInvokeConfigOptions.builder()
+					.onFailure(new SqsDestination(scheduleDlq))
+					.build());
+
+			Schedule.Builder.create(this, "SummarizeSweepSchedule")
+					.schedule(ScheduleExpression.rate(cfg.sweepRate()))
+					.description("Quét article còn thiếu tóm tắt trong cửa sổ 48h")
+					.target(LambdaInvoke.Builder.create(this.summarizeFunction)
+							.input(ScheduleTargetInput.fromObject(
+									Map.of("job", "summarize-sweep")))
+							.retryAttempts(2)
+							.maxEventAge(Duration.minutes(15))
+							.deadLetterQueue(scheduleDlq)
+							.build())
+					.build();
+		}
+	}
+
+	/**
+	 * Ba function khác nhau ở role, trigger và env var — KHÔNG khác ở image,
+	 * kiến trúc, memory hay timeout. Helper này giữ phần "không khác" ở đúng
+	 * một chỗ để một lần đổi memory không thành ba lần sửa lệch nhau.
+	 *
+	 * `env` nhận vào là bản ĐÃ đầy đủ của function đó. Cố ý không merge với một
+	 * map mặc định nào: env var là bề mặt cấu hình mà `SecurityBoundaryTest`
+	 * kiểm từng dòng, và một cơ chế merge sẽ làm "function này có biến gì" trở
+	 * thành câu hỏi phải suy luận thay vì đọc.
+	 */
+	private Function buildFunction(String id, LambdaRole lambdaRole,
+			IRepository repo, String imageDigest, Map<String, String> env) {
+		Function fn = Function.Builder.create(this, id)
+				.role(lambdaRole.role())
 				.runtime(Runtime.FROM_IMAGE)
 				.handler(Handler.FROM_IMAGE)
 				.code(Code.fromEcrImage(repo, EcrImageCodeProps.builder()
@@ -264,141 +339,89 @@ public class AppStack extends Stack {
 				// để lại ~15s cho việc fetch 4 feed là quá sát. Timeout cao không
 				// tốn tiền — Lambda tính theo duration thật, không theo cấu hình.
 				.timeout(Duration.seconds(120))
-				.logGroup(this.logGroup)
+				.logGroup(lambdaRole.logGroup())
 				.environment(env)
 				.build();
 
-		// `Code.fromEcrImage` chọn `@` hay `:` bằng `tagOrDigest.startsWith("sha256:")`.
-		// Digest của ta là token chưa resolve (`${Token[TOKEN.n]}`) nên check đó luôn
-		// trả false và CDK nối bằng `:` — Lambda hiểu thành TAG và deploy chết.
-		// `repositoryUriForDigest` ép `@` mà không soi chuỗi, nên nó đúng với token.
-		CfnFunction cfnFunction = (CfnFunction) this.function.getNode().getDefaultChild();
-		cfnFunction.addPropertyOverride("Code.ImageUri",
-				repo.repositoryUriForDigest(imageDigest));
-
-		// AI được phép gọi Function URL này thì KHÔNG nằm ở đây — hai
-		// `AWS::Lambda::Permission` (`lambda:InvokeFunctionUrl` +
-		// `lambda:InvokeFunction`) đều ở EdgeStack, vì `SourceArn` của chúng phải
-		// trỏ tới distribution. Đưa ngược về đây sẽ tạo circular dependency
-		// AppStack → EdgeStack → AppStack, trừ khi bỏ `SourceArn` — mà bỏ thì mọi
-		// distribution CloudFront đều gọi được.
-		this.functionUrl = this.function.addFunctionUrl(FunctionUrlOptions.builder()
-				.authType(FunctionUrlAuthType.AWS_IAM)
-				.build());
-
-		CfnOutput.Builder.create(this, "FunctionUrl")
-				.value(this.functionUrl.getUrl()).build();
-
-		// Consumer. `addEventSource` tự cấp ReceiveMessage/DeleteMessage/
-		// GetQueueAttributes cho execution role — KHÔNG viết tay lại, làm thế sẽ
-		// có hai policy chồng nhau và cdk-nag báo trùng.
-		//
-		// KHÔNG đặt maxConcurrency: nó tắt mất tối ưu hoá poll-khi-rỗng của
-		// Lambda và làm ESM gọi SQS nhiều hơn 24/7 (TDD §17 #9).
-		this.function.addEventSource(SqsEventSource.Builder.create(summarizeQueue)
-				.batchSize(10)
-				// Gom batch để né cold start: 45 bài mà mỗi bài một invoke thì
-				// riêng tiền boot Spring đã gấp mấy lần tiền model.
-				.maxBatchingWindow(Duration.seconds(60))
-				// BẮT BUỘC. Thiếu nó thì Lambda BỎ QUA response batchItemFailures
-				// và coi cả batch là thành công — message hỏng biến mất im lặng.
-				.reportBatchItemFailures(true)
-				.build());
-
-		// Schedule và DLQ nằm trong AppStack chứ không tách stack riêng (TDD §17 #2):
-		// schedule là TRIGGER CỦA FUNCTION, tách ra sẽ thành một stack chỉ chứa
-		// một trigger trỏ ngược về stack bên cạnh.
-		// MỘT DLQ cho cả hai schedule. Tách ra hai hàng đợi chỉ làm người vận hành
-		// phải nhớ kiểm hai chỗ cho cùng một loại sự cố — "một lượt chạy theo lịch
-		// hỏng hết retry" — trong khi payload trong message đã phân biệt được nguồn.
-		//
-		// Construct id giữ nguyên `IngestDlq` dù nay nó phục vụ cả sweep: đổi id là
-		// đổi logical ID, tức CloudFormation xoá queue cũ và tạo queue mới, vứt luôn
-		// message hỏng đang nằm trong đó — đúng thứ ta cần đọc nhất.
-		Queue scheduleDlq = null;
-		if (cfg.ingestionRate() != null || cfg.sweepRate() != null) {
-			scheduleDlq = Queue.Builder.create(this, "IngestDlq")
-					.retentionPeriod(Duration.days(14))
-					.enforceSsl(true)
-					.build();
-
-			// TẦNG ② của ADR-0015. Scheduler gọi Lambda BẤT ĐỒNG BỘ: nó trả
-			// `202 Accepted` ngay khi Lambda NHẬN sự kiện, và từ giây đó
-			// `retryAttempts(2)` + DLQ của Schedule không còn biết gì nữa. Chúng
-			// canh tầng ① (không giao được việc: throttle, mất quyền). Lỗi khi
-			// HÀM CHẠY rơi vào async retry của Lambda rồi tới ĐÂY.
-			//
-			// Không có destination thì sự kiện rơi mất, chỉ còn metric
-			// `AsyncEventsDropped` — biết "có thứ gì đó rơi" mà không biết cái gì.
-			// Message ở đây mang PAYLOAD GỐC nên đọc được ngay là `ingest-feeds`
-			// hay `summarize-sweep`.
-			//
-			// Cùng queue với tầng ①: một chỗ để nhìn tốt hơn hai, và hai loại
-			// message phân biệt được bằng hình dạng. Runbook mô tả cách đọc.
-			// KHÔNG có `executionRole.addToPolicy(sqs:SendMessage)` đi kèm ở đây, và
-			// đó là kết luận đã ĐO chứ không phải bỏ sót.
-			//
-			// `SqsDestination.bind()` tự gọi `queue.grantSendMessages(fn)`, nên
-			// `FunctionRoleDefaultPolicy` đã có `[GetQueueAttributes, GetQueueUrl,
-			// SendMessage]` trên `IngestDlq` mà không ai viết dòng nào. Thêm một
-			// statement tay nữa chỉ tạo bản sao trong policy: không sai, nhưng nó
-			// là thứ mà lần audit IAM sau phải mất công truy nguyên, và Task 9 —
-			// tập-đóng quyền — sẽ đếm nhầm nguồn gốc của nó.
-			//
-			// Cái giá của việc dựa vào auto-grant: nó RỘNG HƠN statement tay, thêm
-			// `GetQueueAttributes` và `GetQueueUrl`. Hai quyền đọc metadata trên
-			// một DLQ — chấp nhận được, nhưng phải nằm trong tập-đóng của Task 9
-			// một cách có ý thức, không phải lọt vào vì không ai nhìn.
-			//
-			// Chốt chặn: `function_co_on_failure_destination_tro_ve_ingest_dlq`
-			// khẳng định CẢ HAI vế — có `EventInvokeConfig`, VÀ role có
-			// `sqs:SendMessage` trên `IngestDlq`. Nếu CDK bỏ auto-grant ở bản sau,
-			// vế thứ hai đỏ.
-			this.function.configureAsyncInvoke(EventInvokeConfigOptions.builder()
-					.onFailure(new SqsDestination(scheduleDlq))
-					.build());
-		}
-		this.scheduleDlq = scheduleDlq;
-
-		if (cfg.ingestionRate() != null) {
-			Schedule.Builder.create(this, "IngestSchedule")
-					.schedule(ScheduleExpression.rate(cfg.ingestionRate()))
-					.description("Kích hoạt một lượt ingestion RSS/Atom")
-					.target(LambdaInvoke.Builder.create(this.function)
-							// Payload là HỢP ĐỒNG, không phải mặc định của EventBridge:
-							// Phase 3 đổ message SQS vào cùng path /events, nên cần một
-							// discriminator. Chọn sẵn bây giờ tốn 0 dòng.
-							.input(ScheduleTargetInput.fromObject(
-									Map.of("job", "ingest-feeds")))
-							// MẶC ĐỊNH LÀ 185. Không set = một lỗi kéo dài thành 185
-							// lần invoke.
-							.retryAttempts(2)
-							.maxEventAge(Duration.minutes(15))
-							.deadLetterQueue(scheduleDlq)
-							.build())
-					.build();
-		}
-
-		// Schedule thứ hai — sweep (ADR-0014). Thưa hơn ingest có chủ đích: đây là
-		// LƯỚI AN TOÀN, không phải đường chính. `ArticleAddedListener` đã lo bài mới
-		// trong vòng vài phút; xem `EnvConfig.sweepRate` về cái giá của nhịp dày.
-		if (cfg.sweepRate() != null) {
-			Schedule.Builder.create(this, "SummarizeSweepSchedule")
-					.schedule(ScheduleExpression.rate(cfg.sweepRate()))
-					.description("Quét article còn thiếu tóm tắt trong cửa sổ 48h")
-					.target(LambdaInvoke.Builder.create(this.function)
-							.input(ScheduleTargetInput.fromObject(
-									Map.of("job", "summarize-sweep")))
-							.retryAttempts(2)
-							.maxEventAge(Duration.minutes(15))
-							.deadLetterQueue(scheduleDlq)
-							.build())
-					.build();
-		}
+		// Cùng lý do như bản một-function: `Code.fromEcrImage` chọn `@` hay `:`
+		// bằng `tagOrDigest.startsWith("sha256:")`, mà digest của ta là token
+		// chưa resolve nên check đó luôn false và CDK nối bằng `:` — Lambda hiểu
+		// thành TAG và deploy chết.
+		CfnFunction cfn = (CfnFunction) fn.getNode().getDefaultChild();
+		cfn.addPropertyOverride("Code.ImageUri", repo.repositoryUriForDigest(imageDigest));
+		return fn;
 	}
 
-	public Function getFunction() {
-		return function;
+	/**
+	 * Env var mà cả ba function đều cần: định danh môi trường, tên bảng, và cấu
+	 * hình OTel. KHÔNG chứa `AWS_LWA_PASS_THROUGH_PATH` — chỉ hai function
+	 * nhận payload không-HTTP mới có nó, và `web` có nó là mở một đường vào
+	 * không ai dùng.
+	 */
+	private Map<String, String> baseEnv(EnvConfig cfg, String profile,
+			ITable articlesTable, ITable featureTogglesTable, ITable sourcesTable) {
+		Map<String, String> env = new HashMap<>();
+		env.put("SPRING_PROFILES_ACTIVE", "aws," + profile);
+		env.put("NEWS_ENV", cfg.tagPrefix());
+		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
+		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
+		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
+		// ADR-0015. Không có dòng này, LWA trả HTTP status trong BODY và Lambda
+		// coi mọi response là thành công — kể cả 500.
+		//
+		// CHỈ 5xx. Đưa 4xx vào là biến mỗi con bot quét 404 thành một "lỗi
+		// Lambda" và tự đầu độc alarm.
+		env.put("AWS_LWA_ERROR_STATUS_CODES", "500-599");
+		// Tên service trong X-Ray, nay CÓ HẬU TỐ PROFILE. Ba process khác nhau
+		// cùng tên service sẽ làm service map của X-Ray gộp chúng lại và câu hỏi
+		// "lượt hỏng này thuộc function nào" mất câu trả lời. Cái giá: trace của
+		// Phase 4 mang tên cũ nên biểu đồ có một đường gãy tại ngày deploy.
+		env.put("OTEL_SERVICE_NAME", "news-aggregator-" + profile);
+		// TRACES_ENDPOINT chứ KHÔNG phải `OTEL_EXPORTER_OTLP_ENDPOINT` dạng chung:
+		// Boot 4.1 map biến dạng chung vào CẢ BA endpoint trace/metric/log cùng
+		// lúc, mà X-Ray chỉ nhận trace.
+		//
+		// ĐIỀU KIỆN TIÊN QUYẾT ngoài repo: Transaction Search phải BẬT ở account
+		// (`aws xray get-trace-segment-destination` trả `CloudWatchLogs`).
+		env.put("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+				"https://xray." + cfg.region() + ".amazonaws.com/v1/traces");
+		return env;
+	}
+
+	/**
+	 * Bộ action đọc ra từ bytecode của togglz-dynamodb 4.6.2:
+	 *   DynamoDBStateRepositoryBuilder.initializeTable() → describeTable
+	 *   DynamoDBStateRepository.getFeatureState()        → getItem
+	 *
+	 * `DescribeTable` là cái dễ quên nhất và chí mạng nhất: builder gọi nó ĐÚNG
+	 * MỘT LẦN lúc dựng bean rồi ném RuntimeException. Bean là @Lazy nên lần chết
+	 * đầu tiên rơi vào request đầu tiên chạm tới flag — trên môi trường thật.
+	 *
+	 * KHÔNG cấp `UpdateItem` cho bất kỳ function nào ở đây. Đường GHI chỉ thuộc
+	 * về `admin` và nó được cấp ở Task 26, tường minh.
+	 */
+	private static void grantReadFeatureToggles(Role role, ITable featureTogglesTable) {
+		role.addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:DescribeTable", "dynamodb:GetItem"))
+				.resources(List.of(featureTogglesTable.getTableArn()))
+				.build());
+	}
+
+	public Function getWebFunction() {
+		return webFunction;
+	}
+
+	public Function getIngestFunction() {
+		return ingestFunction;
+	}
+
+	public Function getSummarizeFunction() {
+		return summarizeFunction;
+	}
+
+	/** Thứ tự cố định: web, ingest, summarize — chỗ gọi dựa vào nó để đặt tên. */
+	public List<Function> getAllFunctions() {
+		return List.of(webFunction, ingestFunction, summarizeFunction);
 	}
 
 	public FunctionUrl getFunctionUrl() {

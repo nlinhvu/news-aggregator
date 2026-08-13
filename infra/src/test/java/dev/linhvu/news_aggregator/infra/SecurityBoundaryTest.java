@@ -264,12 +264,30 @@ class SecurityBoundaryTest {
 	 * không tạo ra triệu chứng nào, nên test là thứ duy nhất giữ được ranh giới.
 	 */
 	@Test
-	void smoke_role_chi_invoke_duoc_dung_mot_function() {
+	void smoke_role_invoke_duoc_dung_hai_function_scheduled() {
 		Template t = cicdStack();
 
-		assertFalse(resourceForAction(t, "SmokeRoleDefaultPolicy",
-						"lambda:InvokeFunction").isEmpty(),
-				"SmokeRole phải được lambda:InvokeFunction trên function của môi trường");
+		// `resourcesForAction` (số NHIỀU) chứ không `resourceForAction`: bản trước
+		// tên là `..._dung_mot_function` nhưng chỉ hỏi "có không có" trên phần tử
+		// đầu, nên nó xanh với BẤT KỲ số function nào. Tên hứa một đằng, assertion
+		// canh một nẻo — và nó xanh y hệt nhau ở cả hai bên của việc tách.
+		List<String> invokeOn = resourcesForAction(t, "SmokeRoleDefaultPolicy",
+				"lambda:InvokeFunction");
+
+		assertEquals(2, invokeOn.size(),
+				"SmokeRole invoke đúng hai function có đường scheduled, thực tế: "
+						+ invokeOn);
+		assertTrue(invokeOn.stream().anyMatch(r -> r.contains("IngestFunction")),
+				"thiếu quyền invoke `ingest`, thực tế: " + invokeOn);
+		assertTrue(invokeOn.stream().anyMatch(r -> r.contains("SummarizeFunction")),
+				"thiếu quyền invoke `summarize`, thực tế: " + invokeOn);
+		// `web` KHÔNG nằm trong đó: nó có Function URL nên smoke test chạm bằng
+		// `curl`. Chuỗi export của `web` là `…FnGetAttFunction76856677Arn…`, mà hai
+		// function kia cũng chứa `Function`, nên phải loại trừ bằng tiền tố riêng.
+		assertTrue(invokeOn.stream().noneMatch(
+						r -> r.contains("FnGetAttFunction76856677")),
+				"SmokeRole KHÔNG được invoke `web` — nó test qua CloudFront: " + invokeOn);
+
 		for (String action : List.of("lambda:UpdateFunctionCode", "lambda:GetFunction",
 				"ssm:PutParameter", "s3:PutObject")) {
 			assertTrue(resourceForAction(t, "SmokeRoleDefaultPolicy", action).isEmpty(),
@@ -713,9 +731,9 @@ class SecurityBoundaryTest {
 	 *   phụ của việc ai đó sửa dòng `resources(...)`.
 	 */
 	@Test
-	void lambda_ghi_duoc_vao_articles() {
-		List<String> putOn = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
-				"dynamodb:PutItem");
+	void ingest_ghi_duoc_vao_articles() {
+		List<String> putOn = resourcesForAction(appStack(),
+				"IngestFunctionRoleDefaultPolicy", "dynamodb:PutItem");
 
 		assertEquals(1, putOn.size(),
 				"PutItem phải được cấp trên đúng một bảng, thực tế: " + putOn);
@@ -738,11 +756,12 @@ class SecurityBoundaryTest {
 	 * và `lambda_ghi_duoc_vao_articles` đã canh đúng nó cho `PutItem`.
 	 */
 	@Test
-	void lambda_doc_ghi_summary_tren_arn_bang_articles() {
+	void summarize_doc_ghi_summary_tren_arn_bang_articles() {
 		Template t = appStack();
 
 		for (String action : List.of("dynamodb:GetItem", "dynamodb:UpdateItem")) {
-			List<String> on = resourcesForAction(t, "FunctionRoleDefaultPolicy", action);
+			List<String> on = resourcesForAction(t,
+					"SummarizeFunctionRoleDefaultPolicy", action);
 			List<String> onArticles = on.stream()
 					.filter(resource -> resource.contains("ArticlesTable"))
 					.toList();
@@ -767,11 +786,11 @@ class SecurityBoundaryTest {
 	 * (TDD §17 #10).
 	 */
 	@Test
-	void lambda_chi_doc_dung_mot_ssm_parameter() {
+	void summarize_chi_doc_dung_mot_ssm_parameter() {
 		Template t = appStack();
 
-		List<String> readOn = resourcesForAction(t, "FunctionRoleDefaultPolicy",
-				"ssm:GetParameter");
+		List<String> readOn = resourcesForAction(t,
+				"SummarizeFunctionRoleDefaultPolicy", "ssm:GetParameter");
 		assertEquals(1, readOn.size(),
 				"ssm:GetParameter phải được cấp trên đúng một parameter, thực tế: "
 						+ readOn);
@@ -781,8 +800,9 @@ class SecurityBoundaryTest {
 				"resource KHÔNG được chứa wildcard, thực tế: " + readOn.get(0));
 
 		for (String action : List.of("ssm:GetParametersByPath", "ssm:PutParameter")) {
-			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).isEmpty(),
-					"Lambda KHÔNG được cấp " + action);
+			assertTrue(resourcesForAction(t, "SummarizeFunctionRoleDefaultPolicy", action)
+							.isEmpty(),
+					"summarize KHÔNG được cấp " + action);
 		}
 	}
 
@@ -810,10 +830,10 @@ class SecurityBoundaryTest {
 						"Variables", Match.objectLike(Map.of(
 								"NEWS_GEMINI_KEY_PARAMETER", keyParameter)))))));
 
-		assertTrue(resourceForAction(t, "FunctionRoleDefaultPolicy", "ssm:GetParameter")
-						.endsWith(":parameter" + keyParameter),
+		assertTrue(resourceForAction(t, "SummarizeFunctionRoleDefaultPolicy",
+						"ssm:GetParameter").endsWith(":parameter" + keyParameter),
 				"ARN được cấp quyền phải trỏ đúng parameter mà env var chỉ tới, thực tế: "
-						+ resourceForAction(t, "FunctionRoleDefaultPolicy",
+						+ resourceForAction(t, "SummarizeFunctionRoleDefaultPolicy",
 						"ssm:GetParameter"));
 	}
 
@@ -828,7 +848,7 @@ class SecurityBoundaryTest {
 	@Test
 	void kms_decrypt_ghim_ve_khoa_cua_ssm() {
 		List<String> decryptOn = resourcesForAction(appStack(),
-				"FunctionRoleDefaultPolicy", "kms:Decrypt");
+				"SummarizeFunctionRoleDefaultPolicy", "kms:Decrypt");
 
 		assertEquals(1, decryptOn.size(),
 				"kms:Decrypt phải được cấp đúng một lần, thực tế: " + decryptOn);
@@ -855,15 +875,27 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	void khong_bao_gio_scan_bang_articles() {
-		List<String> scanOn = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
-				"dynamodb:Scan");
+		List<String> scanOn = resourcesForAction(appStack(),
+				"IngestFunctionRoleDefaultPolicy", "dynamodb:Scan");
 
 		assertFalse(scanOn.isEmpty(), "AP5 đọc mọi nguồn bằng Scan trên bảng sources");
 		for (String resource : scanOn) {
 			assertTrue(resource.contains("SourcesTable"),
 					"Scan chỉ được cấp trên bảng sources, thực tế: " + resource);
-			assertFalse(resource.contains("ArticlesTable"),
-					"Scan KHÔNG bao giờ được chạm bảng articles, thực tế: " + resource);
+		}
+
+		// Vế phủ định quét CẢ BA role, không riêng `ingest`. Sau khi tách, "Scan
+		// trên articles là KHÔNG THỂ" chỉ còn đúng nếu không role nào có nó —
+		// hỏi mỗi `ingest` sẽ để `web` hoặc `summarize` mọc thêm `Scan` mà test
+		// vẫn xanh.
+		for (String role : List.of("FunctionRoleDefaultPolicy",
+				"IngestFunctionRoleDefaultPolicy", "SummarizeFunctionRoleDefaultPolicy")) {
+			for (String resource
+					: resourcesForAction(appStack(), role, "dynamodb:Scan")) {
+				assertFalse(resource.contains("ArticlesTable"),
+						"Scan KHÔNG bao giờ được chạm bảng articles — " + role
+								+ " đang có: " + resource);
+			}
 		}
 	}
 
@@ -888,13 +920,14 @@ class SecurityBoundaryTest {
 		// `UpdateItem` được cấp trên HAI bảng (sources và articles) — xem lý do ở
 		// `lambda_chi_doc_bang_feature_toggles`.
 		for (String action : List.of("dynamodb:Scan", "dynamodb:UpdateItem")) {
-			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
+			assertTrue(resourcesForAction(t, "IngestFunctionRoleDefaultPolicy", action)
+							.stream()
 							.anyMatch(resource -> resource.contains("SourcesTable")),
-					"Lambda phải được " + action + " trên bảng sources");
+					"ingest phải được " + action + " trên bảng sources");
 		}
 		for (String action : List.of("dynamodb:PutItem", "dynamodb:DeleteItem")) {
 			for (String resource
-					: resourcesForAction(t, "FunctionRoleDefaultPolicy", action)) {
+					: resourcesForAction(t, "IngestFunctionRoleDefaultPolicy", action)) {
 				assertFalse(resource.contains("SourcesTable"),
 						"Lambda KHÔNG được cấp " + action + " trên bảng sources — ghi cấu "
 								+ "hình là việc của sourcesSync, thực tế: " + resource);
@@ -1120,14 +1153,28 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * Tổng kiểm kê: 6 alarm metric trên hạn mức 10 CỦA CẢ ORG (8 account, chia
+	 * Tổng kiểm kê: **8** alarm metric trên hạn mức 10 CỦA CẢ ORG (8 account, chia
 	 * chung với một project khác). Test này là thứ duy nhất giữ con số đó khỏi
 	 * trôi — mỗi phase sau thêm alarm phải sửa đúng chỗ này và nêu chỗ nó lấy từ đâu.
+	 *
+	 * Phase 7 Task 3 thêm `SummarizeFunctionErrors`, và nó tốn **HAI** slot chứ
+	 * không phải một: `ObservabilityStack` dựng một lần mỗi môi trường, nên mọi
+	 * alarm nằm ngoài nhánh `cfg == PROD` đều nhân đôi (dev + prod). Plan Task 3
+	 * Step 8 viết "6 → 7" là phép tính bỏ qua điều đó; số thật là 6 → 8.
+	 *
+	 * Vẫn để nó chạy trên CẢ HAI, không gate về prod: `FunctionErrors` — anh em
+	 * gần nhất của nó — cũng dev+prod, và master §4 ngoại lệ parity đòi mọi alarm
+	 * phải được ép nổ thật trên `dev` trước khi được tin ở `prod`. Một alarm chỉ
+	 * tồn tại ở prod là một alarm chưa từng được kiểm chứng.
+	 *
+	 * KHÔNG thêm alarm cho `ingest`: `IngestHeartbeatAlarm` (metric filter trên
+	 * log) và `IngestDlqDepth` đã phủ. Còn 2 slot; phase sau phải trả lời được
+	 * "cái gì bị bỏ đi" trước khi tiêu tiếp.
 	 */
 	@Test
 	void tong_so_alarm_dung_ngan_sach_free_tier() {
-		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Alarm", 4);
-		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Alarm", 2);
+		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Alarm", 5);
+		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Alarm", 3);
 		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Alarm", 0);
 	}
 
@@ -1392,15 +1439,24 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	void function_co_on_failure_destination_tro_ve_ingest_dlq() {
+		// HAI EventInvokeConfig từ Task 3: `ingest` và `summarize` chạy bất đồng bộ
+		// độc lập nhau, nên mỗi cái phải tự khai tầng ② của mình. Đếm thay vì
+		// `hasResourceProperties`: cái sau xanh khi chỉ MỘT trong hai có destination.
+		appStack().resourceCountIs("AWS::Lambda::EventInvokeConfig", 2);
 		appStack().hasResourceProperties("AWS::Lambda::EventInvokeConfig",
 				Match.objectLike(Map.of("DestinationConfig",
 						Match.objectLike(Map.of("OnFailure", Match.anyValue())))));
 
-		List<String> sendOn = resourcesForAction(appStack(),
-				"FunctionRoleDefaultPolicy", "sqs:SendMessage");
-		assertTrue(sendOn.stream().anyMatch(r -> r.contains("IngestDlq")),
-				"onFailure destination cần sqs:SendMessage trên IngestDlq, thực tế: "
-						+ sendOn);
+		// Cả hai role phải có `sqs:SendMessage` trên `IngestDlq` — do
+		// `SqsDestination.bind()` tự cấp. Thiếu ở một trong hai nghĩa là sự kiện
+		// hỏng của function đó rơi mất, chỉ còn metric `AsyncEventsDropped`.
+		for (String role : List.of("IngestFunctionRoleDefaultPolicy",
+				"SummarizeFunctionRoleDefaultPolicy")) {
+			List<String> sendOn = resourcesForAction(appStack(), role, "sqs:SendMessage");
+			assertTrue(sendOn.stream().anyMatch(r -> r.contains("IngestDlq")),
+					"onFailure destination của " + role
+							+ " cần sqs:SendMessage trên IngestDlq, thực tế: " + sendOn);
+		}
 	}
 
 	/**
@@ -1478,12 +1534,18 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	void env_var_otlp_tro_ve_xray() {
-		appStack().hasResourceProperties("AWS::Lambda::Function",
-				Match.objectLike(Map.of("Environment", Map.of("Variables",
-						Match.objectLike(Map.of(
-								"OTEL_SERVICE_NAME", "news-aggregator",
-								"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-								"https://xray.us-east-1.amazonaws.com/v1/traces"))))));
+		// Tên service MANG HẬU TỐ PROFILE từ Task 3. Ba process cùng tên service
+		// làm service map của X-Ray gộp chúng lại và câu hỏi "lượt hỏng này thuộc
+		// function nào" mất câu trả lời. Kiểm cả ba, không chỉ một: một function
+		// bị quên hậu tố sẽ lẫn vào đúng cái đống ta vừa tách ra.
+		for (String profile : List.of("web", "ingest", "summarize")) {
+			appStack().hasResourceProperties("AWS::Lambda::Function",
+					Match.objectLike(Map.of("Environment", Map.of("Variables",
+							Match.objectLike(Map.of(
+									"OTEL_SERVICE_NAME", "news-aggregator-" + profile,
+									"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+									"https://xray.us-east-1.amazonaws.com/v1/traces"))))));
+		}
 	}
 
 	/**
@@ -1552,6 +1614,81 @@ class SecurityBoundaryTest {
 							+ ngoaiDanhSach
 							+ " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
 		}
+	}
+
+	@Test
+	void ba_function_ba_role_ba_bo_trigger() {
+		Template template = appStack(EnvConfig.DEV);
+
+		template.resourceCountIs("AWS::Lambda::Function", 3);
+		// Ba function dùng chung một log group thì log của người đọc và log của
+		// lượt summarize trộn vào nhau, và retention/quyền không tách được nữa.
+		template.resourceCountIs("AWS::Logs::LogGroup", 3);
+
+		// Ghim theo TÊN chứ không theo TỔNG SỐ role. Tổng không phải 3: Scheduler
+		// tự sinh `SchedulerRoleForTarget` cho mỗi function được nhắm, và sau khi
+		// tách thì hai Schedule trỏ hai function khác nhau nên có hai role loại đó
+		// (bản một-function dùng chung một). Đếm tổng sẽ biến một role lạ mọc thêm
+		// thành thứ test phải nới số, thay vì thứ test phải chỉ mặt.
+		Set<String> roleIds = template.findResources("AWS::IAM::Role").keySet();
+		for (String prefix : List.of("FunctionRole", "IngestFunctionRole",
+				"SummarizeFunctionRole")) {
+			assertTrue(roleIds.stream().anyMatch(id -> id.startsWith(prefix)),
+					"thiếu execution role `" + prefix + "` — đang có: " + roleIds);
+		}
+		// ĐÚNG MỘT Function URL. `ingest` và `summarize` không có đường HTTP nào
+		// từ Internet — đó là nửa còn lại của việc thu hẹp blast radius.
+		template.resourceCountIs("AWS::Lambda::Url", 1);
+		// Một ESM (SQS → summarize), hai Schedule (ingest-feeds → ingest,
+		// summarize-sweep → summarize).
+		template.resourceCountIs("AWS::Lambda::EventSourceMapping", 1);
+		template.resourceCountIs("AWS::Scheduler::Schedule", 2);
+	}
+
+	@Test
+	void web_khong_ghi_duoc_articles_khong_goi_duoc_gemini() {
+		// Đây là LÝ DO TỒN TẠI của cả slice 1. Nếu chỉ giữ được một test của
+		// task này thì giữ test này.
+		Template template = appStack(EnvConfig.DEV);
+		List<Map<String, Object>> statements = statementsOfRole(template, "Function");
+
+		// Ba assertion dưới đều PHỦ ĐỊNH, nên chúng xanh một cách rỗng nếu prefix
+		// tra nhầm và `statements` rỗng. Đổi logical id của `web` mà quên sửa test
+		// là đúng cái kịch bản đó — và nó sẽ trông y hệt một test đang canh.
+		assertFalse(statements.isEmpty(),
+				"không đọc được statement nào của role `web` — prefix tra sai?");
+
+		Set<String> ghiDynamo = Set.of("dynamodb:PutItem", "dynamodb:UpdateItem",
+				"dynamodb:DeleteItem", "dynamodb:BatchWriteItem");
+		assertTrue(statements.stream().noneMatch(
+						s -> actionsOf(s).stream().anyMatch(ghiDynamo::contains)),
+				"`web` không được có action ghi nào trên DynamoDB — " + statements);
+
+		assertTrue(statements.stream().noneMatch(
+						s -> resourcesOf(s).stream().anyMatch(r -> r.contains("gemini-api-key"))),
+				"`web` không được đọc gemini key — không có đường nào tới model — "
+						+ statements);
+
+		assertTrue(statements.stream().noneMatch(
+						s -> actionsOf(s).stream().anyMatch(a -> a.startsWith("sqs:Send"))),
+				"`web` không được gửi SQS — nó không kích hoạt việc tốn tiền — "
+						+ statements);
+	}
+
+	/**
+	 * Lấy statement của role thuộc về một function, tìm theo logical-id prefix.
+	 * Tìm theo prefix chứ không theo tên role: role do CDK sinh tên, còn logical
+	 * id thì ta đặt và test phải ghim vào thứ ta kiểm soát.
+	 */
+	private static List<Map<String, Object>> statementsOfRole(
+			Template template, String functionId) {
+		List<Map<String, Object>> all = new java.util.ArrayList<>();
+		template.findResources("AWS::IAM::Policy").forEach((id, policy) -> {
+			if (id.startsWith(functionId + "Role")) {
+				all.addAll(statementsOf(policy));
+			}
+		});
+		return all;
 	}
 
 	@Test

@@ -30,26 +30,31 @@ class CdkNagTest {
 	 * </ul>
 	 * Thêm resource mới thì phải rà lại bảng này.
 	 */
-	private static final Map<String, String> ACCEPTED = new LinkedHashMap<>(Map.of(
-			"AwsSolutions-S1", "Bucket private tuyệt đối, client DUY NHẤT là CloudFront "
+	// `Map.ofEntries` chứ KHÔNG `Map.of`: `Map.of` chỉ nhận tối đa 10 cặp, và
+	// Phase 7 vượt ngưỡng đó. Lỗi khi vượt là "no suitable method found" ở dòng
+	// khai báo — không hề nhắc tới giới hạn 10.
+	private static final Map<String, String> ACCEPTED = new LinkedHashMap<>(
+			Map.ofEntries(
+
+			Map.entry("AwsSolutions-S1", "Bucket private tuyệt đối, client DUY NHẤT là CloudFront "
 					+ "qua OAC (master §8.1) — server access log chỉ chép lại đúng một "
 					+ "nguồn đó, đổi lại phải dựng thêm một bucket tích luỹ dữ liệu vĩnh "
-					+ "viễn, trái §4 nguyên tắc 3.",
+					+ "viễn, trái §4 nguyên tắc 3."),
 
-			"AwsSolutions-CFR1", "Geo restriction không áp dụng: site public toàn cầu "
-					+ "cho người đọc tin kỹ thuật (master §2).",
+			Map.entry("AwsSolutions-CFR1", "Geo restriction không áp dụng: site public toàn cầu "
+					+ "cho người đọc tin kỹ thuật (master §2)."),
 
-			"AwsSolutions-DDB3", "PITR là quyết định THEO MÔI TRƯỜNG — prod bật, dev "
+			Map.entry("AwsSolutions-DDB3", "PITR là quyết định THEO MÔI TRƯỜNG — prod bật, dev "
 					+ "tắt vì nó tính tiền liên tục theo dung lượng (master §4 nguyên "
 					+ "tắc 3) — mà test này chỉ synth EnvConfig.DEV. Rule KHÔNG tham số "
 					+ "nên entry này nuốt luôn DDB3 của mọi bảng thêm sau vào DataStack; "
 					+ "chốt chặn thật cho prod nằm ở "
-					+ "DataStackTest#pitr_bat_o_prod_tat_o_dev.",
+					+ "DataStackTest#pitr_bat_o_prod_tat_o_dev."),
 
-			"AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
-					+ "tiền theo tháng và là chi phí cố định.",
+			Map.entry("AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
+					+ "tiền theo tháng và là chi phí cố định."),
 
-			"AwsSolutions-CFR3", "Đã cân ở Phase 4 và LOẠI — đây là kết luận chung "
+			Map.entry("AwsSolutions-CFR3", "Đã cân ở Phase 4 và LOẠI — đây là kết luận chung "
 					+ "cuộc, không phải hoãn tiếp. Access log của CloudFront trả lời "
 					+ "được per-URL, per-referrer, per-IP và chi tiết cache hit/miss; "
 					+ "site này có ĐÚNG MỘT trang và không có URL riêng cho từng "
@@ -62,9 +67,9 @@ class CdkNagTest {
 					+ "trên trong chính bảng này; bật CFR3 mà vẫn giữ S1 là tự mâu "
 					+ "thuẫn. NGƯỠNG XEM LẠI: khi có URL riêng cho từng article (trang "
 					+ "chi tiết) — master §7 KHÔNG có phase nào hứa việc đó. Xem TDD "
-					+ "Phase 4 §17 #9.",
+					+ "Phase 4 §17 #9."),
 
-			"AwsSolutions-SQS3", "Hai queue bị rule này chạm — `IngestDlq` và "
+			Map.entry("AwsSolutions-SQS3", "Hai queue bị rule này chạm — `IngestDlq` và "
 					+ "`SummarizeDlq` — và cả hai CHÍNH LÀ dead-letter queue: cấp DLQ "
 					+ "cho một DLQ là đệ quy vô hạn, còn cdk-nag 3.x không có cách đánh "
 					+ "dấu 'đây là DLQ'. `SummarizeQueue` KHÔNG nằm trong số đó, nó có "
@@ -74,35 +79,63 @@ class CdkNagTest {
 					+ "canh DLQ. Chốt chặn hiện có: "
 					+ "SecurityBoundaryTest#schedule_gioi_han_retry_va_co_dlq và "
 					+ "#sweep_schedule_co_retry_va_dlq cho ingestion, "
-					+ "#queue_summarize_co_dlq_voi_max_receive_count_3 cho summarization.",
+					+ "#queue_summarize_co_dlq_voi_max_receive_count_3 cho summarization."),
+
+
 
 			// Hash 76856677 là logical id CDK sinh cho `AppStack/Function`. Cùng loại
 			// footgun với entry SpaBucket bên dưới: đổi tên construct đó là entry lệch.
-			"AwsSolutions-IAM5[Resource::<Function76856677.Arn>:*]",
+			Map.entry("AwsSolutions-IAM5[Resource::<Function76856677.Arn>:*]",
 			"Role do `scheduler.targets.LambdaInvoke` tự dựng. `Function#grantInvoke` "
 					+ "của CDK luôn cấp trên CẢ HAI `<arn>` và `<arn>:*` (vế thứ hai là "
 					+ "alias/version), và target L2 gọi thẳng `grantInvoke` — truyền role "
 					+ "tự viết vào `.role()` cũng không tránh được, vì chính target thêm "
 					+ "statement đó. Wildcard còn lại chỉ nằm ở phần QUALIFIER của đúng "
 					+ "MỘT function; function này chưa có alias hay version nào. Entry có "
-					+ "tham số nên nó chỉ áp cho đúng resource này.",
+					+ "tham số nên nó chỉ áp cho đúng resource này. "
+					+ "PHASE 7: entry này nay là DI SẢN — sau khi tách, không Schedule nào "
+					+ "còn trỏ `web` nữa. Giữ lại vì `Function` vẫn là logical id của "
+					+ "`web`, nhưng nếu nó biến mất khỏi finding thì XOÁ entry chứ đừng để "
+					+ "một ngoại lệ không còn ai dùng nằm lại."),
 
-			"AwsSolutions-IAM5[Resource::*]", "X-Ray KHÔNG hỗ trợ resource-level "
+
+
+			// Hai entry dưới là cùng một cơ chế, nhân lên theo số function được
+			// Schedule nhắm: Phase 7 chuyển `ingest-feeds` sang `IngestFunction` và
+			// `summarize-sweep` sang `SummarizeFunction`, nên mỗi cái sinh một
+			// `SchedulerRoleForTarget` riêng với đúng cặp `<arn>` + `<arn>:*`.
+			// Trước khi tách, hai Schedule cùng trỏ một function nên dùng chung một
+			// role và chỉ có một finding.
+			Map.entry("AwsSolutions-IAM5[Resource::<IngestFunction4B2F2EB2.Arn>:*]",
+			"Cùng lý do entry `Function…` ngay trên: `grantInvoke` của target L2 luôn "
+					+ "kèm qualifier `:*`. Function này chưa có alias hay version nào. "
+					+ "Entry CÓ THAM SỐ nên nó chỉ áp cho đúng resource này."),
+
+			Map.entry("AwsSolutions-IAM5[Resource::<SummarizeFunction10D6AD57.Arn>:*]",
+			"Cùng lý do entry `Function…` ở trên. `summarize-sweep` chạy trên "
+					+ "`summarize` chứ không trên `ingest` (ADR-0020 driver #2: cắt theo "
+					+ "ranh giới NGHIỆP VỤ, không theo nguồn kích hoạt), nên function này "
+					+ "cũng là target của một Schedule và cũng dính qualifier `:*`."),
+
+			Map.entry("AwsSolutions-IAM5[Resource::*]", "X-Ray KHÔNG hỗ trợ resource-level "
 					+ "permission cho action ghi trace — `Resource: \"*\"` là hình "
 					+ "thức hẹp nhất tồn tại cho `xray:PutTraceSegments`, không phải sự cẩu "
 					+ "thả. Entry CÓ THAM SỐ nên nó chỉ áp cho đúng resource này; "
 					+ "ĐỪNG nới thành `AwsSolutions-IAM5` trống, vì như thế là chấp "
-					+ "nhận mọi wildcard tương lai của mọi stack.",
+					+ "nhận mọi wildcard tương lai của mọi stack."),
+
+
 
 			// Hash 48E1059F là logical id CDK sinh cho `EdgeStack/SpaBucket`. Đổi tên
 			// construct đó sẽ làm entry này lệch và test đỏ — khi ấy đọc tên rule mới
 			// trong thông báo lỗi rồi cập nhật lại, ĐỪNG nới thành `AwsSolutions-IAM5`
 			// trống, vì như thế là chấp nhận mọi wildcard tương lai của CicdStack.
-			"AwsSolutions-IAM5[Resource::<SpaBucket48E1059F.Arn>/*]",
+			Map.entry("AwsSolutions-IAM5[Resource::<SpaBucket48E1059F.Arn>/*]",
 			"Quyền object-level bắt buộc phải trỏ `<bucket>/*`; không có cách viết "
 					+ "nào hẹp hơn cho `aws s3 sync`. Action đã được liệt kê tường minh "
 					+ "và resource khoá đúng bucket SPA, nên wildcard còn lại chỉ nằm ở "
-					+ "phần key của object."));
+					+ "phần key của object.")
+			));
 
 	// KHÔNG có entry nào cho SNS, và đó là kết luận đã đo chứ không phải bỏ sót.
 	//

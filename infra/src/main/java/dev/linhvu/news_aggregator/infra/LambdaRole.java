@@ -26,7 +26,29 @@ import software.constructs.Construct;
 record LambdaRole(Role role, LogGroup logGroup) {
 
 	static LambdaRole create(Construct scope, String id, EnvConfig cfg) {
-		LogGroup logGroup = LogGroup.Builder.create(scope, id + "LogGroup")
+		return create(scope, id, id + "LogGroup", cfg);
+	}
+
+	/**
+	 * Bản nhận `logGroupId` RIÊNG, tồn tại vì đúng một lý do đã trả giá thật:
+	 * đổi logical id của một log group ĐANG ĐƯỢC STACK KHÁC IMPORT làm deploy
+	 * chết ở prod.
+	 *
+	 *   Cannot delete export Prod-AppStack:ExportsOutputRefLogGroupF5B46931…
+	 *   as it is in use by Prod-ObservabilityStack.
+	 *
+	 * `ObservabilityStack` dựng `MetricFilter IngestHeartbeat` trên log group, và
+	 * nó nằm trong nhánh `if (cfg == PROD)` — nên **chỉ prod** tạo ra cặp
+	 * export/import này. Dev và qa đổi tên trót lọt, và chính điều đó làm lỗi
+	 * không lộ ra cho tới bước cuối của pipeline.
+	 *
+	 * `cdk synth` KHÔNG bắt được: template mới hoàn toàn hợp lệ, thứ sai là phép
+	 * chuyển TỪ template cũ SANG nó. Không có chốt chặn nào ở repo này thấy được
+	 * điều đó — chốt chặn duy nhất là một lần deploy thật lên môi trường có
+	 * import, tức prod.
+	 */
+	static LambdaRole create(Construct scope, String id, String logGroupId, EnvConfig cfg) {
+		LogGroup logGroup = LogGroup.Builder.create(scope, logGroupId)
 				.retention(RetentionDays.TWO_WEEKS)
 				.removalPolicy(RemovalPolicy.DESTROY)
 				.build();

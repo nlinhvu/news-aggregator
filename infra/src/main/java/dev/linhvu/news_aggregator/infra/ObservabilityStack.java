@@ -44,7 +44,8 @@ public class ObservabilityStack extends Stack {
 	private final Topic alerts;
 
 	public ObservabilityStack(final Construct scope, final String id, final EnvConfig cfg,
-			final Function function, final LogGroup logGroup, final IQueue scheduleDlq,
+			final Function function, final Function summarizeFunction,
+			final LogGroup logGroup, final IQueue scheduleDlq,
 			final IQueue summarizeDlq) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
@@ -194,6 +195,29 @@ public class ObservabilityStack extends Stack {
 				.treatMissingData(TreatMissingData.NOT_BREACHING)
 				.build();
 		errors.addAlarmAction(new SnsAction(this.alerts));
+
+		// Alarm thứ hai, cho `summarize`. Sau khi tách, `FunctionErrors` ở trên chỉ
+		// còn phủ `web` — lượt summarize hỏng không còn đẩy metric `Errors` của
+		// function đó nữa, nên không có dòng này là mất hẳn tín hiệu.
+		//
+		// NGÂN SÁCH ALARM: Phase 4 dùng 6/10 alarm metric org-wide (free tier tính
+		// theo ORG, chia cho 8 account). Thêm MỘT thành 7. KHÔNG thêm alarm cho
+		// `ingest`: lượt ingest hỏng đã có `IngestHeartbeatAlarm` (metric filter
+		// trên log) và DLQ alarm phủ. Nhân ba bộ alarm là cách nhanh nhất để vỡ
+		// pool free tier của cả org.
+		Alarm summarizeErrors = Alarm.Builder.create(this, "SummarizeFunctionErrors")
+				.alarmName("na-" + cfg.tagPrefix() + "-summarize-errors")
+				.alarmDescription("Lambda summarize invoke thất bại — app ném, hoặc timeout/OOM")
+				.metric(summarizeFunction.metricErrors(MetricOptions.builder()
+						.period(Duration.minutes(5))
+						.statistic("Sum")
+						.build()))
+				.threshold(1)
+				.evaluationPeriods(1)
+				.comparisonOperator(ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD)
+				.treatMissingData(TreatMissingData.NOT_BREACHING)
+				.build();
+		summarizeErrors.addAlarmAction(new SnsAction(this.alerts));
 
 		// Ngưỡng 1: message ĐẦU TIÊN trong DLQ đã là tin đáng đọc. ADR-0014 §8 có
 		// mốc "> 20 message/ngày" nhưng đó là mốc để đổi THIẾT KẾ (thêm state

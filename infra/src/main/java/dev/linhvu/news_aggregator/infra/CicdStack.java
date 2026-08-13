@@ -17,7 +17,7 @@ import software.constructs.Construct;
 public class CicdStack extends Stack {
 
 	public CicdStack(final Construct scope, final String id, final EnvConfig cfg,
-			final IFunction function, final IBucket bucket,
+			final List<? extends IFunction> functions, final IBucket bucket,
 			final IDistribution distribution) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
@@ -28,9 +28,13 @@ public class CicdStack extends Stack {
 				.roleName("AppDeployRole")
 				.assumedBy(hub)
 				.build();
+		// AppDeployRole phải cập nhật được CẢ BA function bằng cùng một digest.
+		// Liệt kê ARN tường minh chứ không wildcard `function:*`: thêm function
+		// thứ tư ở Task 26 phải là một lần sửa CÓ Ý THỨC, không phải tự động
+		// được cấp quyền.
 		appDeploy.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("lambda:UpdateFunctionCode", "lambda:GetFunction"))
-				.resources(List.of(function.getFunctionArn()))
+				.resources(functions.stream().map(IFunction::getFunctionArn).toList())
 				.build());
 		appDeploy.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("ssm:PutParameter", "ssm:GetParameter"))
@@ -92,9 +96,14 @@ public class CicdStack extends Stack {
 				.roleName("SmokeRole")
 				.assumedBy(hub)
 				.build();
+		// SmokeRole chỉ invoke được hai function có đường scheduled — `web` có
+		// Function URL nên smoke test chạm nó bằng `curl`, không cần quyền invoke.
+		// Thứ tự của `getAllFunctions()` là hợp đồng: [0]=web, [1]=ingest,
+		// [2]=summarize.
 		smokeRole.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("lambda:InvokeFunction"))
-				.resources(List.of(function.getFunctionArn()))
+				.resources(List.of(functions.get(1).getFunctionArn(),
+						functions.get(2).getFunctionArn()))
 				.build());
 
 		CfnOutput.Builder.create(this, "SmokeRoleArn")
