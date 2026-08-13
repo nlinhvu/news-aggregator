@@ -2039,6 +2039,21 @@ class SecurityBoundaryTest {
 	 * TRỌN danh sách, nên bỏ nó là lấy mất flow an toàn của đường mật khẩu —
 	 * đường mà Cognito BẮT BUỘC phải tồn tại.
 	 */
+	/**
+	 * Không nói cho người lạ biết email nào có tài khoản.
+	 *
+	 * CDK để mặc định LEGACY, và đã ĐO trên dev 2026-08-13: gõ một địa chỉ bất
+	 * kỳ vào ô đăng nhập thì Cognito trả thẳng `Invalid input: User does not
+	 * exist.` Ai cũng dò được một email có phải người dùng của hệ thống hay
+	 * không — không cần tài khoản, không để lại dấu vết đáng chú ý.
+	 */
+	@Test
+	void khong_lo_email_nao_co_tai_khoan() {
+		identityStack(EnvConfig.DEV).hasResourceProperties(
+				"AWS::Cognito::UserPoolClient",
+				Match.objectLike(Map.of("PreventUserExistenceErrors", "ENABLED")));
+	}
+
 	@Test
 	void app_client_bat_choice_based_auth_va_giu_srp() {
 		Template template = identityStack(EnvConfig.DEV);

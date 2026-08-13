@@ -192,6 +192,21 @@ public class IdentityStack extends Stack {
 						.user(true)
 						.userSrp(true)
 						.build())
+				// Không nói cho người lạ biết email nào có tài khoản.
+				//
+				// CDK để mặc định LEGACY, tức Cognito trả thẳng "User does not
+				// exist" — đã ĐO trên dev 2026-08-13 bằng cách gõ một địa chỉ bất
+				// kỳ vào ô đăng nhập. Ai cũng dò được một email có phải người dùng
+				// của hệ thống hay không, không cần tài khoản, không để lại dấu vết
+				// nào đáng chú ý.
+				//
+				// Với một trang tin thì đây không phải rò rỉ chết người, nhưng nó
+				// là rò rỉ THẬT và giá sửa bằng một dòng.
+				//
+				// Đánh đổi CÓ THẬT với QA thủ công: từ nay màn hình đăng nhập hiện
+				// bước chọn factor cho cả email không tồn tại, nên "gõ đại một email
+				// để xem giao diện" không còn phân biệt được user có thật hay không.
+				.preventUserExistenceErrors(true)
 				.oAuth(OAuthSettings.builder()
 						.flows(OAuthFlows.builder()
 								.authorizationCodeGrant(true)
