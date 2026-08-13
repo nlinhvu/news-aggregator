@@ -24,9 +24,21 @@ import org.springframework.stereotype.Repository;
  * Session store của mô hình BFF ([ADR-0018]). Item chứa token của Cognito và
  * KHÔNG BAO GIỜ rời khỏi Lambda.
  *
- * `@Lazy` cùng lý do với `ArticleRepository`: trên đường đọc ẩn danh, bean này
- * không được chạm tới — không cookie thì không tra phiên. Đó là driver #3 của
- * ADR-0018 và `AnonymousReadTest` là chốt chặn.
+ * <b>`@Lazy` ở đây KHÔNG còn tác dụng trên `web`/`admin` — đã đo, đừng trông
+ * cậy vào nó.</b> Task 10 bật `@EnableSpringHttpSession`, thứ đăng ký
+ * `springSessionRepositoryFilter`; filter inject `SessionRepository` qua
+ * constructor và filter thì bắt buộc eager, nên bean này bị dựng ngay lúc khởi
+ * động (`containsSingleton` = true). Đó là bài học "`@Lazy` phải ở ĐIỂM
+ * INJECT", lần thứ hai. Ở `ingest`/`summarize` thì `@Lazy` vẫn còn hiệu lực vì
+ * không profile nào trong hai vai đó có filter — giữ annotation lại chỉ vì lẽ
+ * đó.
+ *
+ * Thứ THẬT SỰ bảo vệ đường đọc ẩn danh (driver #3 của ADR-0018) không phải
+ * `@Lazy` mà là hành vi của chính filter: không cookie phiên thì nó không tra
+ * `findById`, nên không có lời gọi DynamoDB nào. Bean được DỰNG nhưng không
+ * được GỌI — hai chuyện khác nhau, và constructor ở đây chỉ giữ tham chiếu chứ
+ * không chạm mạng. Vế đó CHƯA được đo; `AnonymousReadTest` ở Task 12 là chỗ
+ * phải đo nó.
  */
 @Repository
 @Lazy

@@ -72,6 +72,15 @@ news:
     table-name: ${NEWS_SOURCES_TABLE:sources}
   identity:
     sessions-table: ${NEWS_SESSIONS_TABLE:sessions}
+    cognito:
+      # Bốn biến này CHỈ được `AppStack` bơm vào `web` (và sau này `admin`) —
+      # `ingest`/`summarize` không có bề mặt đăng nhập nào. Giá trị mặc định ở
+      # đây phục vụ `./gradlew bootRun` trên host; Task 12 dựng mock-oauth2-server
+      # ở đúng cổng 8090.
+      issuer-uri: ${NEWS_COGNITO_ISSUER_URI:http://localhost:8090/cognito}
+      client-id: ${NEWS_COGNITO_CLIENT_ID:news-local}
+      secret-parameter: ${NEWS_COGNITO_SECRET_PARAMETER:/news/local/cognito-client-secret}
+      logout-uri: ${NEWS_COGNITO_LOGOUT_URI:http://localhost:8090/cognito/logout}
     # 30 ngày, TRƯỢT theo mỗi lần dùng. Soi gương thời hạn mặc định của refresh
     # token Cognito — hai con số lệch nhau nghĩa là phiên còn sống nhưng không
     # làm mới được token, một trạng thái không ai gỡ được từ phía người dùng.

@@ -9,11 +9,38 @@ import org.springframework.context.annotation.Lazy;
 import org.togglz.core.Feature;
 import org.togglz.core.repository.FeatureState;
 import org.togglz.core.repository.StateRepository;
+import org.togglz.core.user.NoOpUserProvider;
+import org.togglz.core.user.UserProvider;
 import org.togglz.dynamodb.DynamoDBStateRepository;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
 @Configuration(proxyBeanMethods = false)
 public class TogglzConfig {
+
+	/**
+	 * Bean này KHÔNG thêm hành vi nào — nó GIỮ NGUYÊN hành vi đã có. Trước
+	 * Phase 7, `TogglzAutoConfiguration` tự dựng đúng `NoOpUserProvider` này.
+	 *
+	 * Phase 7 đưa `spring-boot-starter-oauth2-client` vào, và bean tự động kia
+	 * là `@ConditionalOnMissingClass(EnableWebSecurity)` nên nó BACK OFF. Bean
+	 * thay thế (`SpringSecurityUserProviderConfiguration`) lại
+	 * `@ConditionalOnClass(SpringSecurityUserProvider)` — class đó nằm ở
+	 * artifact `togglz-spring-security`, thứ ta không có. Kết quả: KHÔNG bean
+	 * `UserProvider` nào tồn tại, mà `featureManager` inject nó EAGER, nên MỌI
+	 * Spring context chết ngay lúc khởi động — kể cả context không đụng gì tới
+	 * feature flag. Cùng chế độ hỏng đã ghi ở
+	 * `FlociTestConfiguration#featureTogglesTableSchema`, chỉ khác nguyên nhân.
+	 *
+	 * ⚠️ NGƯỠNG PHẢI ĐỔI: lúc bật Togglz console (`togglz.console.enabled`, hẹn
+	 * ở Phase 4). `NoOpUserProvider` trả về "không có người dùng", nên kiểm tra
+	 * quyền admin của console mất hiệu lực — bật console mà giữ dòng này nghĩa
+	 * là ai vào được console cũng bật/tắt flag được. Lúc đó đổi sang
+	 * `togglz-spring-security` + `SpringSecurityUserProvider`.
+	 */
+	@Bean
+	UserProvider userProvider() {
+		return new NoOpUserProvider();
+	}
 
 	/**
 	 * @Lazy giữ lại vì lý do ở AwsClientConfig, nhưng đừng trông cậy vào nó ở đây:
