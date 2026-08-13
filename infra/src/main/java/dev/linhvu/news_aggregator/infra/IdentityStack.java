@@ -1,5 +1,7 @@
 package dev.linhvu.news_aggregator.infra;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import software.amazon.awscdk.CfnOutput;
@@ -51,6 +53,7 @@ public class IdentityStack extends Stack {
 	private final UserPool userPool;
 	private final UserPoolClient client;
 	private final UserPoolDomain domain;
+	private final String appDomain;
 
 	public IdentityStack(final Construct scope, final String id, final EnvConfig cfg) {
 		super(scope, id, StackProps.builder()
@@ -61,6 +64,7 @@ public class IdentityStack extends Stack {
 		// Prefix của managed login: `<prefix>.auth.<region>.amazoncognito.com` là
 		// URL người dùng thấy lúc đăng nhập, và là gốc của `getLogoutUri()`.
 		String domainPrefix = "na-" + cfg.tagPrefix() + "-auth";
+		this.appDomain = cfg.appDomain();
 
 		this.userPool = UserPool.Builder.create(this, "UserPool")
 				.userPoolName("na-" + cfg.tagPrefix() + "-users")
@@ -249,8 +253,23 @@ public class IdentityStack extends Stack {
 				+ userPool.getUserPoolId();
 	}
 
+	/**
+	 * URL đăng xuất ĐẦY ĐỦ THAM SỐ, không phải endpoint trần.
+	 *
+	 * `<domain>/logout` một mình trả **400** — Cognito đòi `client_id` và
+	 * `logout_uri`. Bản trước trả đúng endpoint trần đó, và triệu chứng ở tầng
+	 * người dùng là một trang lỗi trắng của trình duyệt sau khi bấm "Đăng xuất":
+	 * phiên phía ta ĐÃ chết, nhưng người dùng không được đưa về đâu cả. Đã đo
+	 * trên dev 2026-08-13.
+	 *
+	 * `logout_uri` phải nằm trong `logoutUrls` của client — cùng một
+	 * `cfg.appDomain()` dựng nên cả hai, nên chúng không lệch được.
+	 */
 	public String getLogoutUri() {
-		return domain.baseUrl() + "/logout";
+		return domain.baseUrl() + "/logout"
+				+ "?client_id=" + client.getUserPoolClientId()
+				+ "&logout_uri=" + URLEncoder.encode(
+						"https://" + appDomain + "/", StandardCharsets.UTF_8);
 	}
 
 	public UserPoolClient getClient() {

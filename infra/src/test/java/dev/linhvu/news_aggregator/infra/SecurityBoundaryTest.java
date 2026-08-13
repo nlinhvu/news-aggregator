@@ -2047,6 +2047,30 @@ class SecurityBoundaryTest {
 	 * exist.` Ai cũng dò được một email có phải người dùng của hệ thống hay
 	 * không — không cần tài khoản, không để lại dấu vết đáng chú ý.
 	 */
+	/**
+	 * URL đăng xuất phải mang ĐỦ tham số Cognito đòi.
+	 *
+	 * `<domain>/logout` trần trả **400** — đã đo trên dev 2026-08-13, và triệu
+	 * chứng ở tầng người dùng là một trang lỗi trắng sau khi bấm "Đăng xuất":
+	 * phiên phía ta ĐÃ chết, nhưng người dùng không được đưa về đâu cả. Không
+	 * test nào trước đây chạm tới giá trị này — nó chỉ được truyền đi.
+	 */
+	@Test
+	void url_dang_xuat_mang_du_tham_so_cognito_doi() {
+		Map<String, Map<String, Object>> functions = appStack()
+				.findResources("AWS::Lambda::Function");
+		String web = functions.entrySet().stream()
+				.filter(e -> e.getKey().startsWith("Function"))
+				.map(e -> String.valueOf(e.getValue()))
+				.findFirst()
+				.orElseThrow();
+
+		assertTrue(web.contains("/logout?client_id="),
+				"thiếu `client_id` thì Cognito trả 400, thực tế: " + web);
+		assertTrue(web.contains("logout_uri=https%3A%2F%2F"),
+				"`logout_uri` phải có và phải được URL-encode, thực tế: " + web);
+	}
+
 	@Test
 	void khong_lo_email_nao_co_tai_khoan() {
 		identityStack(EnvConfig.DEV).hasResourceProperties(
