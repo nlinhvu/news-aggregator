@@ -2022,6 +2022,38 @@ class SecurityBoundaryTest {
 				Match.objectLike(Map.of("UseCognitoProvidedValues", true)));
 	}
 
+	/**
+	 * `ALLOW_USER_AUTH` trên APP CLIENT — mảnh thứ ba của passwordless.
+	 *
+	 * `SignInPolicy.allowedFirstAuthFactors` cấu hình POOL; choice-based
+	 * authentication lại bật ở CLIENT. Đo được trên dev 2026-08-13: sau khi bật
+	 * managed login v2, giao diện đã đúng là v2 (ô Password không còn bắt buộc)
+	 * nhưng màn hình đăng nhập vẫn chỉ có email + password, vì
+	 * `ExplicitAuthFlows` của client là `null`.
+	 *
+	 * <p>Test này cũng là chỗ kiểm chứng ánh xạ của CDK: prop `user` phải render
+	 * ra đúng chuỗi `ALLOW_USER_AUTH`. Template synth là nguồn sự thật cho việc
+	 * đó, không phải trí nhớ.
+	 *
+	 * <p>`ALLOW_USER_SRP_AUTH` đi kèm CÓ CHỦ Ý: khai `authFlows` tường minh thay
+	 * TRỌN danh sách, nên bỏ nó là lấy mất flow an toàn của đường mật khẩu —
+	 * đường mà Cognito BẮT BUỘC phải tồn tại.
+	 */
+	@Test
+	void app_client_bat_choice_based_auth_va_giu_srp() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		// MỘT phần tử mỗi lần: `arrayWith` khớp một dãy con LIỀN KỀ và ĐÚNG THỨ
+		// TỰ, mà CDK render ra `[ALLOW_USER_SRP_AUTH, ALLOW_USER_AUTH,
+		// ALLOW_REFRESH_TOKEN_AUTH]`. Khẳng định theo thứ tự là ghim một chi
+		// tiết ta không kiểm soát và sẽ vỡ vô cớ.
+		for (String flow : List.of("ALLOW_USER_AUTH", "ALLOW_USER_SRP_AUTH")) {
+			template.hasResourceProperties("AWS::Cognito::UserPoolClient",
+					Match.objectLike(Map.of("ExplicitAuthFlows",
+							Match.arrayWith(List.of(flow)))));
+		}
+	}
+
 	@Test
 	void pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc() {
 		Template template = identityStack(EnvConfig.DEV);

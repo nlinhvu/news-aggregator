@@ -7,6 +7,7 @@ import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.cognito.AllowedFirstAuthFactors;
+import software.amazon.awscdk.services.cognito.AuthFlow;
 import software.amazon.awscdk.services.cognito.CfnManagedLoginBranding;
 import software.amazon.awscdk.services.cognito.CfnUserPoolGroup;
 import software.amazon.awscdk.services.cognito.CognitoDomainOptions;
@@ -169,6 +170,28 @@ public class IdentityStack extends Stack {
 				// secret, nhưng với một OAuth client chạy phía server thì
 				// confidential là mặc định của ngành — xem TDD §17 #2.
 				.generateSecret(true)
+				// Mảnh THỨ BA của passwordless, và thiếu nó thì hai mảnh kia vô
+				// dụng. Đã ĐO trên dev 2026-08-13 sau khi bật managed login v2:
+				// giao diện đã là v2 thật (ô Password không còn `required`, trang
+				// đăng ký cho phép bỏ trống mật khẩu) NHƯNG màn hình đăng nhập vẫn
+				// chỉ có email + password, không một lựa chọn OTP nào. Lý do:
+				//
+				//   describe-user-pool-client → ExplicitAuthFlows: null
+				//
+				// `SignInPolicy.allowedFirstAuthFactors` cấu hình POOL; choice-based
+				// authentication lại bật ở APP CLIENT bằng `ALLOW_USER_AUTH`. Hai
+				// chỗ khác nhau, và chỉ có cả hai mới ra được màn hình cho người
+				// dùng chọn cách đăng nhập.
+				//
+				// `userSrp` giữ kèm CÓ CHỦ Ý: khai `authFlows` tường minh sẽ thay
+				// TRỌN danh sách, nên nếu chỉ khai `user` thì đường mật khẩu — thứ
+				// Cognito bắt buộc phải có (xem `allowedFirstAuthFactors`) — mất
+				// flow an toàn của nó. SRP là flow mật khẩu chuẩn, không bao giờ
+				// gửi mật khẩu thô lên mạng.
+				.authFlows(AuthFlow.builder()
+						.user(true)
+						.userSrp(true)
+						.build())
 				.oAuth(OAuthSettings.builder()
 						.flows(OAuthFlows.builder()
 								.authorizationCodeGrant(true)
