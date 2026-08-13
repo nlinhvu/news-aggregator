@@ -19,7 +19,7 @@ public class AppStage extends Stage {
 				data.getSourcesTable(), data.getSessionsTable(), identity);
 		new ObservabilityStack(this, "ObservabilityStack", cfg,
 				appStack.getWebFunction(), appStack.getSummarizeFunction(),
-				appStack.getLogGroup(),
+				appStack.getIngestLogGroup(),
 				appStack.getScheduleDlq(), appStack.getSummarizeDlq());
 		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
 				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());

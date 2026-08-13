@@ -43,9 +43,16 @@ public class ObservabilityStack extends Stack {
 
 	private final Topic alerts;
 
+	/**
+	 * @param ingestLogGroup log group của function **`ingest`** — chỗ DUY NHẤT có
+	 *     dòng `ingestion run xong`. Trước ADR-0020 cả ba vai chạy chung một
+	 *     function nên tham số này từng là log group của `web`, và cú tách function
+	 *     đã biến nó thành sai mà không ai nhận ra: heartbeat mù từ 09:24 UTC
+	 *     2026-08-13, alarm kẹt đỏ. Xem `SecurityBoundaryTest`.
+	 */
 	public ObservabilityStack(final Construct scope, final String id, final EnvConfig cfg,
 			final Function function, final Function summarizeFunction,
-			final LogGroup logGroup, final IQueue scheduleDlq,
+			final LogGroup ingestLogGroup, final IQueue scheduleDlq,
 			final IQueue summarizeDlq) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
@@ -253,7 +260,11 @@ public class ObservabilityStack extends Stack {
 			// nguồn hỏng). `IngestionRunnerTest#log_ket_thuc_luot_giu_dung_tien_to…`
 			// canh phía kia của hợp đồng — hai tầng không thấy nhau.
 			MetricFilter heartbeat = MetricFilter.Builder.create(this, "IngestHeartbeat")
-					.logGroup(logGroup)
+					// Log group của `ingest`, KHÔNG phải của `web` — xem javadoc
+					// constructor. Pattern đúng mà gắn nhầm chỗ thì khớp 0 event, y
+					// hệt lúc pattern sai; khác biệt là đọc pattern không nhìn ra
+					// được, nên nó cần một test riêng.
+					.logGroup(ingestLogGroup)
 					.filterPattern(FilterPattern.stringValue(
 							"$.message", "=", "ingestion run xong:*"))
 					.metricNamespace("NewsAggregator")

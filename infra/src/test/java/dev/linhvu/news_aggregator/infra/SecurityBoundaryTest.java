@@ -1148,6 +1148,34 @@ class SecurityBoundaryTest {
 	 * Đã đo cả ba vế trên log group prod bằng `aws logs filter-log-events`:
 	 * có `*` khớp 5 event, bỏ `*` khớp 0, đổi chuỗi khớp 0.
 	 */
+	/**
+	 * Filter phải gắn vào log group của **`ingest`**, không phải của `web`.
+	 *
+	 * <p>Test ngay dưới ghim PATTERN của filter, và pattern ấy đúng — nhưng không
+	 * ai ghim nó gắn vào ĐÂU, nên bug này đi thẳng lên prod. Cú tách ba function
+	 * (ADR-0020) cho `ingest` một log group riêng, deploy lên prod lúc **09:24
+	 * UTC 2026-08-13**; metric filter ở lại log group của `web`, nơi từ đó không
+	 * bao giờ có dòng `ingestion run xong` nữa. Datapoint cuối cùng của
+	 * `IngestRunCompleted` là **09:00 UTC**, và alarm nổ lúc 14:08 sau đúng 3 giờ
+	 * trống.
+	 *
+	 * <p>Tác hại không phải một mail báo động giả: vì `TreatMissingData.BREACHING`,
+	 * alarm **kẹt đỏ vĩnh viễn**, nên nếu ingest chết thật thì không còn tín hiệu
+	 * nào phân biệt được. Đúng điều `ObservabilityStack` tự cảnh báo — *"một alarm
+	 * hay báo động giả bị phớt lờ đúng lúc cần tin nhất"*.
+	 *
+	 * <p>Khẳng định đi qua `Fn::ImportValue` vì log group nằm ở `AppStack`. Tên
+	 * export mang logical id, nên `IngestFunctionLogGroup` trong chuỗi đó là bằng
+	 * chứng đủ mạnh: đổi sang log group khác thì chuỗi đổi theo.
+	 */
+	@Test
+	void heartbeat_soi_log_group_cua_INGEST_chu_khong_phai_cua_web() {
+		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::Logs::MetricFilter",
+				Match.objectLike(Map.of("LogGroupName", Match.objectLike(Map.of(
+						"Fn::ImportValue",
+						Match.stringLikeRegexp(".*IngestFunctionLogGroup.*"))))));
+	}
+
 	@Test
 	void metric_filter_soi_dung_truong_message_cua_ecs_json() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::Logs::MetricFilter",

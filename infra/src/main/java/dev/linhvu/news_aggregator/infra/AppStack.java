@@ -43,6 +43,7 @@ public class AppStack extends Stack {
 	private final Function summarizeFunction;
 	private final FunctionUrl functionUrl;
 	private final LogGroup logGroup;
+	private final LogGroup ingestLogGroup;
 	private final Queue scheduleDlq;
 	private final Queue summarizeDlq;
 
@@ -98,6 +99,29 @@ public class AppStack extends Stack {
 		// Ích lợi kèm theo: log prod không mất.
 		LambdaRole webRole = LambdaRole.create(this, "Function", "LogGroup", cfg);
 		this.logGroup = webRole.logGroup();
+
+		// ⚠️ DÒNG NÀY LÀ TẠM, XOÁ Ở LƯỢT DEPLOY THỨ HAI. Đừng dọn nó cùng lượt
+		// với thay đổi đã sinh ra nó.
+		//
+		// `ObservabilityStack` vừa chuyển `IngestHeartbeat` sang log group của
+		// `ingest`, nên nó KHÔNG còn tham chiếu log group của `web`. CDK thấy vậy
+		// sẽ bỏ export `ExportsOutputRefLogGroupF5B4693119CE9848` khỏi template —
+		// mà CloudFormation deploy `AppStack` TRƯỚC `ObservabilityStack`, tức lúc
+		// xoá export thì stack kia vẫn đang import nó:
+		//
+		//   "Export Prod-AppStack:ExportsOutputRefLogGroup… cannot be deleted as
+		//    it is in use by Prod-ObservabilityStack"
+		//
+		// Đây đúng cơ chế đã làm `Prod-AppStack` rollback một lần (xem comment
+		// logical id `LogGroup` ngay trên). `exportValue` giữ export sống dù không
+		// còn ai tham chiếu, để lượt deploy này chỉ đổi CONSUMER. Lượt sau, khi
+		// `ObservabilityStack` đã thôi import, xoá dòng này thì export mới ra đi
+		// an toàn.
+		//
+		// Giá trị phải là `getLogGroupName()` chứ không phải ARN: export cũ là một
+		// `Ref` (đã đọc từ template deploy thật), và `exportValue` phải sinh ĐÚNG
+		// tên export đó mới thay thế được nó.
+		this.exportValue(this.logGroup.getLogGroupName());
 
 		// AP1. ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng — cấp `Query` trên ARN
 		// bảng trần là cấp luôn Query trên bảng, và `/index/*` là cấp trên mọi
@@ -177,6 +201,10 @@ public class AppStack extends Stack {
 		// ---------- ingest — ghi catalog, đọc/ghi sources, đẩy SQS ----------
 
 		LambdaRole ingestRole = LambdaRole.create(this, "IngestFunction", cfg);
+		// `ObservabilityStack` gắn `IngestHeartbeat` vào ĐÂY. Trước ADR-0020 cả ba
+		// vai chạy chung một function nên nó gắn vào log group của `web`; cú tách
+		// function biến chỗ đó thành sai mà không lỗi nào phát ra.
+		this.ingestLogGroup = ingestRole.logGroup();
 
 		// Đường GHI của catalog. Resource là ARN của BẢNG, không phải của index:
 		// `PutItem` trên ARN index synth vẫn xanh và chỉ chết lúc runtime.
@@ -485,6 +513,11 @@ public class AppStack extends Stack {
 
 	public LogGroup getLogGroup() {
 		return logGroup;
+	}
+
+	/** Log group của `ingest` — chỗ DUY NHẤT có dòng `ingestion run xong`. */
+	public LogGroup getIngestLogGroup() {
+		return ingestLogGroup;
 	}
 
 	/**
