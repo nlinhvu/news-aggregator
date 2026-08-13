@@ -256,11 +256,17 @@ public class IdentityStack extends Stack {
 	/**
 	 * URL đăng xuất ĐẦY ĐỦ THAM SỐ, không phải endpoint trần.
 	 *
-	 * `<domain>/logout` một mình trả **400** — Cognito đòi `client_id` và
-	 * `logout_uri`. Bản trước trả đúng endpoint trần đó, và triệu chứng ở tầng
-	 * người dùng là một trang lỗi trắng của trình duyệt sau khi bấm "Đăng xuất":
-	 * phiên phía ta ĐÃ chết, nhưng người dùng không được đưa về đâu cả. Đã đo
-	 * trên dev 2026-08-13.
+	 * `<domain>/logout` một mình KHÔNG đưa người dùng về đâu cả — Cognito đòi
+	 * `client_id` và `logout_uri`. Đo trên dev 2026-08-13 bằng GET:
+	 *
+	 * <pre>
+	 *   /logout                        → 302 → &lt;domain&gt;/login?null   (URL hỏng)
+	 *   /logout?client_id=…&amp;logout_uri=… → 302 → https://news…/       (đúng)
+	 * </pre>
+	 *
+	 * Bản trước trả đúng endpoint trần đó, và triệu chứng ở tầng người dùng là
+	 * một trang lỗi trắng của trình duyệt sau khi bấm "Đăng xuất": phiên phía ta
+	 * ĐÃ chết, nhưng người dùng bị bỏ lại ở `login?null`.
 	 *
 	 * `logout_uri` phải nằm trong `logoutUrls` của client — cùng một
 	 * `cfg.appDomain()` dựng nên cả hai, nên chúng không lệch được.

@@ -2050,10 +2050,11 @@ class SecurityBoundaryTest {
 	/**
 	 * URL đăng xuất phải mang ĐỦ tham số Cognito đòi.
 	 *
-	 * `<domain>/logout` trần trả **400** — đã đo trên dev 2026-08-13, và triệu
-	 * chứng ở tầng người dùng là một trang lỗi trắng sau khi bấm "Đăng xuất":
-	 * phiên phía ta ĐÃ chết, nhưng người dùng không được đưa về đâu cả. Không
-	 * test nào trước đây chạm tới giá trị này — nó chỉ được truyền đi.
+	 * `<domain>/logout` trần redirect sang `<domain>/login?null` — một URL hỏng,
+	 * và triệu chứng ở tầng người dùng là trang lỗi trắng sau khi bấm "Đăng
+	 * xuất": phiên phía ta ĐÃ chết, nhưng người dùng bị bỏ lại ở đó. Đã đo trên
+	 * dev 2026-08-13. Không test nào trước đây chạm tới giá trị này — nó chỉ
+	 * được truyền từ infra sang env var rồi đi tiếp.
 	 */
 	@Test
 	void url_dang_xuat_mang_du_tham_so_cognito_doi() {
