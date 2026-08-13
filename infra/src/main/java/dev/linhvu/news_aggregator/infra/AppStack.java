@@ -100,28 +100,21 @@ public class AppStack extends Stack {
 		LambdaRole webRole = LambdaRole.create(this, "Function", "LogGroup", cfg);
 		this.logGroup = webRole.logGroup();
 
-		// ⚠️ DÒNG NÀY LÀ TẠM, XOÁ Ở LƯỢT DEPLOY THỨ HAI. Đừng dọn nó cùng lượt
-		// với thay đổi đã sinh ra nó.
+		// Chỗ này từng có một `exportValue(logGroup.getLogGroupName())` TẠM, sống
+		// đúng một lượt deploy (2026-08-13), và lý do nó tồn tại đáng giữ lại:
 		//
-		// `ObservabilityStack` vừa chuyển `IngestHeartbeat` sang log group của
-		// `ingest`, nên nó KHÔNG còn tham chiếu log group của `web`. CDK thấy vậy
-		// sẽ bỏ export `ExportsOutputRefLogGroupF5B4693119CE9848` khỏi template —
-		// mà CloudFormation deploy `AppStack` TRƯỚC `ObservabilityStack`, tức lúc
-		// xoá export thì stack kia vẫn đang import nó:
+		// Khi `ObservabilityStack` chuyển `IngestHeartbeat` sang log group của
+		// `ingest`, nó thôi tham chiếu log group của `web`, nên CDK bỏ export
+		// tương ứng khỏi template. Nhưng CloudFormation deploy `AppStack` TRƯỚC
+		// `ObservabilityStack`, tức lúc xoá export thì stack kia vẫn đang import
+		// nó — chính cơ chế đã làm `Prod-AppStack` rollback một lần (xem comment
+		// logical id `LogGroup` ngay trên). `exportValue` giữ export sống qua lượt
+		// đầu để lượt đó CHỈ đổi consumer; lượt sau mới dọn.
 		//
-		//   "Export Prod-AppStack:ExportsOutputRefLogGroup… cannot be deleted as
-		//    it is in use by Prod-ObservabilityStack"
-		//
-		// Đây đúng cơ chế đã làm `Prod-AppStack` rollback một lần (xem comment
-		// logical id `LogGroup` ngay trên). `exportValue` giữ export sống dù không
-		// còn ai tham chiếu, để lượt deploy này chỉ đổi CONSUMER. Lượt sau, khi
-		// `ObservabilityStack` đã thôi import, xoá dòng này thì export mới ra đi
-		// an toàn.
-		//
-		// Giá trị phải là `getLogGroupName()` chứ không phải ARN: export cũ là một
-		// `Ref` (đã đọc từ template deploy thật), và `exportValue` phải sinh ĐÚNG
-		// tên export đó mới thay thế được nó.
-		this.exportValue(this.logGroup.getLogGroupName());
+		// ⚠️ Lần sau đổi bên nào của một cross-stack reference cũng phải tách hai
+		// lượt như vậy, và trước khi dọn thì kiểm bằng
+		// `aws cloudformation list-imports --export-name <tên export>` —
+		// "is not imported by any stack" là điều kiện đủ để xoá.
 
 		// AP1. ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng — cấp `Query` trên ARN
 		// bảng trần là cấp luôn Query trên bảng, và `/index/*` là cấp trên mọi
