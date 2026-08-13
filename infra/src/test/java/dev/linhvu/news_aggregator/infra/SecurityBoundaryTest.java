@@ -1943,6 +1943,44 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Tự đăng ký TẮT — và đây là thứ BIẾN lời hứa "không mật khẩu" của ADR-0017
+	 * thành sự thật, sau khi QA slice 2 chứng minh nó chưa phải sự thật.
+	 *
+	 * <p><b>Đo trên prod 2026-08-13.</b> Pool có `EMAIL_OTP` nhưng form *Sign up*
+	 * của managed login vẫn đòi **Email + Password + Confirm password**, và một
+	 * email chưa tồn tại gõ vào form *Sign in* nhận về `"Invalid input: Password
+	 * reset required for the user"` — thông báo sai (do `preventUserExistenceErrors`
+	 * che sự tồn tại) và là ngõ cụt. Pool prod lúc đó có **0 user**, nên mọi
+	 * người đọc đều rơi vào đường đó: story "đăng nhập bằng mã một lần gửi qua
+	 * email" KHÔNG thực hiện được cho người đầu tiên.
+	 *
+	 * <p><b>Vì sao tắt tự đăng ký là câu trả lời, không phải một cách né.</b>
+	 * Master §2 viết người dùng là *"tác giả và một nhóm nhỏ người quen"* — sản
+	 * phẩm này chưa bao giờ là self-service công khai. Với mô hình mời, người
+	 * vận hành tạo tài khoản bằng `admin-create-user` **không kèm
+	 * `--temporary-password`**; AWS: *"If you don't specify a value, Amazon
+	 * Cognito generates one for you **unless you have passwordless options active
+	 * for your user pool**"*. Pool ta có passwordless, nên user sinh ra KHÔNG có
+	 * mật khẩu và đăng nhập thẳng bằng EMAIL_OTP — đúng story, không mật khẩu ở
+	 * bất kỳ đâu.
+	 *
+	 * <p>Kèm theo một vế tiết kiệm: sender mặc định của Cognito giới hạn 50
+	 * email/ngày cho cả pool, và một form đăng ký công khai là cách dễ nhất để
+	 * người lạ đốt sạch hạn mức đó.
+	 *
+	 * <p>⚠️ NGƯỠNG PHẢI ĐỔI: ngày sản phẩm muốn mở cho người lạ. Lúc đó KHÔNG
+	 * bật lại `selfSignUpEnabled` — nó kéo password quay lại — mà phải tự gọi
+	 * `SignUp` API bỏ trống password (AWS cho phép đúng điều đó với pool
+	 * passwordless) từ một endpoint của ta.
+	 */
+	@Test
+	void pool_tat_tu_dang_ky_vi_form_sign_up_cua_cognito_luon_doi_mat_khau() {
+		identityStack(EnvConfig.DEV).hasResourceProperties("AWS::Cognito::UserPool",
+				Match.objectLike(Map.of("AdminCreateUserConfig", Match.objectLike(
+						Map.of("AllowAdminCreateUserOnly", true)))));
+	}
+
+	/**
 	 * Cửa mật khẩu KHÔNG đóng được (xem test trên), nên nó phải được canh.
 	 *
 	 * Đây là hệ quả trực tiếp của việc Cognito ép PASSWORD vào danh sách: từ giây

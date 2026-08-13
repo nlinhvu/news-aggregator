@@ -69,4 +69,30 @@ class AnonymousReadTest {
 		verifyNoInteractions(sessions);
 		verifyNoInteractions(ssm);
 	}
+
+	/**
+	 * `/api/me` là đường SPA gọi Ở MỌI LẦN TẢI TRANG, kể cả của người chưa từng
+	 * đăng nhập — nên nó là đường ẩn danh ĐÔNG NHẤT, không phải một ngoại lệ của
+	 * "đường đăng nhập".
+	 *
+	 * <p>Class này ra đời để canh driver #3 của ADR-0018 nhưng chỉ phủ
+	 * `/api/articles` và `/api/health`, và cái lọt qua khe đó đã chạy thẳng lên
+	 * prod: đo ngày 2026-08-13, mỗi lượt `/api/me` ẩn danh trả **401 kèm
+	 * `Set-Cookie: SESSION`**, tức một `PutItem` và một dòng sống 30 ngày cho mỗi
+	 * khách vãng lai. Một lượt QA của MỘT người để lại 7 phiên.
+	 *
+	 * <p>Thủ phạm không nằm ở controller mà ở filter chain:
+	 * `ExceptionTranslationFilter` gọi `HttpSessionRequestCache.saveRequest()`
+	 * TRƯỚC khi giao cho entry point, và việc lưu đó tạo HTTP session. Saved
+	 * request ấy KHÔNG BAO GIỜ được dùng tới — đăng nhập đi qua
+	 * `/api/auth/login` tường minh, còn `defaultSuccessUrl(..., true)` luôn ghi
+	 * đè đích đến.
+	 */
+	@Test
+	void me_an_danh_tra_401_ma_khong_tao_phien() throws Exception {
+		mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
+
+		verifyNoInteractions(sessions);
+		verifyNoInteractions(ssm);
+	}
 }

@@ -68,7 +68,23 @@ public class IdentityStack extends Stack {
 
 		this.userPool = UserPool.Builder.create(this, "UserPool")
 				.userPoolName("na-" + cfg.tagPrefix() + "-users")
-				.selfSignUpEnabled(true)
+				// TẮT, và đây là thứ biến lời hứa "không mật khẩu" của ADR-0017
+				// thành sự thật — xem `SecurityBoundaryTest`. QA slice 2 trên prod
+				// (2026-08-13) đo được: pool có `EMAIL_OTP` nhưng form *Sign up*
+				// của managed login vẫn đòi Email + Password + Confirm password,
+				// nên người đọc ĐẦU TIÊN buộc phải tạo mật khẩu để rồi không bao
+				// giờ dùng tới.
+				//
+				// Mô hình mời khớp master §2 ("tác giả và một nhóm nhỏ người
+				// quen"): người vận hành tạo tài khoản bằng `admin-create-user`
+				// KHÔNG kèm `--temporary-password`, và vì pool có passwordless
+				// factor, Cognito tạo user KHÔNG mật khẩu thay vì sinh mật khẩu
+				// tạm. Người được mời đăng nhập thẳng bằng EMAIL_OTP.
+				//
+				// ⚠️ NGƯỠNG PHẢI ĐỔI: ngày mở cho người lạ. KHÔNG bật lại dòng này
+				// — nó kéo mật khẩu quay lại — mà tự gọi `SignUp` API bỏ trống
+				// password từ một endpoint của ta.
+				.selfSignUpEnabled(false)
 				.signInAliases(SignInAliases.builder().email(true).build())
 				.standardAttributes(StandardAttributes.builder()
 						.email(StandardAttribute.builder()

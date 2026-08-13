@@ -102,6 +102,23 @@ class SecurityConfig {
 			// `fetch`; một redirect sang HTML là thứ nó không xử lý được.
 			.exceptionHandling(e -> e.authenticationEntryPoint(
 					new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+			// TẮT request cache, và đây là một quyết định về CHI PHÍ.
+			//
+			// `ExceptionTranslationFilter` gọi `HttpSessionRequestCache.saveRequest()`
+			// TRƯỚC khi giao cho entry point, mà việc lưu đó TẠO HTTP session. SPA
+			// gọi `/api/me` ở mọi lần tải trang, nên mỗi khách vãng lai — người
+			// chưa từng đăng nhập — sinh một `PutItem` lên bảng `sessions` và một
+			// dòng sống 30 ngày. Đã đo trên prod 2026-08-13: một lượt QA của MỘT
+			// người để lại 7 phiên ẩn danh.
+			//
+			// Saved request đó KHÔNG BAO GIỜ được dùng tới: đăng nhập đi qua
+			// `/api/auth/login` tường minh, và `defaultSuccessUrl(..., true)` có
+			// `alwaysUse=true` nên luôn ghi đè đích đến. Ta trả tiền cho một cơ
+			// chế không ai đọc.
+			//
+			// Đây là driver #3 của ADR-0018 — "BFF không được làm feed công khai
+			// đắt hơn" — và `AnonymousReadTest` canh nó.
+			.requestCache(cache -> cache.disable())
 			.csrf(csrf -> csrf
 					// httpOnly=false là CỐ Ý và chỉ cho cookie NÀY: SPA phải đọc
 					// được để gửi lại qua header `X-XSRF-TOKEN`. Cookie phiên thì
