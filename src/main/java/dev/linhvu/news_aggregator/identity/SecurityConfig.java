@@ -2,6 +2,7 @@ package dev.linhvu.news_aggregator.identity;
 
 import java.io.IOException;
 
+import dev.linhvu.news_aggregator.platform.NewsFeature;
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
@@ -21,6 +22,10 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.session.DisableEncodeUrlFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatchers;
 import org.springframework.session.config.annotation.web.http.EnableSpringHttpSession;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -103,6 +108,9 @@ class SecurityConfig {
 			// Bắt buộc đi kèm hai dòng trên, không phải trang trí. Xem
 			// `CsrfCookieFilter`.
 			.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
+			// ĐẦU chain, trước cả `DisableEncodeUrlFilter`. Xem `UserAccountsGate`
+			// — vị trí này là một phần của hành vi, không phải chi tiết sắp xếp.
+			.addFilterBefore(new UserAccountsGate(), DisableEncodeUrlFilter.class)
 			.logout(logout -> logout.disable());   // đăng xuất do AuthController lo
 
 		return http.build();
@@ -126,6 +134,69 @@ class SecurityConfig {
 		CsrfTokenRequestAttributeHandler handler = new CsrfTokenRequestAttributeHandler();
 		handler.setCsrfRequestAttributeName(null);
 		return handler;
+	}
+
+	/**
+	 * `USER_ACCOUNTS` OFF ⇒ toàn bộ bề mặt đăng nhập KHÔNG TỒN TẠI.
+	 *
+	 * <p><b>404, không phải 403.</b> Flag tắt nghĩa là tính năng không có mặt,
+	 * không phải "có mặt nhưng anh không được vào" — cùng cách Phase 3 giấu
+	 * `summary`: vắng mặt hoàn toàn, không phải null. SPA cũng đọc đúng hai mã
+	 * này: `401` = ẩn danh nên hiện nút "Đăng nhập", `404` = tắt nên không hiện
+	 * nút nào.
+	 *
+	 * <p><b>Đứng ĐẦU chain là một phần của hành vi.</b> Đứng sau `CsrfFilter`
+	 * thì `POST /api/auth/logout` trả 403 vì thiếu token — một câu trả lời khẳng
+	 * định endpoint CÓ TỒN TẠI. Đứng sau `SecurityContextHolderFilter` thì mỗi
+	 * request vào bề mặt đã tắt còn kéo theo một lượt `GetItem` lên bảng
+	 * `sessions`, tức trả tiền cho thứ đã tắt.
+	 *
+	 * <p>`shouldNotFilter` lọc theo đường dẫn TRƯỚC, nên flag chỉ được đọc trên
+	 * `/api/auth/**` và `/api/me`. Đọc flag là một `GetItem` (`TogglzConfig` cố ý
+	 * không cache), và `/api/articles` với `/api/health` không được đắt thêm vì
+	 * một tính năng chúng không dùng — xem `AnonymousReadTest`.
+	 *
+	 * <p>`setStatus` chứ KHÔNG `sendError`: `sendError` forward sang `/error`,
+	 * tức phụ thuộc vào `dispatcherTypeMatchers(ERROR).permitAll()` ở trên để
+	 * không bị nuốt thành 401 — mà MockMvc không thực hiện forward đó nên test sẽ
+	 * không bao giờ nói thật về nó (xem `ErrorStatusIT`). Thân rỗng cũng là hình
+	 * dạng `HttpStatusEntryPoint` và `/api/me` đang dùng cho 401.
+	 */
+	private static final class UserAccountsGate extends OncePerRequestFilter {
+
+		private static final RequestMatcher SURFACE = RequestMatchers.anyOf(
+				PathPatternRequestMatcher.pathPattern("/api/auth/**"),
+				PathPatternRequestMatcher.pathPattern("/api/me"));
+
+		@Override
+		protected boolean shouldNotFilter(HttpServletRequest request) {
+			return !SURFACE.matches(request);
+		}
+
+		@Override
+		protected void doFilterInternal(HttpServletRequest request,
+				HttpServletResponse response, FilterChain chain)
+				throws ServletException, IOException {
+			if (enabled()) {
+				chain.doFilter(request, response);
+				return;
+			}
+			response.setStatus(HttpStatus.NOT_FOUND.value());
+		}
+
+		/**
+		 * Fail-closed, y hệt `ArticleController` của Phase 3 (TDD §5.4). Lỗi đọc
+		 * flag KHÔNG được làm hỏng cả trang — và ở đây "closed" nghĩa là không có
+		 * đăng nhập, chứ không phải không có site.
+		 */
+		private static boolean enabled() {
+			try {
+				return NewsFeature.USER_ACCOUNTS.isActive();
+			}
+			catch (RuntimeException e) {
+				return false;
+			}
+		}
 	}
 
 	/**

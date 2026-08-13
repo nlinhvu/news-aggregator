@@ -2,12 +2,22 @@ import { useEffect, useState } from 'react'
 
 export type CurrentUser = { sub: string; email?: string; groups: string[] }
 
+// BA câu trả lời cho "tôi là ai", không phải hai. Gộp `404` vào `null` là hiện
+// nút "Đăng nhập" trỏ tới một endpoint đã tắt — đúng thứ kill switch sinh ra để
+// tránh.
+export type AuthState = CurrentUser | null | 'disabled'
+
 // 401 KHÔNG phải lỗi ở đây — nó là câu trả lời hợp lệ cho "tôi là ai": ẩn danh.
 // Ném exception ở 401 sẽ biến trạng thái BÌNH THƯỜNG NHẤT của site thành một
 // error boundary.
-export async function fetchCurrentUser(): Promise<CurrentUser | null> {
+//
+// 404 cũng không phải lỗi, và nó khác hẳn 401: flag `USER_ACCOUNTS` tắt nghĩa
+// là tính năng KHÔNG TỒN TẠI. Backend cố ý trả 404 chứ không 403 — xem
+// `SecurityConfig.UserAccountsGate`.
+export async function fetchCurrentUser(): Promise<AuthState> {
   const res = await fetch('/api/me')
   if (res.status === 401) return null
+  if (res.status === 404) return 'disabled'
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
@@ -66,9 +76,16 @@ export async function logout(): Promise<void> {
  * Hai trạng thái này phải phân biệt được, nếu không header sẽ nhấp nháy nút
  * "Đăng nhập" một nhịp rồi mới đổi thành email — với người đã đăng nhập thì đó
  * trông như vừa bị đăng xuất.
+ *
+ * `disabled` là trạng thái THỨ BA, cùng lý do: nó không phải "chưa biết" và
+ * cũng không phải "ẩn danh".
  */
-export function useCurrentUser(): { user: CurrentUser | null; loading: boolean } {
-  const [user, setUser] = useState<CurrentUser | null>(null)
+export function useCurrentUser(): {
+  user: CurrentUser | null
+  loading: boolean
+  disabled: boolean
+} {
+  const [state, setState] = useState<AuthState>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -79,7 +96,7 @@ export function useCurrentUser(): { user: CurrentUser | null; loading: boolean }
       .catch(() => null)
       .then(u => {
         if (!huy) {
-          setUser(u)
+          setState(u)
           setLoading(false)
         }
       })
@@ -88,5 +105,9 @@ export function useCurrentUser(): { user: CurrentUser | null; loading: boolean }
     }
   }, [])
 
-  return { user, loading }
+  return {
+    user: state === 'disabled' ? null : state,
+    loading,
+    disabled: state === 'disabled',
+  }
 }

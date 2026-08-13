@@ -6,8 +6,12 @@ import java.util.Optional;
 
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.togglz.core.context.FeatureContext;
+import org.togglz.core.manager.FeatureManager;
+import org.togglz.testing.TestFeatureManagerProvider;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.http.client.HttpRedirects;
@@ -61,6 +65,13 @@ class LoginFlowIT {
 	TestRestTemplate autowired;
 
 	/**
+	 * FeatureManager THẬT, dùng ở đúng một test: xem
+	 * {@link #tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang()}.
+	 */
+	@Autowired
+	FeatureManager featureManager;
+
+	/**
 	 * `DONT_FOLLOW` là điều kiện để test này có nghĩa. `TestRestTemplate` của
 	 * Boot 4 ĐI THEO redirect mặc định (Boot 3 thì không) — mà từng chặng 302 ở
 	 * đây là một khẳng định riêng, và ứng dụng dựng `Location` TUYỆT ĐỐI theo
@@ -72,6 +83,18 @@ class LoginFlowIT {
 	@BeforeEach
 	void khongDiTheoRedirect() {
 		this.rest = autowired.withRedirects(HttpRedirects.DONT_FOLLOW);
+	}
+
+	/**
+	 * `FeatureContext` cache FeatureManager trong một field static và Gradle chạy
+	 * mọi test class trong cùng một JVM, nên không dọn thì manager mà
+	 * {@link #tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang()} lắp vào sẽ rò
+	 * sang class khác.
+	 */
+	@AfterEach
+	void traLaiFeatureManagerVeNguyenTrang() {
+		TestFeatureManagerProvider.setFeatureManager(null);
+		FeatureContext.clearCache();
 	}
 
 	@Test
@@ -158,6 +181,51 @@ class LoginFlowIT {
 		ResponseEntity<Void> after = exchange(at("/api/me"), HttpMethod.GET, cookie,
 				Void.class);
 		assertThat(after.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+	}
+
+	/**
+	 * Tắt `USER_ACCOUNTS` giữa chừng: người ĐANG đăng nhập mất TÍNH NĂNG, không
+	 * mất TRANG.
+	 *
+	 * <p>Kịch bản là kịch bản thật của một kill switch — người dùng đã có phiên
+	 * từ trước rồi flag mới bị tắt — nên nó phải chạy trên một phiên THẬT, thứ
+	 * chỉ có sau trọn luồng authorization code. Đó là lý do test này ở đây chứ
+	 * không ở `UserAccountsToggleTest`.
+	 *
+	 * <p>Và nó phải chạy trên Tomcat THẬT: `/api/me` rơi vào
+	 * `anyRequest().authenticated()`, nên một 404 phát ra từ filter mà đi nhầm
+	 * đường ERROR dispatch sẽ hiện ra là 401 — chế độ hỏng mà MockMvc mù hoàn
+	 * toàn (xem `ErrorStatusIT`). 401 ở đây không phải sai lệch nhỏ: SPA đọc nó
+	 * là "ẩn danh" và hiện lại nút "Đăng nhập" trỏ tới một endpoint đã tắt.
+	 */
+	@Test
+	void tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang() {
+		String cookie = loginThroughMockIdp();
+
+		tatUserAccounts();
+
+		assertThat(exchange(at("/api/me"), HttpMethod.GET, cookie, Void.class)
+				.getStatusCode())
+				.as("404 = tính năng không tồn tại, không phải 401 = anh chưa đăng nhập")
+				.isEqualTo(HttpStatus.NOT_FOUND);
+		assertThat(exchange(at("/api/articles?limit=5"), HttpMethod.GET, cookie, Void.class)
+				.getStatusCode())
+				.as("mất tính năng thì được, mất trang thì không")
+				.isEqualTo(HttpStatus.OK);
+	}
+
+	/**
+	 * Ép `FeatureContext` trả về FeatureManager của Spring — cái đọc bảng
+	 * `feature-toggles` rỗng của Floci nên trả lời OFF.
+	 *
+	 * <p>Không có nó thì test trên vô nghĩa theo chiều ngược: `togglz-testing`
+	 * đăng ký một fallback provider trả TRUE cho MỌI feature, nên trong test mà
+	 * không làm gì thì flag đang BẬT HẾT. Bản đầy đủ của lời giải thích nằm ở
+	 * `TogglzGateTest`.
+	 */
+	private void tatUserAccounts() {
+		TestFeatureManagerProvider.setFeatureManager(featureManager);
+		FeatureContext.clearCache();
 	}
 
 	/**

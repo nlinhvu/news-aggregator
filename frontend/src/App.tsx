@@ -10,7 +10,7 @@ import { login, logout, useCurrentUser } from './auth'
  * đúng lúc site chưa có bài nào, tức lúc người dùng đầu tiên ghé thăm.
  */
 function Page({ children }: { children: ReactNode }) {
-  const { user, loading } = useCurrentUser()
+  const { user, loading, disabled } = useCurrentUser()
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: '48rem', margin: '3rem auto' }}>
@@ -18,8 +18,13 @@ function Page({ children }: { children: ReactNode }) {
                        alignItems: 'baseline', marginBottom: '1.5rem' }}>
         <h1 style={{ margin: 0 }}>News Aggregator</h1>
         {/* Đang tải thì KHÔNG render gì: hiện nút "Đăng nhập" rồi đổi thành
-            email một nhịp sau trông như vừa bị đăng xuất. */}
-        {loading ? null : user ? (
+            email một nhịp sau trông như vừa bị đăng xuất.
+
+            `disabled` (flag `USER_ACCOUNTS` tắt) cũng không render gì — kể cả
+            nút "Đăng nhập". `/api/auth/login` khi đó trả 404, nên cái nút ấy chỉ
+            là lời mời vào chỗ trống. Phần còn lại của trang không đổi một chữ:
+            tắt tính năng không được biến thành sự cố. */}
+        {loading || disabled ? null : user ? (
           <span style={{ fontSize: '.9rem' }}>
             {user.email ?? user.sub} · <button onClick={logout}>Đăng xuất</button>
           </span>
