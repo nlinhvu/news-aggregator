@@ -83,8 +83,12 @@ class SecurityConfigTest {
 		// 3xx ở đây (redirect sang `/login` của formLogin), nên một assertion chỉ
 		// đòi 3xx sẽ xanh y hệt khi `SecurityConfig` không tồn tại. Đã đo đúng
 		// như vậy trong lượt chạy đỏ.
+		// TUYỆT ĐỐI, dựng từ `news.identity.public-base-url`, không phải đường
+		// dẫn tương đối: sau CloudFront, host của request là Function URL
+		// (`AuthType=AWS_IAM`), nên một `Location` dựng từ request sẽ đẩy trình
+		// duyệt vào chỗ nó nhận 403. Đã đo trên dev 2026-08-13.
 		mvc.perform(get("/api/auth/login"))
 				.andExpect(status().is3xxRedirection())
-				.andExpect(redirectedUrl("/api/auth/login/cognito"));
+				.andExpect(redirectedUrl("http://localhost:8080/api/auth/login/cognito"));
 	}
 }

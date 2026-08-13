@@ -29,7 +29,7 @@ class SsmClientRegistrationRepositoryTest {
 		SsmClient ssm = mock(SsmClient.class);
 
 		new SsmClientRegistrationRepository(ssm, "/news/test/cognito-client-secret",
-				"https://issuer.example/pool", "client-abc");
+				"https://issuer.example/pool", "client-abc", "https://news.example");
 
 		verifyNoInteractions(ssm);
 	}
@@ -44,7 +44,7 @@ class SsmClientRegistrationRepositoryTest {
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
 				ssm, "/news/test/cognito-client-secret",
-				"https://issuer.example/pool", "client-abc");
+				"https://issuer.example/pool", "client-abc", "https://news.example");
 
 		ClientRegistration first = repo.findByRegistrationId("cognito");
 		ClientRegistration second = repo.findByRegistrationId("cognito");
@@ -65,7 +65,7 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s").build()).build());
 
 		new SsmClientRegistrationRepository(ssm, "/p", "https://issuer.example/pool",
-				"client-abc").findByRegistrationId("cognito");
+				"client-abc", "https://news.example").findByRegistrationId("cognito");
 
 		verify(ssm).getParameter(GetParameterRequest.builder()
 				.name("/p").withDecryption(true).build());
@@ -82,13 +82,42 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s").build()).build());
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
-				ssm, "/p", "https://issuer.example/pool", "client-abc");
+				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				"https://news.example");
 		ClientRegistration reg = repo.findByRegistrationId("cognito");
 
 		assertThat(reg.getRedirectUri())
-				.isEqualTo("{baseUrl}/api/auth/callback/{registrationId}");
+				.isEqualTo("https://news.example/api/auth/callback/cognito");
 		assertThat(reg.getScopes()).containsExactlyInAnyOrder("openid", "email");
 		assertThat(repo.findByRegistrationId("khong-ton-tai")).isNull();
+	}
+
+	@Test
+	void redirect_uri_la_tuyet_doi_khong_dung_placeholder_baseUrl() {
+		// Ghim chính cái bug đã ĐO trên dev 2026-08-13. `{baseUrl}` được Spring
+		// Security giãn ra từ HOST CỦA REQUEST, mà sau CloudFront →
+		// Lambda Function URL host đó là `*.lambda-url.us-east-1.on.aws`:
+		// EdgeStack dùng `ALL_VIEWER_EXCEPT_HOST_HEADER` nên `Host` của viewer bị
+		// strip (SigV4 đòi Host của Function URL). Hệ quả: `redirect_uri` gửi lên
+		// Cognito lệch `callbackUrls` ⇒ Cognito từ chối, và không log nào của ta
+		// nói ra điều đó.
+		//
+		// Test local KHÔNG bao giờ tự bắt được: ở local `Host` là `localhost`,
+		// tức host ĐÚNG, nên `{baseUrl}` giãn ra chuẩn và mọi thứ xanh.
+		SsmClient ssm = mock(SsmClient.class);
+		when(ssm.getParameter(any(GetParameterRequest.class)))
+				.thenReturn(GetParameterResponse.builder()
+						.parameter(Parameter.builder().value("s").build()).build());
+
+		ClientRegistration reg = new SsmClientRegistrationRepository(
+				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				"https://news.example").findByRegistrationId("cognito");
+
+		assertThat(reg.getRedirectUri())
+				.as("mọi placeholder ở đây đều được giãn từ host của request — "
+						+ "thứ SAI sau CloudFront")
+				.doesNotContain("{").doesNotContain("}")
+				.startsWith("https://news.example/");
 	}
 
 	@Test
@@ -103,7 +132,8 @@ class SsmClientRegistrationRepositoryTest {
 						.parameter(Parameter.builder().value("s3cr3t").build()).build());
 
 		SsmClientRegistrationRepository repo = new SsmClientRegistrationRepository(
-				ssm, "/p", "https://issuer.example/pool", "client-abc");
+				ssm, "/p", "https://issuer.example/pool", "client-abc",
+				"https://news.example");
 
 		assertThatThrownBy(() -> repo.findByRegistrationId("cognito"))
 				.isInstanceOf(RuntimeException.class);

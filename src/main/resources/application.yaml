@@ -72,6 +72,13 @@ news:
     table-name: ${NEWS_SOURCES_TABLE:sources}
   identity:
     sessions-table: ${NEWS_SESSIONS_TABLE:sessions}
+    # Domain CÔNG KHAI của site, và app KHÔNG suy ra được nó từ request:
+    # CloudFront đi tới Function URL bằng `ALL_VIEWER_EXCEPT_HOST_HEADER`, tức
+    # `Host` của viewer bị strip có chủ ý (SigV4 đòi Host của Function URL).
+    # Mọi URL tuyệt đối — redirect đăng nhập, `redirect_uri` gửi Cognito — phải
+    # dựng từ đây. `AppStack` bơm biến này bằng CHÍNH `cfg.appDomain()` mà
+    # `IdentityStack` dùng cho `callbackUrls`.
+    public-base-url: ${NEWS_PUBLIC_BASE_URL:http://localhost:8080}
     cognito:
       # Bốn biến này CHỈ được `AppStack` bơm vào `web` (và sau này `admin`) —
       # `ingest`/`summarize` không có bề mặt đăng nhập nào. Giá trị mặc định ở

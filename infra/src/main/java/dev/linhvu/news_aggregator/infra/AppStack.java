@@ -139,13 +139,25 @@ public class AppStack extends Stack {
 
 		Map<String, String> webEnv = baseEnv(cfg, "web", articlesTable,
 				featureTogglesTable, sourcesTable, sessionsTable);
-		// Bốn biến này CHỈ ở `web` (và sau này `admin`), không nằm trong `baseEnv`:
+		// Năm biến này CHỈ ở `web` (và sau này `admin`), không nằm trong `baseEnv`:
 		// `ingest`/`summarize` không có bề mặt đăng nhập nào, nên với chúng đây là
 		// cấu hình chết — và cấu hình chết là thứ lần audit sau phải truy nguyên.
 		webEnv.put("NEWS_COGNITO_ISSUER_URI", identity.getIssuerUri());
 		webEnv.put("NEWS_COGNITO_CLIENT_ID", identity.getClient().getUserPoolClientId());
 		webEnv.put("NEWS_COGNITO_LOGOUT_URI", identity.getLogoutUri());
 		webEnv.put("NEWS_COGNITO_SECRET_PARAMETER", secretParameterName);
+		// Ứng dụng KHÔNG suy ra được domain công khai từ request: CloudFront đi
+		// tới Function URL bằng `ALL_VIEWER_EXCEPT_HOST_HEADER` (EdgeStack), tức
+		// `Host` của viewer bị strip có chủ ý vì SigV4 đòi Host của Function URL.
+		// Thiếu biến này, Spring dựng URL tuyệt đối bằng host
+		// `*.lambda-url.us-east-1.on.aws` — ĐÃ ĐO trên dev 2026-08-13: redirect
+		// đăng nhập trỏ vào Function URL (`AuthType=AWS_IAM` ⇒ trình duyệt nhận
+		// 403), và `redirect_uri` gửi Cognito lệch `callbackUrls`.
+		//
+		// Dùng CHUNG `cfg.appDomain()` với `IdentityStack.callbackUrls` — một
+		// nguồn sự thật duy nhất. Suy ra từ hai chỗ khác nhau là mở lại đúng cái
+		// lệch vừa phải trả giá.
+		webEnv.put("NEWS_PUBLIC_BASE_URL", "https://" + cfg.appDomain());
 
 		this.webFunction = buildFunction("Function", webRole, repo, imageDigest, webEnv);
 

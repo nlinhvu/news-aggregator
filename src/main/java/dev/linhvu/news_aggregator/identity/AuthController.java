@@ -21,19 +21,30 @@ import org.springframework.web.servlet.view.RedirectView;
 class AuthController {
 
 	private final String logoutUri;
+	private final String publicBaseUrl;
 
-	AuthController(@Value("${news.identity.cognito.logout-uri}") String logoutUri) {
+	AuthController(@Value("${news.identity.cognito.logout-uri}") String logoutUri,
+			@Value("${news.identity.public-base-url}") String publicBaseUrl) {
 		this.logoutUri = logoutUri;
+		this.publicBaseUrl = publicBaseUrl;
 	}
 
 	/**
 	 * Spring Security đặt entry point thật ở `/api/auth/login/{registrationId}`.
 	 * Endpoint này tồn tại để SPA không phải biết `registrationId` là gì — và để
 	 * bề mặt API khớp đúng thứ TDD §7 công bố.
+	 *
+	 * URL TUYỆT ĐỐI dựng từ `public-base-url`, không phải đường dẫn tương đối.
+	 * Đường dẫn tương đối được servlet container biến thành tuyệt đối bằng host
+	 * của REQUEST, mà sau CloudFront host đó là Function URL với
+	 * `AuthType=AWS_IAM` — trình duyệt không ký SigV4 được nên nhận 403. Đã ĐO
+	 * trên dev 2026-08-13; đó cũng là lý do không cậy vào
+	 * `server.tomcat.use-relative-redirects`: hành vi ấy là của container và
+	 * MockMvc không đi qua container nên test sẽ không bao giờ nói thật về nó.
 	 */
 	@GetMapping("/api/auth/login")
 	RedirectView login() {
-		return new RedirectView("/api/auth/login/"
+		return new RedirectView(publicBaseUrl + "/api/auth/login/"
 				+ SsmClientRegistrationRepository.REGISTRATION_ID);
 	}
 

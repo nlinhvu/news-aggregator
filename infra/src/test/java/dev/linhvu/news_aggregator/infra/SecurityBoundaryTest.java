@@ -1838,10 +1838,10 @@ class SecurityBoundaryTest {
 	/**
 	 * `ingest` và `summarize` KHÔNG mang cấu hình danh tính.
 	 *
-	 * Bốn biến `NEWS_COGNITO_*` nằm ở khối `web` chứ không ở `baseEnv`, và khác
-	 * biệt đó vô hình: đưa chúng vào `baseEnv` thì mọi thứ chạy y hệt, chỉ là hai
-	 * function không có bề mặt đăng nhập bỗng mang theo issuer, client id và tên
-	 * một secret mà chúng không có quyền đọc.
+	 * Bốn biến `NEWS_COGNITO_*` và `NEWS_PUBLIC_BASE_URL` nằm ở khối `web` chứ
+	 * không ở `baseEnv`, và khác biệt đó vô hình: đưa chúng vào `baseEnv` thì mọi
+	 * thứ chạy y hệt, chỉ là hai function không có bề mặt đăng nhập bỗng mang
+	 * theo issuer, client id và tên một secret mà chúng không có quyền đọc.
 	 */
 	@Test
 	void chi_web_mang_cau_hinh_cognito() {
@@ -1852,10 +1852,43 @@ class SecurityBoundaryTest {
 			if (e.getKey().startsWith("Function")) {
 				continue;   // `web` — logical id giữ nguyên từ bản Lambdalith
 			}
-			assertFalse(String.valueOf(e.getValue()).contains("NEWS_COGNITO_"),
-					"`" + e.getKey() + "` không được mang cấu hình Cognito: "
-							+ e.getValue());
+			for (String prefix : List.of("NEWS_COGNITO_", "NEWS_PUBLIC_BASE_URL")) {
+				assertFalse(String.valueOf(e.getValue()).contains(prefix),
+						"`" + e.getKey() + "` không được mang cấu hình danh tính ("
+								+ prefix + "): " + e.getValue());
+			}
 		}
+	}
+
+	/**
+	 * `NEWS_PUBLIC_BASE_URL` và `callbackUrls` của Cognito phải mọc từ CÙNG một
+	 * `cfg.appDomain()`.
+	 *
+	 * Đây là chốt chặn cho một lỗi đã trả giá thật trên dev (2026-08-13). Ứng
+	 * dụng KHÔNG suy ra được domain công khai từ request: `EdgeStack` dùng
+	 * `ALL_VIEWER_EXCEPT_HOST_HEADER` nên `Host` của viewer bị strip (SigV4 đòi
+	 * Host của Function URL), và Spring khi đó dựng URL tuyệt đối bằng
+	 * `*.lambda-url.us-east-1.on.aws`. Hệ quả đo được: redirect đăng nhập trỏ vào
+	 * Function URL — thứ có `AuthType=AWS_IAM` nên trình duyệt nhận 403 — và
+	 * `redirect_uri` gửi Cognito lệch `callbackUrls` nên Cognito từ chối.
+	 *
+	 * Test này KHÔNG chỉ kiểm biến có mặt: nó kiểm hai giá trị KHỚP NHAU. Chép
+	 * literal domain vào hai chỗ sẽ xanh ở lượt đầu rồi lệch âm thầm ở lần đổi
+	 * domain sau — mà lệch domain thì triệu chứng duy nhất là "đăng nhập hỏng",
+	 * không log nào của ta nói ra.
+	 */
+	@Test
+	void public_base_url_khop_domain_dung_cho_callback_cua_cognito() {
+		EnvConfig cfg = EnvConfig.DEV;
+
+		appStack(cfg).hasResourceProperties("AWS::Lambda::Function",
+				Match.objectLike(Map.of("Environment", Match.objectLike(Map.of(
+						"Variables", Match.objectLike(Map.of(
+								"NEWS_PUBLIC_BASE_URL", "https://" + cfg.appDomain())))))));
+
+		identityStack(cfg).hasResourceProperties("AWS::Cognito::UserPoolClient",
+				Match.objectLike(Map.of("CallbackURLs", Match.arrayEquals(List.of(
+						"https://" + cfg.appDomain() + "/api/auth/callback/cognito")))));
 	}
 
 	/**

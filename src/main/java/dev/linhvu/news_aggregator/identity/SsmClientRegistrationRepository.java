@@ -49,16 +49,19 @@ class SsmClientRegistrationRepository implements ClientRegistrationRepository {
 	private final String secretParameterName;
 	private final String issuerUri;
 	private final String clientId;
+	private final String publicBaseUrl;
 	private volatile ClientRegistration cached;
 
 	SsmClientRegistrationRepository(SsmClient ssm,
 			@Value("${news.identity.cognito.secret-parameter}") String secretParameterName,
 			@Value("${news.identity.cognito.issuer-uri}") String issuerUri,
-			@Value("${news.identity.cognito.client-id}") String clientId) {
+			@Value("${news.identity.cognito.client-id}") String clientId,
+			@Value("${news.identity.public-base-url}") String publicBaseUrl) {
 		this.ssm = ssm;
 		this.secretParameterName = secretParameterName;
 		this.issuerUri = issuerUri;
 		this.clientId = clientId;
+		this.publicBaseUrl = publicBaseUrl;
 	}
 
 	@Override
@@ -93,7 +96,18 @@ class SsmClientRegistrationRepository implements ClientRegistrationRepository {
 				.clientSecret(readSecret())
 				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
 				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-				.redirectUri("{baseUrl}/api/auth/callback/{registrationId}")
+				// TUYỆT ĐỐI, KHÔNG dùng placeholder `{baseUrl}`. Spring Security
+				// giãn `{baseUrl}` từ host của REQUEST, mà sau CloudFront →
+				// Lambda Function URL host đó là `*.lambda-url.us-east-1.on.aws`
+				// (EdgeStack dùng `ALL_VIEWER_EXCEPT_HOST_HEADER`, `Host` của
+				// viewer bị strip vì SigV4 đòi Host của Function URL). Cognito
+				// khi đó từ chối vì `redirect_uri` lệch `callbackUrls` — đã ĐO
+				// trên dev 2026-08-13.
+				//
+				// `news.identity.public-base-url` đến từ `AppStack` và dựng bằng
+				// CHÍNH `cfg.appDomain()` mà `IdentityStack` dùng cho
+				// `callbackUrls`: một nguồn sự thật, nên hai bên không lệch được.
+				.redirectUri(publicBaseUrl + "/api/auth/callback/" + REGISTRATION_ID)
 				.scope(Set.of("openid", "email"))
 				.issuerUri(issuerUri)
 				.authorizationUri(issuerUri + "/oauth2/authorize")
