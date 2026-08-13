@@ -39,22 +39,25 @@ export function login(): void {
   window.location.href = '/api/auth/login'
 }
 
-// Cũng bằng điều hướng, cùng lý do: `/api/auth/logout` trả redirect sang trang
-// đăng xuất của Cognito, và chỉ trình duyệt mới đi theo được. Dùng form vì đây
-// là POST — CSRF token đi trong field `_csrf`, tên mặc định mà `CsrfFilter` đọc.
-export function logout(): void {
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = '/api/auth/logout'
-
-  const input = document.createElement('input')
-  input.type = 'hidden'
-  input.name = '_csrf'
-  input.value = csrfToken() ?? ''
-  form.appendChild(input)
-
-  document.body.appendChild(form)
-  form.submit()
+// POST KHÔNG BODY, token đi trong header — rồi mới điều hướng.
+//
+// Bản đầu dùng form POST với field `_csrf`. Nó CHẾT trên AWS và chết trước khi
+// tới ứng dụng: CloudFront OAC không ký request body khi origin là Lambda
+// Function URL, nên mọi request mang body đều trượt chữ ký SigV4 và nhận
+// `The request signature we calculated does not match…`. Form luôn có body;
+// `fetch` không body thì không.
+//
+// Hệ quả kéo theo: `fetch` không đọc được `Location` của redirect, nên endpoint
+// trả URL đăng xuất trong THÂN response và ta tự điều hướng. Phải là điều hướng
+// thật — trang đăng xuất của Cognito nằm khác origin.
+export async function logout(): Promise<void> {
+  const res = await fetch('/api/auth/logout', {
+    method: 'POST',
+    headers: csrfHeader(),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const { logoutUrl } = (await res.json()) as { logoutUrl: string }
+  window.location.href = logoutUrl
 }
 
 /**

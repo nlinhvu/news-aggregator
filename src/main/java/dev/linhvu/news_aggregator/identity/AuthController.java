@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
+
 @RestController
 @Profile(RoleProfiles.HTTP)
 class AuthController {
@@ -67,8 +68,29 @@ class AuthController {
 	 * Thiếu vế 2 thì lần "Đăng nhập" kế tiếp vào thẳng, không hỏi gì — trông y
 	 * hệt một nút đăng xuất hỏng.
 	 */
+	/**
+	 * Trả URL đăng xuất của Cognito dưới dạng JSON, KHÔNG redirect.
+	 *
+	 * Bản đầu trả `RedirectView` và SPA gọi bằng form POST để trình duyệt đi
+	 * theo redirect. Cách đó CHẾT trên AWS, và chết trước khi tới ứng dụng:
+	 *
+	 * <pre>
+	 *   POST có body    → {"message":"The request signature we calculated does
+	 *                      not match the signature you provided…"}
+	 *   POST không body → tới được ứng dụng
+	 * </pre>
+	 *
+	 * CloudFront OAC KHÔNG ký request body khi origin là Lambda Function URL,
+	 * nên mọi request mang body đều trượt chữ ký SigV4. Form POST luôn có body
+	 * (field `_csrf`), `fetch` không body thì không.
+	 *
+	 * Vì `fetch` không đọc được header `Location` của một redirect (response là
+	 * opaque), URL phải đi trong THÂN response. Đây cũng là hình dạng đúng hơn
+	 * cho một API mà người gọi là SPA: một redirect HTML nhét vào chỗ chờ JSON
+	 * chưa bao giờ là câu trả lời tốt.
+	 */
 	@PostMapping("/api/auth/logout")
-	RedirectView logout(HttpServletRequest request) {
+	LogoutResponse logout(HttpServletRequest request) {
 		HttpSession session = request.getSession(false);
 		if (session != null) {
 			// Với Spring Session, `invalidate()` gọi thẳng
@@ -77,9 +99,12 @@ class AuthController {
 			// `dynamodb:DeleteItem`.
 			session.invalidate();
 		}
-		return new RedirectView(logoutUri);
+		return new LogoutResponse(logoutUri);
 	}
 
 	record CurrentUserDto(String sub, String email, List<String> groups) {
+	}
+
+	record LogoutResponse(String logoutUrl) {
 	}
 }

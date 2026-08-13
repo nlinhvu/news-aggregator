@@ -135,12 +135,23 @@ class LoginFlowIT {
 		assertThat(exchange(at("/api/me"), HttpMethod.GET, cookie, Void.class)
 				.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-		// Kiểm status của CHÍNH lời gọi đăng xuất. Thiếu nó thì một 401/403 ở
-		// đây trôi qua im lặng và vế "phiên đã chết" bên dưới xanh vì lý do sai.
-		assertThat(exchange(at("/api/auth/logout"), HttpMethod.POST, cookie, Void.class)
-				.getStatusCode())
+		// Kiểm status VÀ thân của CHÍNH lời gọi đăng xuất. Thiếu nó thì một
+		// 401/403 ở đây trôi qua im lặng và vế "phiên đã chết" bên dưới xanh vì
+		// lý do sai.
+		//
+		// 200 + JSON chứ KHÔNG redirect: CloudFront OAC không ký request body
+		// khi origin là Lambda Function URL, nên form POST (luôn có body) trượt
+		// chữ ký SigV4 và không tới được ứng dụng. SPA vì thế gọi bằng `fetch`
+		// không body, mà `fetch` lại không đọc được `Location` — nên URL đăng
+		// xuất phải nằm trong thân response.
+		ResponseEntity<String> logout = exchange(at("/api/auth/logout"),
+				HttpMethod.POST, cookie, String.class);
+		assertThat(logout.getStatusCode())
 				.as("đăng xuất phải đi lọt CSRF — SPA gửi lại token qua X-XSRF-TOKEN")
-				.isEqualTo(HttpStatus.FOUND);
+				.isEqualTo(HttpStatus.OK);
+		assertThat(logout.getBody())
+				.as("SPA cần URL để tự điều hướng sang trang đăng xuất của Cognito")
+				.contains("logoutUrl");
 
 		// Dùng LẠI đúng cookie cũ. Nếu đăng xuất chỉ xoá cookie phía trình duyệt
 		// thì request này vẫn 200 — và phiên bị đánh cắp vẫn sống.

@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator.identity;
 import java.io.IOException;
 
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,6 +48,21 @@ class SecurityConfig {
 			throws Exception {
 		http
 			.authorizeHttpRequests(auth -> auth
+					// ERROR dispatch phải đi lọt, nếu không MỌI lỗi trên đường ẩn
+					// danh biến thành 401. Spring Security lọc cả dispatch type
+					// này (mặc định từ Boot 3), mà `/error` thì không ai cấp
+					// quyền, nên request ẩn danh bị entry point nuốt.
+					//
+					// ĐÃ ĐO trên dev 2026-08-13, sau khi Task 10+11 đưa Spring
+					// Security vào:
+					//   /api/khong-ton-tai      → 401  (phải là 404)
+					//   /api/articles?limit=abc → 401  (phải là 400)
+					//
+					// Vế nguy hiểm không phải 404: một lỗi 500 trên đường đọc công
+					// khai cũng sẽ hiện ra là 401, tức một sự cố trông y hệt vấn
+					// đề đăng nhập. Phase này đã mất thời gian đúng một lần vì
+					// nhìn 401 rồi truy sai chỗ (xem `CsrfCookieFilter`).
+					.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 					// Đường đọc ẩn danh — liệt kê TƯỜNG MINH, không dựa vào thứ
 					// tự matcher. `/api/articles` là sản phẩm chính và nó phải
 					// mở với mọi người, mãi mãi (master §3.1).
