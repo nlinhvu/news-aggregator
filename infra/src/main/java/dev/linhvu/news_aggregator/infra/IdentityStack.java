@@ -7,9 +7,11 @@ import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.cognito.AllowedFirstAuthFactors;
+import software.amazon.awscdk.services.cognito.CfnManagedLoginBranding;
 import software.amazon.awscdk.services.cognito.CfnUserPoolGroup;
 import software.amazon.awscdk.services.cognito.CognitoDomainOptions;
 import software.amazon.awscdk.services.cognito.FeaturePlan;
+import software.amazon.awscdk.services.cognito.ManagedLoginVersion;
 import software.amazon.awscdk.services.cognito.OAuthFlows;
 import software.amazon.awscdk.services.cognito.PasswordPolicy;
 import software.amazon.awscdk.services.cognito.OAuthScope;
@@ -142,6 +144,23 @@ public class IdentityStack extends Stack {
 				.cognitoDomain(CognitoDomainOptions.builder()
 						.domainPrefix(domainPrefix)
 						.build())
+				// VERSION 2, và đây KHÔNG phải lựa chọn thẩm mỹ.
+				//
+				// Mặc định của CDK là version 1 — classic hosted UI — thứ chỉ có
+				// email + password và KHÔNG có giao diện passwordless nào. Toàn bộ
+				// cấu hình của ADR-0017 (`EMAIL_OTP`, passkey) vẫn nằm nguyên trong
+				// pool nhưng không đường nào chạm tới được từ UI: pool đúng, cửa vào
+				// sai.
+				//
+				// Đã ĐO trên dev 2026-08-13 bằng trình duyệt thật, TRƯỚC khi có dòng
+				// này: `/login` và `/signup` đều bắt buộc trường Password, không một
+				// lựa chọn OTP nào trên màn hình, trong khi
+				// `describe-user-pool-domain` trả `ManagedLoginVersion: 1`.
+				//
+				// Không test nào bắt được chế độ hỏng đó: mọi assertion trên
+				// `describe-user-pool` đều xanh vì pool THẬT SỰ được cấu hình đúng.
+				// Chốt chặn duy nhất là mở trang đăng nhập bằng trình duyệt.
+				.managedLoginVersion(ManagedLoginVersion.NEWER_MANAGED_LOGIN)
 				.build());
 
 		this.client = userPool.addClient("WebClient", UserPoolClientOptions.builder()
@@ -164,6 +183,22 @@ public class IdentityStack extends Stack {
 						.logoutUrls(List.of("https://" + cfg.appDomain() + "/"))
 						.build())
 				.build());
+
+		// Managed login v2 ĐÒI một style tồn tại cho app client; không có nó thì
+		// người dùng gặp trang lỗi thay vì màn hình đăng nhập — tức đổi version
+		// mà quên dòng này còn tệ hơn không đổi.
+		//
+		// `useCognitoProvidedValues(true)` lấy style mặc định của Cognito, nên
+		// không phải mở branding designer và không có tài sản thiết kế nào phải
+		// version-control. Ngưỡng thay bằng style riêng: khi thương hiệu của
+		// trang cần xuất hiện trên màn hình đăng nhập.
+		//
+		// Đứng SAU `addClient` vì nó cần `clientId`.
+		CfnManagedLoginBranding.Builder.create(this, "ManagedLoginBranding")
+				.userPoolId(userPool.getUserPoolId())
+				.clientId(client.getUserPoolClientId())
+				.useCognitoProvidedValues(true)
+				.build();
 
 		CfnOutput.Builder.create(this, "IssuerUri").value(getIssuerUri()).build();
 		CfnOutput.Builder.create(this, "ClientId")

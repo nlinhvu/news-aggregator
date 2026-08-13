@@ -1993,6 +1993,35 @@ class SecurityBoundaryTest {
 	 * đăng ký passkey sẽ hỏng, và đường sửa là một lượt deploy THỨ HAI đặt RP ID
 	 * sau khi domain đã tồn tại — không phải nhét lại vào lần create đầu.
 	 */
+	/**
+	 * Managed login **version 2**, và một style cho app client.
+	 *
+	 * Đây là chốt chặn cho một lỗi chỉ trình duyệt mới thấy (dev, 2026-08-13):
+	 * mặc định của CDK là version 1 — classic hosted UI — thứ chỉ có email +
+	 * password. Toàn bộ cấu hình passwordless của ADR-0017 (`EMAIL_OTP`,
+	 * passkey) vẫn nằm nguyên trong pool nhưng KHÔNG đường nào chạm tới được từ
+	 * UI. Pool đúng, cửa vào sai.
+	 *
+	 * <p>Vì sao không test nào khác bắt được: mọi assertion trên
+	 * `AWS::Cognito::UserPool` đều xanh, vì pool THẬT SỰ được cấu hình đúng.
+	 * Thứ sai nằm ở `AWS::Cognito::UserPoolDomain`, một resource mà trước hôm
+	 * nay không assertion nào chạm tới ngoài `Domain` prefix.
+	 *
+	 * <p>Vế thứ hai — branding — không phải trang trí: v2 ĐÒI một style tồn tại
+	 * cho app client, thiếu nó thì người dùng gặp trang lỗi thay vì màn hình
+	 * đăng nhập. Đổi version mà quên branding còn tệ hơn không đổi.
+	 */
+	@Test
+	void managed_login_la_v2_va_co_style_cho_app_client() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		template.hasResourceProperties("AWS::Cognito::UserPoolDomain",
+				Match.objectLike(Map.of("ManagedLoginVersion", 2)));
+
+		template.hasResourceProperties("AWS::Cognito::ManagedLoginBranding",
+				Match.objectLike(Map.of("UseCognitoProvidedValues", true)));
+	}
+
 	@Test
 	void pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc() {
 		Template template = identityStack(EnvConfig.DEV);
