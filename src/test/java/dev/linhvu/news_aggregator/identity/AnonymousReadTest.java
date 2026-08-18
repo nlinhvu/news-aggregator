@@ -60,6 +60,24 @@ class AnonymousReadTest {
 		verifyNoInteractions(ssm);
 	}
 
+	/**
+	 * Hàng chip gọi `/api/sources` ở MỌI lần tải trang, kể cả của người ẩn danh —
+	 * đúng hình dạng đã làm `/api/me` lọt lưới một lần: một đường công khai mới
+	 * mở ra mà không ai hỏi nó có chạm phiên không.
+	 *
+	 * Nó đọc bảng `sources` bằng `Scan`, và đó là lý do vế `verifyNoInteractions`
+	 * ở đây không thừa: `Scan` là quyền mới cấp cho `web` ở Task 19, nên đường
+	 * này nay chạm DynamoDB — chỉ không được chạm bảng `sessions` và không được
+	 * gọi SSM.
+	 */
+	@Test
+	void danh_sach_nguon_an_danh_khong_tra_phien_va_khong_goi_ssm() throws Exception {
+		mvc.perform(get("/api/sources")).andExpect(status().isOk());
+
+		verifyNoInteractions(sessions);
+		verifyNoInteractions(ssm);
+	}
+
 	@Test
 	void health_an_danh_cung_khong_cham_gi() throws Exception {
 		// `/api/health` là đường CloudFront và người vận hành gọi thường xuyên

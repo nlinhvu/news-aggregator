@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <pre>
  *   bean                   web      ingest   summarize
  *   articleController      CÓ       -        -
+ *   sourceController       CÓ       VẮNG     -
  *   eventsController       VẮNG     CÓ       CÓ
  *   chatClient             VẮNG     -        CÓ
  *   ingestFeedsHandler     -        CÓ       VẮNG
@@ -71,6 +72,10 @@ class RoleProfileContextTest {
 					.as("`web` phục vụ GET /api/articles")
 					.isTrue();
 
+			assertThat(ctx.containsBeanDefinition("sourceController"))
+					.as("`web` phục vụ GET /api/sources — hàng chip của slice 4")
+					.isTrue();
+
 			assertThat(ctx.containsBeanDefinition("chatClient"))
 					.as("`web` không được có ĐỊNH NGHĨA ChatClient — nó không có quyền "
 							+ "đọc gemini key, nên một lời gọi nhầm phải chết lúc tra "
@@ -96,6 +101,13 @@ class RoleProfileContextTest {
 		void ingest_co_handler_va_co_duong_day_hang_doi() {
 			assertThat(ctx.containsBeanDefinition("eventsController")).isTrue();
 			assertThat(ctx.containsBeanDefinition("ingestFeedsHandler")).isTrue();
+
+			// `ingest` ĐỌC bảng `sources` (AP5) nhưng không phục vụ HTTP cho ai —
+			// controller ở đây là một đường vào không ai gọi, trên một function
+			// không có Function URL.
+			assertThat(ctx.containsBeanDefinition("sourceController"))
+					.as("`ingest` không phục vụ endpoint đọc nào")
+					.isFalse();
 
 			// Vế QUAN TRỌNG NHẤT của test này: `ArticleAdded` phát trong lượt
 			// ingest, nên đường đẩy vào SQS phải sống Ở ĐÂY. Gắn
