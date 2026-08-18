@@ -39,10 +39,19 @@ public class MockOAuth2ServerConfiguration {
 	 * MỘT `oauth2Login()` với prod — chỉ khác issuer. Claim `cognito:groups`
 	 * phải có, nếu không cổng `ops` của slice 5 không kiểm được ở local và ta
 	 * chỉ phát hiện nó hỏng trên `dev`.
+	 *
+	 * <p><b>`requestParam` là `grant_type`, KHÔNG phải `scope`.</b> Token request
+	 * của luồng authorization code mang `grant_type`, `code`, `redirect_uri`,
+	 * `client_id` — không mang `scope`. Mapping theo `scope` vì thế không bao giờ
+	 * khớp, và ID token ra đời với đúng
+	 * {@code [sub, aud, nbf, iss, exp, iat, nonce, jti]}: không `email`, không
+	 * `cognito:groups`. Fixture im lặng không phát thứ nó hứa, nên mọi khẳng định
+	 * dựa vào hai claim đó đều xanh vì RỖNG. Đã đo bằng cách in
+	 * `OidcUser.getClaims().keySet()` trong `LoginFlowIT`.
 	 */
 	private static final String JSON_CONFIG = """
 			{"interactiveLogin":true,"tokenCallbacks":[{"issuerId":"cognito",\
-			"tokenExpiry":3600,"requestMappings":[{"requestParam":"scope","match":"*",\
+			"tokenExpiry":3600,"requestMappings":[{"requestParam":"grant_type","match":"authorization_code",\
 			"claims":{"cognito:groups":["ops"],"email":"dev@local"}}]}]}""";
 
 	private static final GenericContainer<?> MOCK_IDP =

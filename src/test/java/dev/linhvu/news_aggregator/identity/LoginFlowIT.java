@@ -4,11 +4,14 @@ import java.net.URI;
 import java.util.List;
 import java.util.Optional;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.togglz.core.context.FeatureContext;
 import org.togglz.core.manager.FeatureManager;
 import org.togglz.testing.TestFeatureManagerProvider;
@@ -229,6 +232,36 @@ class LoginFlowIT {
 	}
 
 	/**
+	 * `@EventListener` chỉ chạy khi Spring TÌM THẤY bean — unit test gọi thẳng
+	 * method thì xanh kể cả khi bean không bao giờ được dựng, và cũng xanh kể cả
+	 * khi `oauth2Login()` không hề bắn `AuthenticationSuccessEvent`. Hai chế độ
+	 * hỏng đó chỉ lộ ra ở một luồng đăng nhập thật.
+	 */
+	@Test
+	void moi_luot_dang_nhap_de_lai_dung_mot_dong_log_co_ten_provider() {
+		ListAppender<ILoggingEvent> logs = new ListAppender<>();
+		ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+				LoggerFactory.getLogger(LoginAuditListener.class);
+		logs.start();
+		logger.addAppender(logs);
+		try {
+			loginThroughMockIdp();
+		}
+		finally {
+			logger.detachAppender(logs);
+			logs.stop();
+		}
+
+		assertThat(logs.list).singleElement()
+				.extracting(ILoggingEvent::getFormattedMessage).asString()
+				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
+				.contains("provider=cognito")
+				// ID token của mock server mang `email: dev@local`, nên vế này
+				// đo trên dữ liệu thật chứ không trên một map tự dựng.
+				.doesNotContain("dev@local");
+	}
+
+	/**
 	 * Đi trọn luồng authorization code và trả về cookie phiên.
 	 *
 	 * Cookie phải được mang theo từ chặng 2: Spring Security lưu
@@ -249,8 +282,13 @@ class LoginFlowIT {
 		// Form của mock server: `<form method="post">` không có `action`, tức nó
 		// POST về CHÍNH url authorize (kèm nguyên query string). Hai field:
 		// `username` và `claims`.
+		//
+		// `username` thành `sub`, và nó CỐ Ý không phải email: Cognito phát `sub`
+		// dạng UUID còn email là claim riêng, nên fixture để hai giá trị trùng
+		// nhau sẽ làm mọi khẳng định "không log email" trở nên vô nghĩa — không
+		// phân biệt được rò email với in đúng `sub`.
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-		form.add("username", "dev@local");
+		form.add("username", "3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f");
 		form.add("claims", "{}");
 		HttpHeaders headers = new HttpHeaders();
 		headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);

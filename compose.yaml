@@ -34,12 +34,17 @@ services:
       - '8090:8080'
     environment:
       # `interactiveLogin` bật màn hình đăng nhập thật, nên luồng ở local là
-      # CÙNG MỘT `oauth2Login()` với prod — chỉ khác issuer. Claim
+      # CÙNG MỘT `oauth2Login()` với prod — chỉ khác issuer.
+      #
+      # `requestParam` phải là `grant_type`: token request của luồng
+      # authorization code KHÔNG mang `scope`, nên mapping theo `scope` không
+      # bao giờ khớp và hai claim dưới đây lặng lẽ không được phát. Claim
       # `cognito:groups` phải có, nếu không cổng `ops` của slice 5 không kiểm
       # được ở local và ta chỉ phát hiện nó hỏng trên `dev`.
       - >-
         JSON_CONFIG={"interactiveLogin":true,"tokenCallbacks":[{"issuerId":"cognito",
-        "tokenExpiry":3600,"requestMappings":[{"requestParam":"scope","match":"*",
+        "tokenExpiry":3600,"requestMappings":[{"requestParam":"grant_type",
+        "match":"authorization_code",
         "claims":{"cognito:groups":["ops"],"email":"dev@local"}}]}]}
     healthcheck:
       test: ['CMD', 'curl', '-f',
