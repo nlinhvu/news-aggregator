@@ -1,7 +1,13 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbIndex;
@@ -15,6 +21,8 @@ import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
 import software.amazon.awssdk.enhanced.dynamodb.model.UpdateItemEnhancedRequest;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 
+import dev.linhvu.news_aggregator.platform.TracePropagation;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Repository;
@@ -25,15 +33,22 @@ class ArticleRepository {
 
 	private final DynamoDbTable<Article> table;
 	private final DynamoDbIndex<Article> recentIndex;
+	private final DynamoDbIndex<Article> bySourceIndex;
+	private final TracePropagation tracePropagation;
 
-	ArticleRepository(DynamoDbEnhancedClient client,
+	ArticleRepository(DynamoDbEnhancedClient client, TracePropagation tracePropagation,
 			@Value("${news.catalog.table-name}") String tableName) {
+		this.tracePropagation = tracePropagation;
 		this.table = client.table(tableName, TableSchema.fromBean(Article.class));
 		// Chỗ DUY NHẤT chuyển đọc sang v2, nên `findRecent` đi theo và
 		// `gsi-recent` cũ hết người đọc — điều kiện để Task 17 xoá được nó.
 		// Query một index chưa backfill xong trả về kết quả THIẾU chứ không lỗi,
 		// nên dòng này chỉ được deploy sau khi `gsi-recent-v2` đã `ACTIVE`.
 		this.recentIndex = table.index(Article.RECENT_INDEX_V2);
+		// Query một index chưa `ACTIVE` trả về lỗi, còn query một index chưa
+		// backfill xong trả về kết quả THIẾU — im lặng. Đó là lý do Task 19
+		// (tạo index) và Task 21 (backfill) đứng trước dòng này.
+		this.bySourceIndex = table.index(Article.BY_SOURCE_INDEX);
 	}
 
 	void save(Article article) {
@@ -115,6 +130,84 @@ class ArticleRepository {
 				.flatMap(page -> page.items().stream())
 				.limit(limit)
 				.toList();
+	}
+
+	/**
+	 * AP11. Fan-out song song rồi merge-sort. Số query bị chặn trên bởi số nguồn
+	 * đang bật, mà master §2 đặt trần ở ~30.
+	 *
+	 * Virtual thread + `TracePropagation`, KHÔNG `StructuredTaskScope`: cái sau
+	 * vẫn là preview ở JDK 25 (JEP 505) và cần `--enable-preview` trên image do
+	 * buildpack dựng — cùng lý do đã ghi ở `IngestionRunner.fetchAll`. `wrap` là
+	 * thứ giữ `trace_id` sống qua ranh giới thread; bỏ nó ra thì span của các
+	 * query fan-out mất cha và `/api/my/feed` hiện trong X-Ray như một request
+	 * không có việc gì bên trong.
+	 *
+	 * KHÔNG `Semaphore` như `IngestionRunner`: ở đó song song là request ra
+	 * INTERNET tới host của người khác, ở đây là query tới DynamoDB — dịch vụ
+	 * được thiết kế cho đúng việc đó, và trần ~30 đã là trần.
+	 *
+	 * KHÔNG có nhánh fallback sang `gsi-recent-v2` khi tập chọn phủ gần hết
+	 * nguồn: nhánh đó buộc phải lọc theo `sourceName` (vì `sourceId` không nằm
+	 * trong projection BẤT BIẾN của `gsi-recent-v2`), tức khoá lọc bằng chuỗi
+	 * hiển thị — đúng khiếm khuyết đã bị loại ở TDD §17 #7.
+	 *
+	 * `limit` áp hai lần và cả hai đều cần: lần trong `queryOneSource` chặn
+	 * lượng đọc, lần sau khi gộp mới là con số người dùng xin.
+	 */
+	List<Article> findRecentBySources(Collection<String> sourceIds, int limit) {
+		// Rỗng = TẤT CẢ nguồn (TDD §17 #10), và nó uỷ quyền cho `findRecent` chứ
+		// KHÔNG fan-out qua mọi nguồn: đường cũ đi qua `gsi-recent-v2`, thứ chứa
+		// cả bài chưa có `sourceId`.
+		if (sourceIds.isEmpty()) {
+			return findRecent(limit);
+		}
+		try (ExecutorService executor = tracePropagation.wrap(
+				Executors.newVirtualThreadPerTaskExecutor())) {
+			List<Future<List<Article>>> futures = sourceIds.stream()
+					.map(id -> executor.submit(() -> queryOneSource(id, limit)))
+					.toList();
+			return futures.stream()
+					.flatMap(future -> join(future).stream())
+					.sorted(Comparator.comparing(Article::getPublishedAt).reversed())
+					.limit(limit)
+					.toList();
+		}
+	}
+
+	/** AP10. `scanIndexForward(false)` cho ra mới nhất trước trong MỘT nguồn. */
+	private List<Article> queryOneSource(String sourceId, int limit) {
+		return bySourceIndex.query(QueryEnhancedRequest.builder()
+						.queryConditional(QueryConditional.keyEqualTo(
+								Key.builder().partitionValue(sourceId).build()))
+						.scanIndexForward(false)
+						.limit(limit)
+						.build())
+				.stream()
+				.flatMap(page -> page.items().stream())
+				.limit(limit)
+				.toList();
+	}
+
+	/**
+	 * NÉM, không nuốt — ngược hẳn `IngestionRunner.join`, và khác biệt đó là cả
+	 * quyết định: ở đó một nguồn hỏng vẫn để lượt ingestion tiếp tục, còn ở đây
+	 * một query hỏng mà trả kết quả một phần khiến người đọc tưởng nguồn đó
+	 * không có bài mới. Sai lệch im lặng tệ hơn một lỗi nhìn thấy được.
+	 */
+	private static List<Article> join(Future<List<Article>> future) {
+		try {
+			return future.get();
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("fan-out theo nguồn bị ngắt", e);
+		}
+		catch (ExecutionException e) {
+			throw new IllegalStateException(
+					"một query theo nguồn hỏng — KHÔNG trả kết quả một phần",
+					e.getCause());
+		}
 	}
 
 	/**

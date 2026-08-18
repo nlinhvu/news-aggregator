@@ -104,6 +104,12 @@ class ArticleIngestListenerTest {
 		// điều đó. Quên `setExcerpt` thì không gì đỏ: bài vẫn vào bảng, chỉ là
 		// `findSummarizable` trả rỗng cho mọi bài và không ai được tóm tắt.
 		assertThat(saved.getExcerpt()).isEqualTo("Đoạn trích mẫu.");
+		// `sourceId` cũng đi từ event xuống bảng, và triệu chứng khi quên còn kín
+		// hơn `excerpt`: bài vẫn vào bảng, vẫn hiện trên feed công khai, chỉ là
+		// nó nằm NGOÀI `gsi-by-source` (sparse index) nên biến mất khỏi mọi feed
+		// đã lọc. Backfill của Task 21 chỉ chạy một lượt, không dọn lại phần rơi
+		// ra sau đó.
+		assertThat(saved.getSourceId()).isEqualTo("src-1");
 		// Phase 2 KHÔNG sinh summary — Phase 3 mới điền.
 		assertThat(saved.getSummary()).isNull();
 	}

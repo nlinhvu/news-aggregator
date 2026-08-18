@@ -2,10 +2,12 @@ package dev.linhvu.news_aggregator.catalog;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
+import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +49,23 @@ class ArticleCatalogService implements ArticleCatalog {
 				.filter(this::excerptDuDai)
 				.map(a -> new SummarizableArticle(
 						a.getArticleId(), a.getTitle(), a.getExcerpt()))
+				.toList();
+	}
+
+	/**
+	 * Đường vào của `personalization`. Ánh xạ đi qua `ArticleSummaries` — chỗ
+	 * DUY NHẤT quyết định `summary` có kèm hay không — nên `/api/my/feed` và
+	 * `/api/articles` không thể phản ứng khác nhau với `AI_SUMMARIZATION`.
+	 *
+	 * Đọc flag MỘT lần cho cả danh sách, không phải mỗi item: giá trị đổi giữa
+	 * chừng sẽ cho ra một trang nửa có nửa không.
+	 */
+	@Override
+	public List<ArticleSummaryDto> recentBySources(Collection<String> sourceIds,
+			int limit) {
+		boolean hienSummary = ArticleSummaries.hienSummary();
+		return repository.findRecentBySources(sourceIds, limit).stream()
+				.map(a -> ArticleSummaries.toDto(a, hienSummary))
 				.toList();
 	}
 

@@ -14,6 +14,12 @@ import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import software.amazon.awssdk.enhanced.dynamodb.TableSchema;
 
+import java.util.List;
+
+import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,6 +54,9 @@ class TogglzGateTest {
 	 */
 	@Autowired
 	FeatureManager featureManager;
+
+	@Autowired
+	ArticleCatalog catalog;
 
 	@Value("${news.catalog.table-name}")
 	String tableName;
@@ -105,6 +114,36 @@ class TogglzGateTest {
 				// `$[0].summary` "không tồn tại" và test xanh mà chẳng kiểm gì.
 				.andExpect(jsonPath("$[0].id").exists())
 				.andExpect(jsonPath("$[0].summary").doesNotExist());
+	}
+
+	/**
+	 * Đường đọc THỨ HAI — `ArticleCatalog.recentBySources`, thứ `/api/my/feed`
+	 * dùng từ Task 23 — phải phản ứng với flag y hệt `/api/articles`.
+	 *
+	 * Đây là lý do phép ánh xạ Article → DTO nằm ở `ArticleSummaries` chứ không
+	 * bị chép hai bản: hai bản sao sẽ trôi khỏi nhau đúng vào ngày người vận
+	 * hành tắt `AI_SUMMARIZATION` — trang công khai đổi hành vi, feed của người
+	 * đã đăng nhập thì không, và flag mất luôn ý nghĩa nó tự nhận.
+	 *
+	 * Gọi thẳng API của module chứ không qua HTTP: controller của
+	 * `personalization` chưa tồn tại ở Task 20, còn hợp đồng thì đã có.
+	 */
+	@Test
+	@AllEnabled(NewsFeature.class)
+	void flag_bat_thi_feed_theo_nguon_cung_co_summary() {
+		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
+				.isNotEmpty()
+				.allSatisfy(dto -> assertThat(dto.summary()).isNotNull());
+	}
+
+	@Test
+	void flag_tat_thi_feed_theo_nguon_cung_KHONG_co_summary() {
+		dungFeatureManagerThat();
+
+		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
+				// Chốt chống test rỗng: danh sách rỗng cũng làm `allSatisfy` xanh.
+				.isNotEmpty()
+				.allSatisfy(dto -> assertThat(dto.summary()).isNull());
 	}
 
 	/**

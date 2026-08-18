@@ -40,6 +40,11 @@ class ArticleIngestListener {
 		article.setTitle(event.title());
 		article.setCanonicalUrl(event.canonicalUrl());
 		article.setSourceName(event.sourceName());
+		// `ArticleDiscovered` mang `sourceId` từ Phase 2; `catalog` chỉ đang bỏ
+		// đi. Thiếu dòng này thì bài MỚI cũng rơi ra ngoài `gsi-by-source` y hệt
+		// bài chưa backfill — và backfill của Task 21 chỉ chạy một lượt, nên
+		// không có gì dọn lại phần rơi ra sau đó.
+		article.setSourceId(event.sourceId());
 		article.setExcerpt(event.excerpt());
 		// summary để null — Phase 3 mới điền.
 

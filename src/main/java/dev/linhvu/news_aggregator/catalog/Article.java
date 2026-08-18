@@ -41,6 +41,7 @@ public class Article {
 	private String title;
 	private String canonicalUrl;
 	private String sourceName;
+	private String sourceId;
 	private String excerpt;
 	private String summary;
 
@@ -52,7 +53,11 @@ public class Article {
 	public String getListBucket() { return listBucket; }
 	public void setListBucket(String listBucket) { this.listBucket = listBucket; }
 
-	@DynamoDbSecondarySortKey(indexNames = { RECENT_INDEX_V2 })
+	// Sort key của CẢ HAI index. Thiếu `BY_SOURCE_INDEX` ở đây thì enhanced
+	// client vẫn dựng được bean và query vẫn chạy — nó chỉ thôi coi `publishedAt`
+	// là sort key của index kia, nên `scanIndexForward(false)` không còn nghĩa gì
+	// và bài trả về theo thứ tự tuỳ DynamoDB.
+	@DynamoDbSecondarySortKey(indexNames = { RECENT_INDEX_V2, BY_SOURCE_INDEX })
 	public String getPublishedAt() { return publishedAt; }
 	public void setPublishedAt(String publishedAt) { this.publishedAt = publishedAt; }
 
@@ -64,6 +69,18 @@ public class Article {
 
 	public String getSourceName() { return sourceName; }
 	public void setSourceName(String sourceName) { this.sourceName = sourceName; }
+
+	/**
+	 * Khoá của nguồn, KHÔNG phải tên hiển thị: lọc theo `sourceName` là khoá lọc
+	 * bằng chuỗi hiển thị, khiếm khuyết đã bị loại ở TDD §17 #7.
+	 *
+	 * SPARSE: bài nào không có attribute này thì không nằm trong
+	 * `gsi-by-source`, nên nó biến mất khỏi feed đã lọc — đúng trạng thái của
+	 * mọi bài Phase 1–3 cho tới khi backfill (Task 21) chạy xong.
+	 */
+	@DynamoDbSecondaryPartitionKey(indexNames = { BY_SOURCE_INDEX })
+	public String getSourceId() { return sourceId; }
+	public void setSourceId(String sourceId) { this.sourceId = sourceId; }
 
 	// Attribute NGOÀI KEY nên thêm nó cần đúng KHÔNG migration (master §4
 	// nguyên tắc 7). Đây là lần đầu tính chất đó được dùng tới chứ không chỉ
