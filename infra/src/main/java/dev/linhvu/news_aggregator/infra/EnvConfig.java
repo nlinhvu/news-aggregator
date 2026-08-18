@@ -88,6 +88,25 @@ public record EnvConfig(
 	 */
 	public static final String OPERATOR_EMAIL = "vungoclinh2710@gmail.com";
 
+	/**
+	 * Định danh công khai của hai app bên thứ ba. HẰNG SỐ, không phải tham số
+	 * theo môi trường — một app Facebook và một OAuth client Google phục vụ cả
+	 * `dev`, `qa`, `prod`; thứ duy nhất khác nhau giữa ba môi trường là redirect
+	 * URI, mà redirect URI thì khai bên console của họ chứ không ở đây.
+	 *
+	 * Hai giá trị này KHÔNG phải secret: chúng đi trong URL của trình duyệt ở mỗi
+	 * lượt đăng nhập. Secret của cặp nằm ở Parameter Store, đọc lúc deploy — xem
+	 * `IdentityStack`.
+	 *
+	 * Đánh đổi của việc dùng chung: sửa nhầm cấu hình app — xoá một redirect URI,
+	 * đổi tên app — hỏng cả ba môi trường cùng lúc, kể cả prod. Không có bậc thang
+	 * dev → qa → prod ở tầng này. Xem runbook §D.
+	 */
+	public static final String FACEBOOK_CLIENT_ID = "28226451700282443";
+
+	public static final String GOOGLE_CLIENT_ID =
+			"731779048748-867vqvk618euo8dt99e8jri7r473p72f.apps.googleusercontent.com";
+
 	public static final String TOOLING_ACCOUNT = "237076104209";
 	public static final String TOOLING_REGION = "us-east-1";
 	public static final String ECR_REPOSITORY_NAME = "news-aggregator";

@@ -2224,6 +2224,95 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * `email` PHẢI được ánh xạ ở CẢ HAI provider. Thiếu nó, Cognito tạo user
+	 * không có thuộc tính bắt buộc và đăng nhập hỏng ở bước cuối — sau khi người
+	 * dùng đã bấm "Đồng ý" bên Facebook, chỗ tệ nhất để hỏng.
+	 *
+	 * Ghim `ProviderName` ở mỗi assertion chứ KHÔNG viết một
+	 * `hasResourceProperties` trần: `hasResourceProperties` xanh khi CHỈ MỘT
+	 * resource cùng type khớp, nên với hai IdP thì một assertion trần chứng minh
+	 * được "có ít nhất một provider ánh xạ email" — đúng nửa câu, và nửa còn
+	 * thiếu là nửa hỏng được.
+	 */
+	@Test
+	void hai_social_idp_deu_anh_xa_email() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		template.resourceCountIs("AWS::Cognito::UserPoolIdentityProvider", 2);
+
+		for (String provider : List.of("Facebook", "Google")) {
+			template.hasResourceProperties("AWS::Cognito::UserPoolIdentityProvider",
+					Match.objectLike(Map.of(
+							"ProviderName", provider,
+							"AttributeMapping", Match.objectLike(
+									Map.of("email", "email")))));
+		}
+	}
+
+	/**
+	 * App client phải liệt kê ĐỦ BA provider. Thiếu một cái thì nút tương ứng
+	 * không hiện trên managed login, dù IdP đã cấu hình xong và deploy sạch —
+	 * hỏng im lặng, không lỗi ở đâu cả.
+	 *
+	 * Một phần tử mỗi lượt, cùng lý do đã ghi ở
+	 * `app_client_bat_choice_based_auth_va_giu_srp`: `arrayWith` khớp dãy con
+	 * LIỀN KỀ và ĐÚNG THỨ TỰ, nên khẳng định cả ba cùng lúc là ghim luôn thứ tự
+	 * render — một chi tiết ta không kiểm soát.
+	 */
+	@Test
+	void app_client_liet_ke_ca_ba_provider() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		for (String provider : List.of("COGNITO", "Facebook", "Google")) {
+			template.hasResourceProperties("AWS::Cognito::UserPoolClient",
+					Match.objectLike(Map.of("SupportedIdentityProviders",
+							Match.arrayWith(List.of(provider)))));
+		}
+	}
+
+	/**
+	 * Secret phải rơi ra thành dynamic reference `{{resolve:ssm:…}}`, không phải
+	 * giá trị thật và không phải `ssm-secure`.
+	 *
+	 * Hai chế độ hỏng test này canh, cả hai đều synth xanh:
+	 *
+	 * <ol>
+	 * <li>Ai đó dán thẳng secret vào code. Template đi vào CloudFormation, và
+	 *     `get-template` đọc ra được — nhưng không có gì đỏ.</li>
+	 * <li>Ai đó dùng `SecretValue.ssmSecure(...)`. CloudFormation từ chối
+	 *     `ssm-secure` ở ĐÚNG resource này (danh sách trắng 11 cặp
+	 *     resource/property, không có Cognito), nên nó chết ở DEPLOY chứ không ở
+	 *     synth — xem runbook §C.</li>
+	 * </ol>
+	 */
+	@Test
+	@SuppressWarnings("unchecked")
+	void secret_cua_idp_la_dynamic_reference_ssm_khong_phai_gia_tri_that() {
+		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
+			Map<String, Map<String, Object>> idps = identityStack(cfg)
+					.findResources("AWS::Cognito::UserPoolIdentityProvider");
+
+			assertEquals(2, idps.size(),
+					"phải có đúng hai IdP ở " + cfg.name() + ", thực tế: " + idps.keySet());
+
+			for (Map<String, Object> idp : idps.values()) {
+				Map<String, Object> props =
+						(Map<String, Object>) idp.get("Properties");
+				Map<String, Object> details =
+						(Map<String, Object>) props.get("ProviderDetails");
+				String provider = String.valueOf(props.get("ProviderName"));
+				String secret = String.valueOf(details.get("client_secret"));
+
+				assertEquals("{{resolve:ssm:/news/" + cfg.tagPrefix() + "/"
+						+ provider.toLowerCase(java.util.Locale.ROOT)
+						+ "-client-secret}}", secret,
+						provider + " ở " + cfg.name() + " phải đọc secret từ SSM lúc"
+								+ " deploy, thực tế: " + secret);
+			}
+		}
+	}
+
+	/**
 	 * Lấy statement của role thuộc về một function, tìm theo logical-id prefix.
 	 * Tìm theo prefix chứ không theo tên role: role do CDK sinh tên, còn logical
 	 * id thì ta đặt và test phải ghim vào thứ ta kiểm soát.

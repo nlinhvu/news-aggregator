@@ -4,11 +4,15 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import software.amazon.awscdk.CfnDynamicReference;
+import software.amazon.awscdk.CfnDynamicReferenceService;
 import software.amazon.awscdk.CfnOutput;
 import software.amazon.awscdk.RemovalPolicy;
+import software.amazon.awscdk.SecretValue;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.services.cognito.AllowedFirstAuthFactors;
+import software.amazon.awscdk.services.cognito.AttributeMapping;
 import software.amazon.awscdk.services.cognito.AuthFlow;
 import software.amazon.awscdk.services.cognito.CfnManagedLoginBranding;
 import software.amazon.awscdk.services.cognito.CfnUserPoolGroup;
@@ -17,6 +21,7 @@ import software.amazon.awscdk.services.cognito.FeaturePlan;
 import software.amazon.awscdk.services.cognito.ManagedLoginVersion;
 import software.amazon.awscdk.services.cognito.OAuthFlows;
 import software.amazon.awscdk.services.cognito.PasswordPolicy;
+import software.amazon.awscdk.services.cognito.ProviderAttribute;
 import software.amazon.awscdk.services.cognito.OAuthScope;
 import software.amazon.awscdk.services.cognito.OAuthSettings;
 import software.amazon.awscdk.services.cognito.SignInAliases;
@@ -25,9 +30,12 @@ import software.amazon.awscdk.services.cognito.StandardAttribute;
 import software.amazon.awscdk.services.cognito.StandardAttributes;
 import software.amazon.awscdk.services.cognito.UserPool;
 import software.amazon.awscdk.services.cognito.UserPoolClient;
+import software.amazon.awscdk.services.cognito.UserPoolClientIdentityProvider;
 import software.amazon.awscdk.services.cognito.UserPoolClientOptions;
 import software.amazon.awscdk.services.cognito.UserPoolDomain;
 import software.amazon.awscdk.services.cognito.UserPoolDomainOptions;
+import software.amazon.awscdk.services.cognito.UserPoolIdentityProviderFacebook;
+import software.amazon.awscdk.services.cognito.UserPoolIdentityProviderGoogle;
 import software.constructs.Construct;
 
 /**
@@ -184,6 +192,77 @@ public class IdentityStack extends Stack {
 				.managedLoginVersion(ManagedLoginVersion.NEWER_MANAGED_LOGIN)
 				.build());
 
+		// Secret đọc lúc DEPLOY, không phải lúc runtime — khác hẳn Lambda env var
+		// của Phase 3, chỗ ta truyền TÊN parameter rồi để ứng dụng tự đọc. Ở đây
+		// người đọc parameter là CloudFormation.
+		//
+		// `CfnDynamicReference(SSM, …)` chứ KHÔNG phải `SecretValue.ssmSecure(…)`,
+		// và đây là kết luận đã suýt trả giá bằng một lượt deploy hỏng. Bảng chính
+		// thức của CloudFormation liệt kê đúng 11 cặp resource/property nhận
+		// `ssm-secure` — DirectoryService, ElastiCache, RDS, Redshift… — và KHÔNG
+		// có Cognito. Chế độ hỏng:
+		//
+		//   SSM Secure reference is not supported in:
+		//   [AWS::Cognito::UserPoolIdentityProvider/Properties/ProviderDetails/client_secret]
+		//
+		// Nó chết ở DEPLOY. `./gradlew test` và `cdk synth` đều xanh — lại đúng ca
+		// "synth xanh không chứng minh deploy được". Vì thế hai parameter này là
+		// `--type String`, cố ý khác `cognito-client-secret` và `gemini-api-key`
+		// nằm ngay cạnh chúng trong Parameter Store: hai cái kia do ỨNG DỤNG đọc
+		// lúc runtime nên `SecureString` được, hai cái này do CloudFormation đọc
+		// lúc deploy nên không.
+		//
+		// Đánh đổi đã chấp nhận: secret nằm plaintext trong Parameter Store và
+		// `get-template --template-stage Processed` đọc ra được. Xem runbook §C.
+		String secretPath = "/news/" + cfg.tagPrefix() + "/";
+		CfnDynamicReference facebookSecret = new CfnDynamicReference(
+				CfnDynamicReferenceService.SSM, secretPath + "facebook-client-secret");
+		CfnDynamicReference googleSecret = new CfnDynamicReference(
+				CfnDynamicReferenceService.SSM, secretPath + "google-client-secret");
+
+		// Client id thì KHÔNG phải secret — nó đi trong URL trình duyệt ở mỗi lượt
+		// đăng nhập — nên nó là hằng số trong `EnvConfig`, không phải parameter.
+		//
+		// `email` PHẢI được ánh xạ ở cả hai. Pool khai `email` là thuộc tính bắt
+		// buộc (xem `standardAttributes` trên), nên thiếu ánh xạ thì Cognito không
+		// tạo nổi user và luồng chết ở bước CUỐI — sau khi người dùng đã bấm
+		// "Đồng ý" bên provider, tức chỗ không còn gì để bấm quay lại.
+		var facebook = UserPoolIdentityProviderFacebook.Builder
+				.create(this, "Facebook")
+				.userPool(userPool)
+				.clientId(EnvConfig.FACEBOOK_CLIENT_ID)
+				.clientSecret(facebookSecret.toString())
+				// `public_profile` đi kèm `email` vì Facebook cấp sẵn cả hai ở mức
+				// Standard access; không xin thêm gì cần App Review.
+				.scopes(List.of("email", "public_profile"))
+				.attributeMapping(AttributeMapping.builder()
+						.email(ProviderAttribute.FACEBOOK_EMAIL)
+						.build())
+				.build();
+
+		var google = UserPoolIdentityProviderGoogle.Builder
+				.create(this, "Google")
+				.userPool(userPool)
+				.clientId(EnvConfig.GOOGLE_CLIENT_ID)
+				// HAI BUILDER, HAI ĐƯỜNG KHÁC NHAU — và đây không phải chỗ để
+				// làm cho đối xứng. `UserPoolIdentityProviderGoogleProps#clientSecret`
+				// đã DEPRECATED ("use clientSecretValue instead. This API will be
+				// removed in the next major release"), trong khi builder của Facebook
+				// chỉ có đúng bản `String`. Viết giống nhau cho đẹp mắt là mua một
+				// warning ở mỗi lượt build và một lần vỡ ở bản CDK major kế tiếp.
+				//
+				// `SecretValue.cfnDynamicReference(...)` là cầu nối: nó bọc đúng
+				// object dynamic reference, không phải `unsafePlainText` bọc lại
+				// chuỗi đã `toString()`.
+				.clientSecretValue(SecretValue.cfnDynamicReference(googleSecret))
+				// Ba scope, cả ba non-sensitive, nên Google KHÔNG bắt đi verification
+				// dù app đã ở In production — xem runbook §B3.
+				.scopes(List.of("openid", "email", "profile"))
+				.attributeMapping(AttributeMapping.builder()
+						.email(ProviderAttribute.GOOGLE_EMAIL)
+						.build())
+				.build();
+
 		this.client = userPool.addClient("WebClient", UserPoolClientOptions.builder()
 				// Confidential client: backend giữ secret, trình duyệt không bao
 				// giờ thấy nó. Public client + PKCE cũng chạy được và bớt một
@@ -227,6 +306,18 @@ public class IdentityStack extends Stack {
 				// bước chọn factor cho cả email không tồn tại, nên "gõ đại một email
 				// để xem giao diện" không còn phân biệt được user có thật hay không.
 				.preventUserExistenceErrors(true)
+				// Thiếu một provider ở đây thì nút tương ứng KHÔNG hiện trên
+				// managed login — dù IdP đã cấu hình xong và deploy sạch. Không lỗi
+				// ở đâu cả, chỉ là một nút vắng mặt.
+				//
+				// COGNITO phải liệt kê tường minh: khai `supportedIdentityProviders`
+				// là THAY TRỌN danh sách, nên bỏ nó ra là đóng luôn đường email OTP
+				// — cùng cái bẫy "khai tường minh thì thay trọn" đã gặp ở
+				// `authFlows` bên trên.
+				.supportedIdentityProviders(List.of(
+						UserPoolClientIdentityProvider.COGNITO,
+						UserPoolClientIdentityProvider.FACEBOOK,
+						UserPoolClientIdentityProvider.GOOGLE))
 				.oAuth(OAuthSettings.builder()
 						.flows(OAuthFlows.builder()
 								.authorizationCodeGrant(true)
@@ -241,6 +332,16 @@ public class IdentityStack extends Stack {
 						.logoutUrls(List.of("https://" + cfg.appDomain() + "/"))
 						.build())
 				.build());
+
+		// App client phải được dựng SAU hai IdP. Không có hai dòng này,
+		// CloudFormation tự do dựng client trước, và `SupportedIdentityProviders`
+		// trỏ vào thứ chưa tồn tại.
+		//
+		// Chỉ hỏng ở lần deploy ĐẦU của một môi trường mới — ba môi trường hiện có
+		// đều đã có client rồi, nên lượt deploy sắp tới sẽ không lộ ra gì. Đây là
+		// loại lỗi ngủ đông tới khi có người tạo môi trường thứ tư.
+		this.client.getNode().addDependency(facebook);
+		this.client.getNode().addDependency(google);
 
 		// Managed login v2 ĐÒI một style tồn tại cho app client; không có nó thì
 		// người dùng gặp trang lỗi thay vì màn hình đăng nhập — tức đổi version
