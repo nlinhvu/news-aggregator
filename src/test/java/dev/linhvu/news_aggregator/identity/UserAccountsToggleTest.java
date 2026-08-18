@@ -77,6 +77,27 @@ class UserAccountsToggleTest {
 		mvc.perform(get("/api/articles?limit=5")).andExpect(status().isOk());
 	}
 
+	/**
+	 * Slice 4 mở hai đường mới, và chúng thuộc về kill switch này: không có tài
+	 * khoản thì không có gì để cá nhân hoá.
+	 *
+	 * `404` chứ không `401`, và khác biệt đó là thứ SPA dựa vào: `401` = "chưa
+	 * đăng nhập" (hiện nút đăng nhập), `404` = "tính năng không tồn tại" (không
+	 * hiện gì cả). Thiếu vế này thì tắt flag sẽ để lại một hàng chip bấm vào
+	 * không có tác dụng.
+	 *
+	 * `/api/sources` CỐ Ý không nằm trong danh sách: hàng chip hiện dạng mờ cho
+	 * người ẩn danh, nên danh sách nguồn phải sống kể cả khi đăng nhập tắt.
+	 */
+	@Test
+	void flag_tat_thi_ca_feed_rieng_lan_lua_chon_nguon_deu_404() throws Exception {
+		tatFlag();
+
+		mvc.perform(get("/api/my/feed")).andExpect(status().isNotFound());
+		mvc.perform(get("/api/preferences/sources")).andExpect(status().isNotFound());
+		mvc.perform(get("/api/sources")).andExpect(status().isOk());
+	}
+
 	@Test
 	void flag_tat_thi_dang_xuat_cung_404_chu_khong_403() throws Exception {
 		// Vị trí của cổng chặn viết thành khẳng định: nó phải đứng TRƯỚC
@@ -97,6 +118,11 @@ class UserAccountsToggleTest {
 		// 401 chứ không 404: tính năng CÓ, chỉ là người gọi đang ẩn danh. Đây
 		// đúng là hai mã SPA dùng để chọn có hiện nút hay không.
 		mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
+		// Hai đường của slice 4 cũng phải trở lại — nếu không, một cổng chặn
+		// "chặn tất" vẫn làm test tắt flag ở trên xanh.
+		mvc.perform(get("/api/my/feed")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/preferences/sources"))
+				.andExpect(status().isUnauthorized());
 	}
 
 	/**

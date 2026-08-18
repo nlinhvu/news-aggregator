@@ -8,6 +8,7 @@ import java.util.Optional;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
 import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
+import dev.linhvu.news_aggregator.catalog.api.CatalogUnavailableException;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -64,9 +65,19 @@ class ArticleCatalogService implements ArticleCatalog {
 	public List<ArticleSummaryDto> recentBySources(Collection<String> sourceIds,
 			int limit) {
 		boolean hienSummary = ArticleSummaries.hienSummary();
-		return repository.findRecentBySources(sourceIds, limit).stream()
-				.map(a -> ArticleSummaries.toDto(a, hienSummary))
-				.toList();
+		try {
+			return repository.findRecentBySources(sourceIds, limit).stream()
+					.map(a -> ArticleSummaries.toDto(a, hienSummary))
+					.toList();
+		}
+		catch (RuntimeException e) {
+			// Bọc TẠI RANH GIỚI module, không để chỗ gọi bắt `RuntimeException`
+			// trần: `personalization` cần phân biệt "không đọc được bài" (503)
+			// với một lỗi lập trình (500), và nó không được biết `DynamoDbException`
+			// hay `IllegalStateException` của fan-out là gì.
+			throw new CatalogUnavailableException(
+					"không đọc được feed theo nguồn", e);
+		}
 	}
 
 	// Chuỗi rỗng cũng tính là chưa có: một `summary` rỗng lọt vào bảng là dữ

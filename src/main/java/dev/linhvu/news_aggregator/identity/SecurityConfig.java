@@ -233,9 +233,19 @@ class SecurityConfig {
 	 */
 	private static final class UserAccountsGate extends OncePerRequestFilter {
 
+		// Hai đường của slice 4 nằm ở đây vì chúng KHÔNG TỒN TẠI nếu không có
+		// tài khoản: `USER_ACCOUNTS` tắt thì SPA không có ai để cá nhân hoá, và
+		// TDD §5.4 quy định chúng trả 404 chứ không 401 — `404` là "tính năng
+		// không có", `401` là "anh chưa đăng nhập", và SPA phân biệt hai cái đó
+		// để quyết định có hiện hàng chip hay không.
+		//
+		// `/api/sources` KHÔNG nằm ở đây: hàng chip hiện dạng mờ cho người ẩn
+		// danh, nên danh sách nguồn phải sống kể cả khi đăng nhập bị tắt.
 		private static final RequestMatcher SURFACE = RequestMatchers.anyOf(
 				PathPatternRequestMatcher.pathPattern("/api/auth/**"),
-				PathPatternRequestMatcher.pathPattern("/api/me"));
+				PathPatternRequestMatcher.pathPattern("/api/me"),
+				PathPatternRequestMatcher.pathPattern("/api/my/**"),
+				PathPatternRequestMatcher.pathPattern("/api/preferences/**"));
 
 		@Override
 		protected boolean shouldNotFilter(HttpServletRequest request) {

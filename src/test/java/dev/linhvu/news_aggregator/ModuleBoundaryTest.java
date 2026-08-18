@@ -71,6 +71,50 @@ class ModuleBoundaryTest {
 	}
 
 	/**
+	 * [ADR-0019] driver #1. Cạnh chạy MỚI → CŨ: `personalization` biết `catalog`,
+	 * `catalog` KHÔNG biết `personalization` tồn tại.
+	 *
+	 * Chiều ngược lại là thứ đã đẻ ra cycle `catalog ↔ summarization` mà
+	 * ADR-0012 phải xử lý bằng ignore-predicate — và phase này cam kết KHÔNG
+	 * thêm ignore-predicate nào.
+	 *
+	 * `verify()` một mình KHÔNG đủ để nói câu này: nó kiểm `allowedDependencies`,
+	 * mà `allowedDependencies` là thứ người ta sửa cùng lúc với việc thêm cạnh
+	 * sai. Hai vế dưới đọc cạnh THẬT từ bytecode, nên chúng đỏ trước khi ai kịp
+	 * "sửa" khai báo.
+	 */
+	@Test
+	void personalization_phu_thuoc_catalog_chu_khong_nguoc_lai() {
+		MODULES.verify();
+
+		assertThat(dependenciesOf("personalization"))
+				.as("`personalization` đọc feed qua `ArticleCatalog`")
+				.contains("catalog");
+
+		for (String cu : List.of("catalog", "sources", "ingestion", "summarization")) {
+			assertThat(dependenciesOf(cu))
+					.as("`%s` không được biết `personalization` tồn tại", cu)
+					.doesNotContain("personalization");
+		}
+	}
+
+	/**
+	 * Đọc cạnh TRỰC TIẾP, không phải cạnh bắc cầu: câu hỏi ở đây là "module này
+	 * có tự tay chạm module kia không", và bản bắc cầu sẽ trả lời "có" cho
+	 * `catalog → platform → …` rồi làm vế phủ định thành vô nghĩa.
+	 */
+	private static List<String> dependenciesOf(String moduleName) {
+		return MODULES.getModuleByName(moduleName)
+				.orElseThrow(() -> new AssertionError("không có module " + moduleName))
+				.getDirectDependencies(MODULES)
+				.uniqueModules()
+				// `getIdentifier()` chứ không `getName()`: Modulith 2.1 bỏ hẳn
+				// `getName()` khỏi `ApplicationModule`.
+				.map(m -> m.getIdentifier().toString())
+				.toList();
+	}
+
+	/**
 	 * `CanonicalUrl.articleId` (ingestion) và `CatalogIds.articleId` (catalog)
 	 * là trùng lặp có ý thức. Test này là thứ giữ cho chúng không trôi khỏi nhau.
 	 * Cả hai đều package-private nên test phải nằm đúng package tương ứng —

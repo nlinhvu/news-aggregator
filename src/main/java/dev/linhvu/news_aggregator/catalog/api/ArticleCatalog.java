@@ -30,8 +30,9 @@ public interface ArticleCatalog {
 	 * nào" — hợp đồng này phải viết ra vì hai cách hiểu đều tự nhiên và chọn sai
 	 * cho ra một trang trống thay vì một feed đầy đủ.
 	 *
-	 * Ném khi bất kỳ query nào hỏng. KHÔNG trả kết quả một phần: feed thiếu bài
-	 * mà không báo gì khiến người đọc tưởng nguồn đó không có bài mới.
+	 * Ném {@link CatalogUnavailableException} khi bất kỳ query nào hỏng. KHÔNG
+	 * trả kết quả một phần: feed thiếu bài mà không báo gì khiến người đọc tưởng
+	 * nguồn đó không có bài mới.
 	 *
 	 * Bài chưa có `sourceId` (mọi bài Phase 1–3, cho tới khi backfill xong)
 	 * KHÔNG nằm trong kết quả khi `sourceIds` khác rỗng — `gsi-by-source` là

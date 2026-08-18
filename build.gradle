@@ -181,6 +181,12 @@ dependencies {
 //	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testImplementation "io.floci:spring-boot-testcontainers-floci:${flociTestcontainersVersion}"
 	testImplementation "org.togglz:togglz-junit:${togglzVersion}"
+	// Mở ở Task 23 cho hai controller của `personalization`: chúng đòi PHIÊN
+	// (`oidcLogin()`) và CSRF token (`csrf()`), hai thứ không dựng tay được bằng
+	// MockMvc trần. `LoginFlowIT` vẫn là chỗ chứng minh luồng đăng nhập THẬT —
+	// post-processor ở đây chỉ dựng sẵn SecurityContext để test HÀNH VI của
+	// endpoint, không thay thế vế đó. Version do BOM của Boot quản.
+	testImplementation 'org.springframework.security:spring-security-test'
 
 	// Task 7 gỡ `testImplementation sourceSets.seed.output`: `ArticleFixtures` và
 	// `fixtures/articles.json` đã về `src/test`, nên test không còn cần gì của
