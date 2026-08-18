@@ -39,23 +39,65 @@ class DataStackTest {
 	}
 
 	/**
-	 * ĐÚNG MỘT GSI — vế cuối của migrate `gsi-recent` → `gsi-recent-v2`.
+	 * ĐÚNG HAI GSI, không hơn — `gsi-recent-v2` (AP1, AP9) và `gsi-by-source`
+	 * (AP10, AP11).
 	 *
-	 * `arrayEquals` chứ không `arrayWith`: vế "có chứa v2" xanh cả khi index cũ
-	 * còn nguyên, mà index cũ còn nguyên nghĩa là mỗi lượt ghi vẫn trả WCU cho
-	 * một index không ai đọc. Con số 2 ở đây là hồi quy thật, không phải giả định.
+	 * `arrayEquals` chứ không `arrayWith`: vế "có chứa v2" xanh cả khi index đời
+	 * đầu `gsi-recent` còn nguyên, mà index cũ còn nguyên nghĩa là mỗi lượt ghi
+	 * vẫn trả WCU cho một index không ai đọc. Đó là hồi quy thật của lần migrate
+	 * v1 → v2, không phải giả định.
 	 *
 	 * Và nó phải soi gương `FlociTestConfiguration.articlesTableSchema` (master §9:
-	 * schema chép tay, rủi ro đã chấp nhận). Để sót v1 ở fixture test thì test vẫn
-	 * xanh trong khi prod đã xoá nó — sai lệch theo chiều không ai phát hiện được.
+	 * schema chép tay, rủi ro đã chấp nhận). Fixture thiếu `gsi-by-source` thì test
+	 * T2 vẫn xanh trong khi query trên AWS trỏ vào một index local không có — sai
+	 * lệch theo chiều không ai phát hiện được.
+	 *
+	 * ⚠️ MỘT lần update stack chỉ thêm/xoá được MỘT GSI. Con số này lên 3 thì phải
+	 * chia làm hai lượt deploy, đúng như migrate v1 → v2 đã phải làm.
 	 */
 	@Test
-	void bang_articles_chi_con_mot_gsi() {
+	void bang_articles_co_dung_hai_gsi() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayEquals(List.of(
-								Match.objectLike(Map.of("IndexName", "gsi-recent-v2"))))
+								Match.objectLike(Map.of("IndexName", "gsi-recent-v2")),
+								Match.objectLike(Map.of("IndexName",
+										DataStack.BY_SOURCE_INDEX_NAME))))
 				)));
+	}
+
+	/**
+	 * `gsi-by-source` dùng projection ALL, và đây là QUYẾT ĐỊNH chứ không phải
+	 * mặc định bị bỏ quên.
+	 *
+	 * `gsi-recent-v2` dùng INCLUDE với một danh sách BẤT BIẾN sau lần deploy đầu —
+	 * sửa rồi deploy là `UPDATE_FAILED`, và cách chữa duy nhất là một index tên mới
+	 * nữa. Chương trình đã trả giá đó một lần (v1 → v2). ALL xoá hẳn cái bẫy, và
+	 * giá tính được: item ~3 KB, ~200 bài/ngày ⇒ ~220 MB/năm nhân đôi, nằm gọn
+	 * trong 25 GB free tier.
+	 *
+	 * `Map.of` chứ không `Match.objectLike` ở vế `Projection`: ALL đi kèm
+	 * `NonKeyAttributes` là cấu hình mà DynamoDB TỪ CHỐI, nên vế khớp-chính-xác ở
+	 * đây bắt được lỗi copy dòng projection của index bên trên.
+	 *
+	 * KeySchema cũng ghim ở đây: PK `sourceId` + SK `publishedAt`. Thiếu sort key
+	 * thì "bài mới nhất của một nguồn" mất chỗ dựa và mọi query fan-out phải quét
+	 * cả partition rồi tự sắp xếp.
+	 */
+	@Test
+	void gsi_by_source_dung_projection_ALL() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
+								Match.objectLike(Map.of(
+										"IndexName", DataStack.BY_SOURCE_INDEX_NAME,
+										"KeySchema", List.of(
+												Map.of("AttributeName", "sourceId",
+														"KeyType", "HASH"),
+												Map.of("AttributeName", "publishedAt",
+														"KeyType", "RANGE")),
+										"Projection", Map.of("ProjectionType", "ALL"))))
+				))));
 	}
 
 	/**
@@ -275,6 +317,77 @@ class DataStackTest {
 									"AttributeName", "sessionId",
 									"KeyType", "HASH")),
 							"PointInTimeRecoverySpecification", Match.absent())));
+		}
+	}
+
+	/**
+	 * Bảng `user-preferences`: PK `userId` (= Cognito `sub`), KHÔNG GSI, KHÔNG TTL.
+	 *
+	 * Ba vế trong một test vì chúng cùng mô tả MỘT quyết định — bảng này chỉ trả
+	 * lời AP13 ("lựa chọn nguồn của một người"), nên mọi thứ ngoài `GetItem` theo
+	 * `userId` là thừa:
+	 * - GSI: không có access pattern thứ hai nào. Thêm một cái là trả WCU cho một
+	 *   index không ai đọc.
+	 * - TTL: lựa chọn của người dùng KHÔNG tự hết hạn. Đây là khác biệt với
+	 *   `sessions` ngay bên trên, và chép nhầm dòng `timeToLiveAttribute` sang đây
+	 *   sẽ làm lựa chọn của người dùng lặng lẽ biến mất — không lỗi, không log,
+	 *   chỉ là một ngày nào đó feed quay về "tất cả nguồn".
+	 *
+	 * Ghim đích danh bằng `KeySchema` vì `hasResourceProperties` xanh khi CÓ MỘT
+	 * resource khớp: một vế `TimeToLiveSpecification: absent` trần được ba bảng
+	 * không-TTL kia làm cho xanh sẵn.
+	 */
+	@Test
+	void bang_user_preferences_khoa_bang_userId_khong_gsi_khong_ttl() {
+		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
+				Match.objectLike(Map.of(
+						"KeySchema", List.of(Map.of(
+								"AttributeName", "userId",
+								"KeyType", "HASH")),
+						"BillingMode", "PAY_PER_REQUEST",
+						"GlobalSecondaryIndexes", Match.absent(),
+						"TimeToLiveSpecification", Match.absent())));
+	}
+
+	/**
+	 * PITR của `user-preferences` soi gương `articles`: bật ở prod, tắt ở dev.
+	 *
+	 * Ngược hẳn `sessions` — thứ CỐ Ý không có PITR ở bất kỳ đâu. Hai bảng cùng
+	 * sinh ra ở Phase 7 và cùng khoá theo một người dùng, nên khác biệt này phải
+	 * có chốt chặn riêng: `sessions` chứa trạng thái phù du (khôi phục nó là hồi
+	 * sinh phiên đã đăng xuất), còn đây là thứ NGƯỜI DÙNG TỰ TAY nhập và không có
+	 * cách nào dựng lại nếu mất.
+	 */
+	@Test
+	void pitr_cua_bang_user_preferences_bat_o_prod_tat_o_dev() {
+		for (Map.Entry<EnvConfig, Boolean> e
+				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
+			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"KeySchema", List.of(Map.of(
+									"AttributeName", "userId",
+									"KeyType", "HASH")),
+							"PointInTimeRecoverySpecification", Map.of(
+									"PointInTimeRecoveryEnabled", e.getValue()))));
+		}
+	}
+
+	/**
+	 * `user-preferences` RETAIN ở prod, DELETE ở dev — ghim đích danh bằng
+	 * `KeySchema` lồng trong `Properties`, đúng lý do đã ghi ở
+	 * `prod_giu_lai_bang_sources_khi_xoa_stack`.
+	 */
+	@Test
+	void prod_giu_lai_bang_user_preferences_khi_xoa_stack() {
+		for (Map.Entry<EnvConfig, String> e
+				: Map.of(EnvConfig.PROD, "Retain", EnvConfig.DEV, "Delete").entrySet()) {
+			dataStack(e.getKey()).hasResource("AWS::DynamoDB::Table",
+					Match.objectLike(Map.of(
+							"DeletionPolicy", e.getValue(),
+							"Properties", Match.objectLike(Map.of(
+									"KeySchema", List.of(Map.of(
+											"AttributeName", "userId",
+											"KeyType", "HASH")))))));
 		}
 	}
 }

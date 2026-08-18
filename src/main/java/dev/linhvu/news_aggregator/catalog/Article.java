@@ -21,6 +21,17 @@ public class Article {
 	 */
 	public static final String RECENT_INDEX_V2 = "gsi-recent-v2";
 
+	/**
+	 * Tên GSI cho AP10 + AP11 (bài của một nguồn, rồi fan-out qua tập nguồn đã
+	 * chọn). Phải KHỚP TỪNG KÝ TỰ với `DataStack.BY_SOURCE_INDEX_NAME` bên module
+	 * `infra`, cùng lý do với hằng số trên.
+	 *
+	 * KHÔNG có hậu tố phiên bản: index này dùng `ProjectionType.ALL`, nên thứ đã
+	 * ép `gsi-recent` phải đẻ ra `-v2` — danh sách projection bất biến — không tồn
+	 * tại ở đây.
+	 */
+	public static final String BY_SOURCE_INDEX = "gsi-by-source";
+
 	/** Partition key hằng số của gsi-recent — xem TDD §6. */
 	public static final String LIST_BUCKET = "ALL";
 

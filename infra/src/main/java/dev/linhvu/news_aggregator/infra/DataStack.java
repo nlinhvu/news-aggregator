@@ -32,6 +32,18 @@ public class DataStack extends Stack {
 	public static final String RECENT_INDEX_V2_NAME = "gsi-recent-v2";
 
 	/**
+	 * Tên GSI của AP10 + AP11 (bài mới nhất của một nguồn, rồi fan-out qua tập
+	 * nguồn đã chọn). Public vì `AppStack` cấp `dynamodb:Query` trỏ THẲNG vào ARN
+	 * của index này — cùng lý do với hằng số trên: hai nơi viết rời cùng một chuỗi
+	 * thì lệch nhau lúc nào không hay, và hậu quả là AccessDenied lúc runtime.
+	 *
+	 * KHÔNG có hậu tố phiên bản, và đó là hệ quả trực tiếp của việc index này dùng
+	 * `ProjectionType.ALL`: thứ đã ép `gsi-recent` phải đẻ ra `-v2` là danh sách
+	 * projection bất biến, mà ALL thì không có danh sách nào để sửa.
+	 */
+	public static final String BY_SOURCE_INDEX_NAME = "gsi-by-source";
+
+	/**
 	 * Partition key của bảng feature-toggles. Giá trị này do `togglz-dynamodb`
 	 * quy định chứ không phải ta chọn — xem comment tại chỗ tạo bảng. Là hằng số
 	 * public để `DataStackTest` khẳng định lại đúng chuỗi đó thay vì chép tay.
@@ -42,6 +54,7 @@ public class DataStack extends Stack {
 	private final Table featureTogglesTable;
 	private final Table sourcesTable;
 	private final Table sessionsTable;
+	private final Table userPreferencesTable;
 
 	public DataStack(final Construct scope, final String id, final EnvConfig cfg) {
 		super(scope, id, StackProps.builder()
@@ -79,6 +92,23 @@ public class DataStack extends Stack {
 				// UPDATE_FAILED, và cách chữa duy nhất lại là một index tên mới nữa.
 				.nonKeyAttributes(List.of("title", "canonicalUrl", "sourceName",
 						"summary", "excerpt"))
+				.build());
+
+		// AP10 (bài mới nhất của MỘT nguồn) + AP11 (fan-out qua tập nguồn đã chọn).
+		// `ProjectionType.ALL` — xem `DataStackTest#gsi_by_source_dung_projection_ALL`
+		// và TDD §6 về vì sao KHÔNG dùng INCLUDE ở đây.
+		//
+		// SPARSE INDEX: item KHÔNG có attribute `sourceId` thì không nằm trong index
+		// này. Mọi article của Phase 1–3 đều thiếu nó, nên chúng biến mất khỏi feed
+		// ĐÃ LỌC cho tới khi backfill xong (Task 21) — đó là lý do backfill là điều
+		// kiện tiên quyết của slice, không phải việc dọn dẹp làm sau cũng được.
+		this.articlesTable.addGlobalSecondaryIndex(GlobalSecondaryIndexProps.builder()
+				.indexName(BY_SOURCE_INDEX_NAME)
+				.partitionKey(Attribute.builder()
+						.name("sourceId").type(AttributeType.STRING).build())
+				.sortKey(Attribute.builder()
+						.name("publishedAt").type(AttributeType.STRING).build())
+				.projectionType(ProjectionType.ALL)
 				.build());
 
 		CfnOutput.Builder.create(this, "ArticlesTableName")
@@ -154,6 +184,31 @@ public class DataStack extends Stack {
 
 		CfnOutput.Builder.create(this, "SessionsTableName")
 				.value(sessionsTable.getTableName()).build();
+
+		// AP13 — lựa chọn nguồn của một người. Khoá là Cognito `sub`, và bảng này
+		// KHÔNG lưu email: xoá tài khoản là một thao tác trên Cognito, không phải
+		// một migration ở đây.
+		//
+		// KHÔNG TTL, và đó là khác biệt CÓ CHỦ Ý với `sessionsTable` ngay trên:
+		// lựa chọn của người dùng không tự hết hạn. Chép dòng
+		// `timeToLiveAttribute` sang đây thì lựa chọn lặng lẽ biến mất — không
+		// lỗi, không log, chỉ là một ngày nào đó feed quay về "tất cả nguồn".
+		//
+		// PITR soi gương `articles` chứ KHÔNG soi gương `sessions`: đây là thứ
+		// NGƯỜI DÙNG TỰ TAY nhập, mất rồi không dựng lại được từ đâu cả.
+		this.userPreferencesTable = Table.Builder.create(this, "UserPreferencesTable")
+				.partitionKey(Attribute.builder()
+						.name("userId").type(AttributeType.STRING).build())
+				.billingMode(BillingMode.PAY_PER_REQUEST)
+				.removalPolicy(cfg.removalPolicy())
+				.pointInTimeRecoverySpecification(
+						PointInTimeRecoverySpecification.builder()
+								.pointInTimeRecoveryEnabled(cfg.terminationProtection())
+								.build())
+				.build();
+
+		CfnOutput.Builder.create(this, "UserPreferencesTableName")
+				.value(userPreferencesTable.getTableName()).build();
 	}
 
 	public Table getArticlesTable() {
@@ -170,5 +225,9 @@ public class DataStack extends Stack {
 
 	public Table getSessionsTable() {
 		return sessionsTable;
+	}
+
+	public Table getUserPreferencesTable() {
+		return userPreferencesTable;
 	}
 }

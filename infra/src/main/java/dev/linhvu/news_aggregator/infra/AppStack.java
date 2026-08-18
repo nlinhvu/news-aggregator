@@ -50,7 +50,7 @@ public class AppStack extends Stack {
 	public AppStack(final Construct scope, final String id, final EnvConfig cfg,
 			final ITable articlesTable, final ITable featureTogglesTable,
 			final ITable sourcesTable, final ITable sessionsTable,
-			final IdentityStack identity) {
+			final ITable userPreferencesTable, final IdentityStack identity) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		String imageDigest = StringParameter.valueForStringParameter(
@@ -116,10 +116,9 @@ public class AppStack extends Stack {
 		// `aws cloudformation list-imports --export-name <tên export>` —
 		// "is not imported by any stack" là điều kiện đủ để xoá.
 
-		// AP1. ĐÚNG MỘT ARN, trỏ index chứ không trỏ bảng — cấp `Query` trên ARN
-		// bảng trần là cấp luôn Query trên bảng, và `/index/*` là cấp trên mọi
-		// index tương lai (kể cả `gsi-by-source` của slice 4, thứ phải được cấp
-		// bằng một dòng CÓ Ý THỨC ở Task 19).
+		// AP1. MỖI INDEX MỘT ARN, và trỏ index chứ không trỏ bảng — cấp `Query` trên
+		// ARN bảng trần là cấp luôn Query trên bảng, còn `/index/*` là cấp trên mọi
+		// index TƯƠNG LAI, tức là mở cửa cho một index chưa ai viết ra.
 		webRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("dynamodb:Query"))
 				.resources(List.of(articlesTable.getTableArn()
@@ -135,6 +134,35 @@ public class AppStack extends Stack {
 				.actions(List.of("dynamodb:GetItem", "dynamodb:PutItem",
 						"dynamodb:UpdateItem", "dynamodb:DeleteItem"))
 				.resources(List.of(sessionsTable.getTableArn()))
+				.build());
+
+		// AP10 + AP11. Dòng RIÊNG chứ không nối thêm ARN vào statement `Query` bên
+		// trên: đó chính là "một dòng CÓ Ý THỨC" mà comment kia hẹn tới. Ghép chung
+		// thì việc mở thêm một index cho function phục vụ Internet trở thành một
+		// ký tự phẩy giữa dòng.
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Query"))
+				.resources(List.of(articlesTable.getTableArn()
+						+ "/index/" + DataStack.BY_SOURCE_INDEX_NAME))
+				.build());
+
+		// AP13. Bảng THỨ HAI mà `web` ghi được, và bộ action hẹp hơn `sessions` một
+		// bậc: KHÔNG `DeleteItem` (bỏ chọn hết nguồn là `PutItem` một danh sách
+		// rỗng) và KHÔNG `UpdateItem` (item chỉ có hai attribute ngoài khoá nên
+		// repository ghi đè cả item).
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:GetItem", "dynamodb:PutItem"))
+				.resources(List.of(userPreferencesTable.getTableArn()))
+				.build());
+
+		// AP14 — `GET /api/sources` dựng hàng chip. Đây là lần đầu function phục vụ
+		// Internet đọc bảng `sources`, và `Scan` tính tiền theo kích thước BẢNG chứ
+		// không theo số item trả về (master §4 nguyên tắc 3). Chấp nhận được vì
+		// bảng bị chặn trên ~30 dòng bởi master §2 và endpoint là công khai; chấp
+		// nhận được CHỈ trên bảng này — `articles` tăng vô hạn.
+		webRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:Scan"))
+				.resources(List.of(sourcesTable.getTableArn()))
 				.build());
 
 		// Client secret của Cognito — secret THỨ HAI của chương trình, và nó đi
@@ -155,7 +183,7 @@ public class AppStack extends Stack {
 				.build());
 
 		Map<String, String> webEnv = baseEnv(cfg, "web", articlesTable,
-				featureTogglesTable, sourcesTable, sessionsTable);
+				featureTogglesTable, sourcesTable, sessionsTable, userPreferencesTable);
 		// Năm biến này CHỈ ở `web` (và sau này `admin`), không nằm trong `baseEnv`:
 		// `ingest`/`summarize` không có bề mặt đăng nhập nào, nên với chúng đây là
 		// cấu hình chết — và cấu hình chết là thứ lần audit sau phải truy nguyên.
@@ -219,8 +247,8 @@ public class AppStack extends Stack {
 				.resources(List.of(summarizeQueue.getQueueArn()))
 				.build());
 
-		Map<String, String> ingestEnv = baseEnv(cfg, "ingest",
-				articlesTable, featureTogglesTable, sourcesTable, sessionsTable);
+		Map<String, String> ingestEnv = baseEnv(cfg, "ingest", articlesTable,
+				featureTogglesTable, sourcesTable, sessionsTable, userPreferencesTable);
 		// CHỈ hai function nhận payload không-HTTP mới có biến này. Phải khớp
 		// `news.platform.pass-through-path` bên repo app; hai bên không thấy nhau
 		// nên compiler không bắt được lệch.
@@ -275,8 +303,8 @@ public class AppStack extends Stack {
 						+ ":alias/aws/ssm"))
 				.build());
 
-		Map<String, String> summarizeEnv = baseEnv(cfg, "summarize",
-				articlesTable, featureTogglesTable, sourcesTable, sessionsTable);
+		Map<String, String> summarizeEnv = baseEnv(cfg, "summarize", articlesTable,
+				featureTogglesTable, sourcesTable, sessionsTable, userPreferencesTable);
 		summarizeEnv.put("AWS_LWA_PASS_THROUGH_PATH", "/events");
 		summarizeEnv.put("NEWS_SUMMARIZE_QUEUE_URL", summarizeQueue.getQueueUrl());
 		// Chỉ TÊN parameter đi qua đây, không phải giá trị: key nằm nguyên trong
@@ -430,7 +458,7 @@ public class AppStack extends Stack {
 	 */
 	private Map<String, String> baseEnv(EnvConfig cfg, String profile,
 			ITable articlesTable, ITable featureTogglesTable, ITable sourcesTable,
-			ITable sessionsTable) {
+			ITable sessionsTable, ITable userPreferencesTable) {
 		Map<String, String> env = new HashMap<>();
 		env.put("SPRING_PROFILES_ACTIVE", "aws," + profile);
 		env.put("NEWS_ENV", cfg.tagPrefix());
@@ -442,6 +470,11 @@ public class AppStack extends Stack {
 		// tên không mở được cửa nào, còn giữ `baseEnv` là một danh mục đầy đủ thì
 		// "function này thấy bảng nào" đọc được thay vì phải suy luận.
 		env.put("NEWS_SESSIONS_TABLE", sessionsTable.getTableName());
+		// Đi cùng lối `NEWS_SESSIONS_TABLE`: TÊN cho cả ba function, QUYỀN chỉ cho
+		// `web`. Có mặt ở đây TRƯỚC khi module `personalization` tồn tại là cố ý —
+		// cấu hình phải lên môi trường trước đoạn code cần nó, nếu không lượt
+		// deploy đầu của Task 23 sẽ chết vì một biến chưa ai đặt.
+		env.put("NEWS_PREFERENCES_TABLE", userPreferencesTable.getTableName());
 		// ADR-0015. Không có dòng này, LWA trả HTTP status trong BODY và Lambda
 		// coi mọi response là thành công — kể cả 500.
 		//

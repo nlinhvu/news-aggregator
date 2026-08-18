@@ -70,6 +70,11 @@ news:
     table-name: ${NEWS_TOGGLES_TABLE:feature-toggles}
   sources:
     table-name: ${NEWS_SOURCES_TABLE:sources}
+  personalization:
+    # Khai TRƯỚC module `personalization` (Task 23) vì fixture test T2 và
+    # `AppStack` đã dựng bảng từ Task 19 — cấu hình phải có mặt trước đoạn code
+    # đọc nó, không phải cùng lúc.
+    preferences-table: ${NEWS_PREFERENCES_TABLE:user-preferences}
   identity:
     sessions-table: ${NEWS_SESSIONS_TABLE:sessions}
     # `false` ở đây là cho LOCAL (`http://localhost`), nơi trình duyệt vứt bỏ

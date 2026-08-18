@@ -652,33 +652,42 @@ class SecurityBoundaryTest {
 	 * {@link #khong_bao_gio_scan_bang_articles()}. Để lại một bản sao ở đây thì
 	 * lần sửa quy tắc tiếp theo sẽ chỉ sửa một trong hai chỗ.
 	 *
-	 * ĐÚNG MỘT ARN. Trong lúc migrate sang `gsi-recent-v2` chỗ này có HAI — code
-	 * còn đọc v1 tới Task 13 — và con số đó quay về 1 khi index cũ bị xoá. Giữ
-	 * lại ARN của một index không còn tồn tại là để execution role mang một quyền
-	 * trỏ vào hư không: không lỗi, không triệu chứng, chỉ là quyền thừa mà lần
-	 * audit sau phải mất công truy nguyên.
+	 * ĐÚNG HAI ARN, mỗi index MỘT dòng. Con số này là lịch sử của chương trình chứ
+	 * không phải một hằng số tuỳ ý: 1 ở Phase 1, tạm lên 2 trong lúc migrate sang
+	 * `gsi-recent-v2` (code còn đọc v1 tới Task 13), về lại 1 khi index cũ bị xoá,
+	 * và lên 2 ở Task 19 vì slice 4 thêm `gsi-by-source`. Giữ lại ARN của một index
+	 * không còn tồn tại là để execution role mang một quyền trỏ vào hư không: không
+	 * lỗi, không triệu chứng, chỉ là quyền thừa mà lần audit sau phải truy nguyên.
 	 *
 	 * Vế `contains(RECENT_INDEX_V2_NAME)` là an toàn, nhưng vế `contains(v1)` thì
 	 * KHÔNG bao giờ được viết trần: `…/index/gsi-recent` là TIỀN TỐ của
 	 * `…/index/gsi-recent-v2`, nên nó được chính ARN v2 làm cho xanh vĩnh viễn.
-	 * Đã đo cả hai chiều hồi Task 11B. Ở đây `assertEquals(1, size)` là thứ chặn
+	 * Đã đo cả hai chiều hồi Task 11B. Ở đây `assertEquals(2, size)` là thứ chặn
 	 * việc ARN v1 lặng lẽ quay lại.
+	 *
+	 * Vế "mọi ARN đều có `/index/`" là vế mới của Task 19: `Query` trên ARN BẢNG
+	 * trần cấp luôn quyền query mọi thứ trong bảng, và nó synth xanh y hệt.
 	 */
 	@Test
-	void lambda_chi_query_dung_index_gsi_recent_v2() {
+	void web_chi_query_dung_hai_index_cua_articles() {
 		List<String> queryOn = resourcesForAction(appStack(),
 				"FunctionRoleDefaultPolicy", "dynamodb:Query");
 
-		assertEquals(1, queryOn.size(),
-				"Query phải được cấp trên đúng một index, thực tế: " + queryOn);
-		assertEquals(1, queryOn.stream()
-						.filter(resource -> resource.contains(
-								"/index/" + DataStack.RECENT_INDEX_V2_NAME))
-						.count(),
-				"ARN duy nhất phải trỏ gsi-recent-v2, thực tế: " + queryOn);
+		assertEquals(2, queryOn.size(),
+				"Query phải được cấp trên đúng hai index, thực tế: " + queryOn);
+		for (String index : List.of(DataStack.RECENT_INDEX_V2_NAME,
+				DataStack.BY_SOURCE_INDEX_NAME)) {
+			assertEquals(1, queryOn.stream()
+							.filter(resource -> resource.contains("/index/" + index))
+							.count(),
+					"phải có đúng một ARN trỏ " + index + ", thực tế: " + queryOn);
+		}
 		for (String resource : queryOn) {
 			assertFalse(resource.contains("/index/*"),
 					"KHÔNG được cấp wildcard /index/*, thực tế: " + resource);
+			assertTrue(resource.contains("/index/"),
+					"Query phải trỏ INDEX chứ không phải ARN bảng trần, thực tế: "
+							+ resource);
 		}
 	}
 
@@ -1622,17 +1631,27 @@ class SecurityBoundaryTest {
 			"logs:CreateLogStream",   // Lambda runtime ghi log
 			"logs:PutLogEvents",      // Lambda runtime ghi log
 			"xray:PutTraceSegments",  // exporter OTLP gửi span tới X-Ray endpoint
-			"dynamodb:Query",         // ArticleRepository.findRecent — gsi-recent-v2
+			// findRecent (gsi-recent-v2) VÀ findRecentBySources (gsi-by-source) —
+			// hai index, hai statement, cùng một action.
+			"dynamodb:Query",
 			"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
-			// Togglz đọc flag (feature-toggles) VÀ phân giải cookie → phiên
-			// (sessions, AP12). Cùng một action trên hai bảng: phạm vi theo BẢNG
-			// được canh ở `web_khong_ghi_duoc_articles_khong_goi_duoc_gemini`.
+			// Togglz đọc flag (feature-toggles), phân giải cookie → phiên (sessions,
+			// AP12), và từ Task 19 đọc lựa chọn nguồn (user-preferences, AP13). Cùng
+			// một action trên ba bảng: phạm vi theo BẢNG được canh ở
+			// `web_khong_ghi_duoc_articles_khong_goi_duoc_gemini`.
 			"dynamodb:GetItem",
 			// Ba action ghi dưới đây CHỈ trên bảng `sessions` — đường ghi đầu tiên
 			// của function phục vụ Internet, mở ở Task 7 slice 2.
-			"dynamodb:PutItem",       // DynamoDbSessionRepository lưu phiên mới
+			// PutItem trên `sessions` (phiên mới) VÀ `user-preferences` (lưu lựa
+			// chọn nguồn — xem `web_doc_ghi_user_preferences_nhung_khong_xoa`).
+			"dynamodb:PutItem",
 			"dynamodb:UpdateItem",    // trượt TTL `expiresAt` mỗi lần dùng
 			"dynamodb:DeleteItem",    // đăng xuất — xoá phiên, không chỉ xoá cookie
+			// `Scan` CHỈ trên bảng `sources` (Task 19): `GET /api/sources` dựng hàng
+			// chip cho slice 4. Lần đầu function phục vụ Internet đọc bảng đó —
+			// chấp nhận được vì bảng bị chặn trên ~30 dòng bởi master §2 và endpoint
+			// là công khai. Phạm vi được canh ở `web_scan_duoc_sources_va_chi_sources`.
+			"dynamodb:Scan",
 			// Hai action dưới là secret THỨ HAI của chương trình (Task 8): client
 			// secret của Cognito, đọc LƯỜI ở Task 10 — chỉ khi có người đăng nhập.
 			"ssm:GetParameter",       // SsmClientRegistrationRepository
@@ -1803,6 +1822,65 @@ class SecurityBoundaryTest {
 						s -> actionsOf(s).stream().anyMatch(a -> a.startsWith("sqs:Send"))),
 				"`web` không được gửi SQS — nó không kích hoạt việc tốn tiền — "
 						+ statements);
+	}
+
+	/**
+	 * `user-preferences` là bảng THỨ HAI mà function phục vụ Internet ghi được, và
+	 * bộ action của nó hẹp hơn `sessions` đúng một bậc: KHÔNG có `DeleteItem`.
+	 *
+	 * "Bỏ chọn hết nguồn" là `PutItem` một danh sách rỗng, không phải xoá item —
+	 * hai đường dẫn tới cùng một màn hình, nhưng đường xoá cần thêm một quyền mà
+	 * không tính năng nào đòi. `UpdateItem` cũng không: `SourcePreferenceRepository`
+	 * ghi đè cả item, vì item chỉ có đúng hai attribute ngoài khoá.
+	 *
+	 * Vế phủ định soi theo BẢNG chứ không theo action — cả `DeleteItem` lẫn
+	 * `UpdateItem` đều là quyền HỢP LỆ của `web` trên `sessions` (đăng xuất, trượt
+	 * TTL), nên "web không có DeleteItem" là câu sai. Câu đúng là "không có trên
+	 * bảng NÀY".
+	 */
+	@Test
+	void web_doc_ghi_user_preferences_nhung_khong_xoa() {
+		Template t = appStack();
+
+		for (String action : List.of("dynamodb:GetItem", "dynamodb:PutItem")) {
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
+							.anyMatch(resource -> resource.contains("PreferencesTable")),
+					"`web` phải được " + action + " trên bảng user-preferences");
+		}
+		for (String action : List.of("dynamodb:DeleteItem", "dynamodb:UpdateItem")) {
+			for (String resource
+					: resourcesForAction(t, "FunctionRoleDefaultPolicy", action)) {
+				assertFalse(resource.contains("PreferencesTable"),
+						"`web` KHÔNG được cấp " + action + " trên user-preferences — bỏ "
+								+ "chọn hết nguồn là PutItem danh sách rỗng, thực tế: "
+								+ resource);
+			}
+		}
+	}
+
+	/**
+	 * `Scan` của `web` là quyền MỚI đáng dừng lại một nhịp: đây là lần đầu function
+	 * phục vụ Internet đọc bảng `sources` (`GET /api/sources` dựng hàng chip).
+	 *
+	 * Chấp nhận được vì bảng bị chặn trên ~30 dòng bởi master §2 và endpoint là
+	 * công khai — nhưng phạm vi phải hẹp hết mức: `Scan` trên `articles` là bảng
+	 * TĂNG VÔ HẠN, và `Scan` tính tiền theo kích thước BẢNG chứ không theo số item
+	 * trả về (master §4 nguyên tắc 3).
+	 *
+	 * Vế "phải có" đứng trước vế phủ định là cố ý: thiếu nó thì test này xanh rỗng
+	 * đúng vào ngày ai đó gỡ mất quyền và `GET /api/sources` chết bằng AccessDenied.
+	 */
+	@Test
+	void web_scan_duoc_sources_va_chi_sources() {
+		List<String> scanOn = resourcesForAction(appStack(),
+				"FunctionRoleDefaultPolicy", "dynamodb:Scan");
+
+		assertFalse(scanOn.isEmpty(),
+				"AP14 — `GET /api/sources` liệt kê nguồn bằng Scan trên bảng sources");
+		for (String resource : scanOn) {
+			assertTrue(resource.contains("SourcesTable"),
+					"`web` chỉ được Scan bảng sources, thực tế: " + resource);
+		}
 	}
 
 	/**

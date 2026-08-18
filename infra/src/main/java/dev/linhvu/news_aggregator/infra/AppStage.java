@@ -16,7 +16,8 @@ public class AppStage extends Stage {
 		IdentityStack identity = new IdentityStack(this, "IdentityStack", cfg);
 		AppStack appStack = new AppStack(this, "AppStack", cfg,
 				data.getArticlesTable(), data.getFeatureTogglesTable(),
-				data.getSourcesTable(), data.getSessionsTable(), identity);
+				data.getSourcesTable(), data.getSessionsTable(),
+				data.getUserPreferencesTable(), identity);
 		new ObservabilityStack(this, "ObservabilityStack", cfg,
 				appStack.getWebFunction(), appStack.getSummarizeFunction(),
 				appStack.getIngestLogGroup(),

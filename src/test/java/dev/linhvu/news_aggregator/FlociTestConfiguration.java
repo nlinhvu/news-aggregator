@@ -81,10 +81,20 @@ public class FlociTestConfiguration {
 								AttributeDefinition.builder().attributeName("listBucket")
 										.attributeType(ScalarAttributeType.S).build(),
 								AttributeDefinition.builder().attributeName("publishedAt")
+										.attributeType(ScalarAttributeType.S).build(),
+								AttributeDefinition.builder().attributeName("sourceId")
 										.attributeType(ScalarAttributeType.S).build())
-						// MỘT index, y như `DataStack` sau khi migrate xong. Thiếu
-						// `excerpt` trong projection thì `findPendingSummary` khớp KHÔNG
-						// item nào và sweep im lặng không nhặt bài — đã đo bằng mutation.
+						// HAI index, đúng bằng `DataStack` — xem
+						// `DataStackTest#bang_articles_co_dung_hai_gsi`.
+						//
+						// `gsi-recent-v2`: thiếu `excerpt` trong projection thì
+						// `findPendingSummary` khớp KHÔNG item nào và sweep im lặng
+						// không nhặt bài — đã đo bằng mutation.
+						//
+						// `gsi-by-source`: projection ALL (KHÔNG phải INCLUDE) và
+						// SPARSE — article không có attribute `sourceId` thì không nằm
+						// trong index, nên test nào quên set `sourceId` sẽ thấy feed đã
+						// lọc trống rỗng chứ không thấy lỗi.
 						.globalSecondaryIndexes(
 								GlobalSecondaryIndex.builder()
 										.indexName(Article.RECENT_INDEX_V2)
@@ -97,6 +107,17 @@ public class FlociTestConfiguration {
 												.projectionType(ProjectionType.INCLUDE)
 												.nonKeyAttributes("title", "canonicalUrl",
 														"sourceName", "summary", "excerpt")
+												.build())
+										.build(),
+								GlobalSecondaryIndex.builder()
+										.indexName(Article.BY_SOURCE_INDEX)
+										.keySchema(
+												KeySchemaElement.builder().attributeName("sourceId")
+														.keyType(KeyType.HASH).build(),
+												KeySchemaElement.builder().attributeName("publishedAt")
+														.keyType(KeyType.RANGE).build())
+										.projection(Projection.builder()
+												.projectionType(ProjectionType.ALL)
 												.build())
 										.build())
 						.billingMode(BillingMode.PAY_PER_REQUEST)
@@ -198,6 +219,36 @@ public class FlociTestConfiguration {
 								.attributeName("sessionId").keyType(KeyType.HASH).build())
 						.attributeDefinitions(
 								AttributeDefinition.builder().attributeName("sessionId")
+										.attributeType(ScalarAttributeType.S).build())
+						.billingMode(BillingMode.PAY_PER_REQUEST)
+						.build());
+			} catch (ResourceInUseException ignored) {
+				// container dùng lại giữa các context — bảng đã có sẵn
+			}
+		};
+	}
+
+	/**
+	 * Bảng `user-preferences`, soi gương `DataStack.userPreferencesTable`.
+	 *
+	 * PK `userId` (= Cognito `sub`), KHÔNG GSI — đúng một access pattern (AP13).
+	 *
+	 * KHÔNG TTL, và đây là khẳng định chứ không phải chỗ bỏ sót: lựa chọn của
+	 * người dùng không tự hết hạn. Đó cũng là khác biệt duy nhất về hình dạng so
+	 * với bảng `sessions` ngay trên, nên chép nhầm giữa hai chỗ này sẽ không có
+	 * triệu chứng nào ở local.
+	 */
+	@Bean
+	InitializingBean userPreferencesTableSchema(DynamoDbClient dynamoDbClient,
+			@Value("${news.personalization.preferences-table}") String tableName) {
+		return () -> {
+			try {
+				dynamoDbClient.createTable(CreateTableRequest.builder()
+						.tableName(tableName)
+						.keySchema(KeySchemaElement.builder()
+								.attributeName("userId").keyType(KeyType.HASH).build())
+						.attributeDefinitions(
+								AttributeDefinition.builder().attributeName("userId")
 										.attributeType(ScalarAttributeType.S).build())
 						.billingMode(BillingMode.PAY_PER_REQUEST)
 						.build());
