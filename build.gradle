@@ -222,6 +222,18 @@ tasks.register('sourcesSync', JavaExec) {
 	mainClass = 'dev.linhvu.seed.SourcesSyncApplication'
 }
 
+// Cùng ràng buộc như `sourcesSync`: không test tự động nào chạm tới nó, nên chốt
+// chặn là bước kiểm tay ở runbook phase-7 §"backfillSourceId — kiểm chứng
+// idempotent". Tính chất phải giữ: UpdateItem CÓ ĐIỀU KIỆN
+// `attribute_not_exists(sourceId)` — bỏ điều kiện đi thì một lượt chạy muộn ghi
+// đè `sourceId` mà ingestion vừa gắn cho bài mới, và không gì đỏ.
+tasks.register('backfillSourceId', JavaExec) {
+	group = 'application'
+	description = 'Gắn sourceId cho article ghi trước Phase 7 (idempotent)'
+	classpath = sourceSets.seed.runtimeClasspath
+	mainClass = 'dev.linhvu.seed.BackfillSourceIdApplication'
+}
+
 tasks.named('bootBuildImage') {
 	imageName = 'news-aggregator:local'
 	builder = 'paketobuildpacks/builder-noble-java-tiny:latest'
