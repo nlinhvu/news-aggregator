@@ -33,10 +33,9 @@ function csrfToken(): string | undefined {
   return raw ? decodeURIComponent(raw) : undefined
 }
 
-// Chưa có caller nào hôm nay: đường ghi duy nhất của SPA là đăng xuất, mà nó
-// đi bằng form (xem `logout`). Giữ lại vì đây là bề mặt TDD §7 công bố cho mọi
-// lời gọi POST/PUT/DELETE bằng `fetch` về sau, và vì nó dùng CHUNG `csrfToken()`
-// với `logout` nên hai chỗ không thể trôi khỏi nhau.
+// Bề mặt CHUNG cho mọi lời gọi ghi của SPA: `logout` ngay dưới đây, và
+// `sendJson` bên `api.ts` — tức cả `PUT /api/preferences/sources`. Cả hai đọc
+// cookie qua cùng một `csrfToken()` nên chúng không thể trôi khỏi nhau.
 export function csrfHeader(): Record<string, string> {
   const token = csrfToken()
   return token ? { 'X-XSRF-TOKEN': token } : {}
