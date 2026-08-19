@@ -80,6 +80,11 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 	 * <p>`location.reload()` sau khi xong là bắt buộc: `fetch` không điều hướng,
 	 * nên không có nó thì flag đã đổi mà trang vẫn hiện trạng thái cũ — người vận
 	 * hành sẽ bấm lần nữa và lật ngược lại thứ mình vừa lật.
+	 *
+	 * <p>`redirect: 'manual'` là phần TIẾT KIỆM MỘT NỬA. Console trả 302 về
+	 * `index` sau khi lật, và `fetch` mặc định ĐI THEO redirect đó — tức tải trọn
+	 * trang console về rồi vứt đi, ngay trước khi `location.reload()` tải nó lần
+	 * thứ hai. Hai lượt render cho một cú bấm, mà lượt đầu không ai nhìn thấy.
 	 */
 	private static final String SCRIPT = """
 			<script>
@@ -89,7 +94,7 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 			  e.preventDefault();
 			  var query = new URLSearchParams(new FormData(form)).toString();
 			  var url = form.action + (form.action.indexOf('?') < 0 ? '?' : '&') + query;
-			  fetch(url, { method: 'POST', credentials: 'same-origin' })
+			  fetch(url, { method: 'POST', credentials: 'same-origin', redirect: 'manual' })
 			    .then(function () { location.reload(); });
 			}, true);
 			</script>
