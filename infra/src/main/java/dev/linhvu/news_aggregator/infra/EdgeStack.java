@@ -33,7 +33,7 @@ public class EdgeStack extends Stack {
 
 	public EdgeStack(final Construct scope, final String id, final EnvConfig cfg,
 			final IHostedZone zone, final ICertificate certificate,
-			final FunctionUrl functionUrl) {
+			final FunctionUrl functionUrl, final FunctionUrl adminUrl) {
 		super(scope, id, StackProps.builder().env(cfg.awsEnvironment()).build());
 
 		this.bucket = Bucket.Builder.create(this, "SpaBucket")
@@ -53,9 +53,46 @@ public class EdgeStack extends Stack {
 						.viewerProtocolPolicy(ViewerProtocolPolicy.REDIRECT_TO_HTTPS)
 						.cachePolicy(CachePolicy.CACHING_OPTIMIZED)
 						.build())
-				.additionalBehaviors(java.util.Map.of(
+				// `LinkedHashMap` chứ TUYỆT ĐỐI KHÔNG `Map.of`, và đây không phải
+				// thẩm mỹ: `Map.of` trả về `ImmutableCollections.MapN`, thứ có thứ
+				// tự lặp phụ thuộc `SALT` — một giá trị ngẫu nhiên hoá MỖI LẦN JVM
+				// khởi động. CDK đặt tên origin theo THỨ TỰ LẶP
+				// (`DistributionOrigin2`, `…Origin3`), nên với hai behavior trở lên
+				// thì cùng một dòng code sinh ra hai template khác nhau.
+				//
+				// ĐÃ ĐO, không phải suy đoán: chạy `cdk synth 'Dev/EdgeStack'` năm
+				// lần liên tiếp cho ra `Origin2 = admin` bốn lần và `Origin2 = web`
+				// một lần.
+				//
+				// Hậu quả nếu để `Map.of`: mỗi lượt deploy rơi vào thứ tự khác lần
+				// trước sẽ ĐỔI CHỦ của `Origin2`/`Origin3`, tức đổi `TargetOriginId`
+				// của `/api/*`, đổi luôn hai OAC và hai `CfnPermission` mà CDK tự
+				// sinh theo tên origin. CloudFront bị cập nhật lại toàn bộ vì một
+				// thay đổi KHÔNG CÓ trong code, và giữa chừng có cửa sổ mà permission
+				// trỏ nhầm function. `cdk diff` sẽ báo thay đổi ở một lượt deploy
+				// mà không ai sửa gì — triệu chứng dễ bị bỏ qua nhất.
+				.additionalBehaviors(behaviors(
 						"/api/*", BehaviorOptions.builder()
 								.origin(FunctionUrlOrigin.withOriginAccessControl(functionUrl))
+								.viewerProtocolPolicy(ViewerProtocolPolicy.REDIRECT_TO_HTTPS)
+								.cachePolicy(CachePolicy.CACHING_DISABLED)
+								.originRequestPolicy(
+										OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER)
+								.allowedMethods(AllowedMethods.ALLOW_ALL)
+								.build(),
+						// Origin THỨ BA. ADR-0005 ghi "một distribution, hai origin";
+						// Phase 7 nâng lên ba. Quyết định LÕI của ADR đó — một
+						// distribution, same-origin, KHÔNG CORS — không đổi, và đó
+						// chính là thứ khiến cookie phiên do `web` phát ra đi tới được
+						// `admin` mà không cần cấu hình gì thêm: hai function nằm sau
+						// cùng một tên miền.
+						//
+						// `CACHING_DISABLED` bắt buộc: console lật flag rồi tải lại
+						// trang, và một response được cache biến "đã tắt" thành "vẫn
+						// hiện là bật" — người vận hành sẽ lật lại lần nữa và tin rằng
+						// console hỏng.
+						"/admin/*", BehaviorOptions.builder()
+								.origin(FunctionUrlOrigin.withOriginAccessControl(adminUrl))
 								.viewerProtocolPolicy(ViewerProtocolPolicy.REDIRECT_TO_HTTPS)
 								.cachePolicy(CachePolicy.CACHING_DISABLED)
 								.originRequestPolicy(
@@ -100,6 +137,20 @@ public class EdgeStack extends Stack {
 						+ ":distribution/" + this.distribution.getDistributionId())
 				.build();
 
+		// Origin thứ ba cần CHÍNH XÁC cùng cặp permission — `withOriginAccessControl`
+		// sinh `lambda:InvokeFunctionUrl` cho nó, cái thứ hai vẫn phải tự thêm.
+		// Quên dòng này thì `/admin/*` trả 403 AccessDeniedException, và triệu chứng
+		// đó trùng khít với 403 mà Spring trả cho người không thuộc nhóm `ops` —
+		// tức là sẽ đi sửa nhầm sang Cognito group. Phân biệt bằng THÂN response:
+		// 403 của AWS có body JSON/XML, 403 của Spring có thân rỗng.
+		CfnPermission.Builder.create(this, "AllowCloudFrontInvokeAdminFunction")
+				.action("lambda:InvokeFunction")
+				.functionName(adminUrl.getFunctionArn())
+				.principal("cloudfront.amazonaws.com")
+				.sourceArn("arn:aws:cloudfront::" + cfg.account()
+						+ ":distribution/" + this.distribution.getDistributionId())
+				.build();
+
 		ARecord.Builder.create(this, "AliasRecord")
 				.zone(zone)
 				.recordName(cfg.appDomain())
@@ -112,6 +163,24 @@ public class EdgeStack extends Stack {
 				.value(bucket.getBucketName()).build();
 		CfnOutput.Builder.create(this, "DistributionId")
 				.value(distribution.getDistributionId()).build();
+	}
+
+	/**
+	 * Giữ THỨ TỰ CHÈN của các behavior, vì thứ tự đó quyết định tên origin mà
+	 * CDK sinh ra — xem comment dài ở chỗ gọi.
+	 *
+	 * `/api/*` phải đứng TRƯỚC `/admin/*`: nó đã chiếm `DistributionOrigin2`
+	 * trong distribution đang chạy, và đảo lại là đổi `TargetOriginId` của một
+	 * behavior đang phục vụ traffic thật. Behavior thêm về sau cũng nối vào
+	 * CUỐI, cùng lý do.
+	 */
+	private static java.util.Map<String, BehaviorOptions> behaviors(
+			String pattern1, BehaviorOptions options1,
+			String pattern2, BehaviorOptions options2) {
+		java.util.Map<String, BehaviorOptions> ordered = new java.util.LinkedHashMap<>();
+		ordered.put(pattern1, options1);
+		ordered.put(pattern2, options2);
+		return ordered;
 	}
 
 	public Bucket getBucket() {

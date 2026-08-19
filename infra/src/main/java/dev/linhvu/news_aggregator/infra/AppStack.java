@@ -39,9 +39,11 @@ import software.constructs.Construct;
 public class AppStack extends Stack {
 
 	private final Function webFunction;
+	private final Function adminFunction;
 	private final Function ingestFunction;
 	private final Function summarizeFunction;
 	private final FunctionUrl functionUrl;
+	private final FunctionUrl adminFunctionUrl;
 	private final LogGroup logGroup;
 	private final LogGroup ingestLogGroup;
 	private final Queue scheduleDlq;
@@ -184,7 +186,7 @@ public class AppStack extends Stack {
 
 		Map<String, String> webEnv = baseEnv(cfg, "web", articlesTable,
 				featureTogglesTable, sourcesTable, sessionsTable, userPreferencesTable);
-		// Năm biến này CHỈ ở `web` (và sau này `admin`), không nằm trong `baseEnv`:
+		// Năm biến này CHỈ ở `web` và `admin`, không nằm trong `baseEnv`:
 		// `ingest`/`summarize` không có bề mặt đăng nhập nào, nên với chúng đây là
 		// cấu hình chết — và cấu hình chết là thứ lần audit sau phải truy nguyên.
 		webEnv.put("NEWS_COGNITO_ISSUER_URI", identity.getIssuerUri());
@@ -218,6 +220,84 @@ public class AppStack extends Stack {
 
 		CfnOutput.Builder.create(this, "FunctionUrl")
 				.value(this.functionUrl.getUrl()).build();
+
+		// ---------- admin — mặt phẳng vận hành, đường GHI DUY NHẤT vào bảng flag ----
+
+		// Function thứ tư, ra đời ở slice 5 chứ không ở slice 1: một function rỗng
+		// nằm chờ bốn slice là hạ tầng chết (spec §20 #14). Nó khác `web` ở đúng
+		// một điểm có ý nghĩa — quyền lật flag — và toàn bộ giá trị của việc tách
+		// nằm ở chỗ `web` KHÔNG có quyền đó.
+		LambdaRole adminRole = LambdaRole.create(this, "AdminFunction", cfg);
+
+		// Đường GHI DUY NHẤT vào bảng flag trong toàn hệ thống. Bộ action đọc ra
+		// từ mã nguồn togglz-dynamodb 4.6.2, giống hệt cách `grantReadFeatureToggles`
+		// làm: `initializeTable()` → DescribeTable, `getFeatureState()` → GetItem,
+		// `setFeatureState()` → UpdateItem.
+		//
+		// KHÔNG có `Scan`: danh sách flag mà console hiển thị đến từ
+		// `EnumBasedFeatureProvider` (enum `NewsFeature`), không từ bảng — trong
+		// cả class `DynamoDBStateRepository` không có một lời gọi `scan` nào.
+		adminRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:DescribeTable", "dynamodb:GetItem",
+						"dynamodb:UpdateItem"))
+				.resources(List.of(featureTogglesTable.getTableArn()))
+				.build());
+		// Phiên: ĐỌC để biết người gọi là ai, GHI để trượt TTL, XOÁ để dọn phiên
+		// quá hạn. Cùng bộ action như `web` trừ `UpdateItem` — `admin` không có
+		// nó vì `DynamoDbSessionRepository` KHÔNG BAO GIỜ gọi `updateItem`: TTL
+		// trượt bằng `PutItem` ghi đè cả item trong `save()`, và
+		// `SessionRepositoryFilter` gọi `save()` ở cuối MỌI request chạm session.
+		//
+		// Thiếu `PutItem` ở đây thì console hoạt động đúng một request rồi chết
+		// bằng AccessDenied — và chỉ trên môi trường thật, vì Floci không cưỡng
+		// chế IAM.
+		adminRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("dynamodb:GetItem", "dynamodb:PutItem",
+						"dynamodb:DeleteItem"))
+				.resources(List.of(sessionsTable.getTableArn()))
+				.build());
+		// Cùng client secret, cùng khoá KMS như `web`: `SecurityConfig` và
+		// `SsmClientRegistrationRepository` đều là `@Profile(HTTP)` nên chúng dựng
+		// ở CẢ HAI function. Đăng nhập luôn bắt đầu từ `web` (`/api/auth/login`
+		// nằm dưới behavior `/api/*`), nhưng chain của `admin` vẫn phải dựng được
+		// `ClientRegistration` — thiếu quyền ở đây thì lỗi chỉ nổ ra ở request đầu
+		// tiên chạm tới nó.
+		adminRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("ssm:GetParameter"))
+				.resources(List.of("arn:aws:ssm:" + cfg.region() + ":" + cfg.account()
+						+ ":parameter" + secretParameterName))
+				.build());
+		adminRole.role().addToPolicy(PolicyStatement.Builder.create()
+				.actions(List.of("kms:Decrypt"))
+				.resources(List.of("arn:aws:kms:" + cfg.region() + ":" + cfg.account()
+						+ ":alias/aws/ssm"))
+				.build());
+
+		Map<String, String> adminEnv = baseEnv(cfg, "admin", articlesTable,
+				featureTogglesTable, sourcesTable, sessionsTable, userPreferencesTable);
+		// Cùng năm biến như `web`, cùng lý do — xem khối `web` ngay trên. Chép
+		// tường minh chứ không trích thành helper: hai function này giống nhau
+		// HÔM NAY, và một helper sẽ biến việc chúng tách ra thành một lần sửa
+		// khó thấy.
+		adminEnv.put("NEWS_COGNITO_ISSUER_URI", identity.getIssuerUri());
+		adminEnv.put("NEWS_COGNITO_CLIENT_ID", identity.getClient().getUserPoolClientId());
+		adminEnv.put("NEWS_COGNITO_LOGOUT_URI", identity.getLogoutUri());
+		adminEnv.put("NEWS_COGNITO_SECRET_PARAMETER", secretParameterName);
+		adminEnv.put("NEWS_PUBLIC_BASE_URL", "https://" + cfg.appDomain());
+
+		this.adminFunction = buildFunction("AdminFunction", adminRole, repo,
+				imageDigest, adminEnv);
+
+		// `AWS_IAM` y hệt `web`. Một trang quản trị sau `AuthType=NONE` là trang
+		// quản trị nằm trần trên Internet — và nó vẫn hoạt động hoàn hảo, nên
+		// không triệu chứng nào lộ ra.
+		this.adminFunctionUrl = this.adminFunction.addFunctionUrl(
+				FunctionUrlOptions.builder()
+						.authType(FunctionUrlAuthType.AWS_IAM)
+						.build());
+
+		CfnOutput.Builder.create(this, "AdminFunctionUrl")
+				.value(this.adminFunctionUrl.getUrl()).build();
 
 		// ---------- ingest — ghi catalog, đọc/ghi sources, đẩy SQS ----------
 
@@ -413,9 +493,9 @@ public class AppStack extends Stack {
 	}
 
 	/**
-	 * Ba function khác nhau ở role, trigger và env var — KHÔNG khác ở image,
+	 * Bốn function khác nhau ở role, trigger và env var — KHÔNG khác ở image,
 	 * kiến trúc, memory hay timeout. Helper này giữ phần "không khác" ở đúng
-	 * một chỗ để một lần đổi memory không thành ba lần sửa lệch nhau.
+	 * một chỗ để một lần đổi memory không thành bốn lần sửa lệch nhau.
 	 *
 	 * `env` nhận vào là bản ĐÃ đầy đủ của function đó. Cố ý không merge với một
 	 * map mặc định nào: env var là bề mặt cấu hình mà `SecurityBoundaryTest`
@@ -451,10 +531,10 @@ public class AppStack extends Stack {
 	}
 
 	/**
-	 * Env var mà cả ba function đều cần: định danh môi trường, tên bảng, và cấu
+	 * Env var mà cả bốn function đều cần: định danh môi trường, tên bảng, và cấu
 	 * hình OTel. KHÔNG chứa `AWS_LWA_PASS_THROUGH_PATH` — chỉ hai function
-	 * nhận payload không-HTTP mới có nó, và `web` có nó là mở một đường vào
-	 * không ai dùng.
+	 * nhận payload không-HTTP mới có nó, và `web`/`admin` có nó là mở một đường
+	 * vào không ai dùng.
 	 */
 	private Map<String, String> baseEnv(EnvConfig cfg, String profile,
 			ITable articlesTable, ITable featureTogglesTable, ITable sourcesTable,
@@ -465,12 +545,12 @@ public class AppStack extends Stack {
 		env.put("NEWS_ARTICLES_TABLE", articlesTable.getTableName());
 		env.put("NEWS_TOGGLES_TABLE", featureTogglesTable.getTableName());
 		env.put("NEWS_SOURCES_TABLE", sourcesTable.getTableName());
-		// TÊN bảng đi cho cả ba function, QUYỀN thì không — chỉ `web` được cấp
-		// action nào trên bảng này. Đi theo đúng lối `NEWS_SOURCES_TABLE`: một cái
+		// TÊN bảng đi cho cả bốn function, QUYỀN thì không — chỉ `web` và `admin`
+		// được cấp action nào trên bảng này. Đi theo đúng lối `NEWS_SOURCES_TABLE`: một cái
 		// tên không mở được cửa nào, còn giữ `baseEnv` là một danh mục đầy đủ thì
 		// "function này thấy bảng nào" đọc được thay vì phải suy luận.
 		env.put("NEWS_SESSIONS_TABLE", sessionsTable.getTableName());
-		// Đi cùng lối `NEWS_SESSIONS_TABLE`: TÊN cho cả ba function, QUYỀN chỉ cho
+		// Đi cùng lối `NEWS_SESSIONS_TABLE`: TÊN cho cả bốn function, QUYỀN chỉ cho
 		// `web`. Có mặt ở đây TRƯỚC khi module `personalization` tồn tại là cố ý —
 		// cấu hình phải lên môi trường trước đoạn code cần nó, nếu không lượt
 		// deploy đầu của Task 23 sẽ chết vì một biến chưa ai đặt.
@@ -481,7 +561,7 @@ public class AppStack extends Stack {
 		// CHỈ 5xx. Đưa 4xx vào là biến mỗi con bot quét 404 thành một "lỗi
 		// Lambda" và tự đầu độc alarm.
 		env.put("AWS_LWA_ERROR_STATUS_CODES", "500-599");
-		// Tên service trong X-Ray, nay CÓ HẬU TỐ PROFILE. Ba process khác nhau
+		// Tên service trong X-Ray, nay CÓ HẬU TỐ PROFILE. Bốn process khác nhau
 		// cùng tên service sẽ làm service map của X-Ray gộp chúng lại và câu hỏi
 		// "lượt hỏng này thuộc function nào" mất câu trả lời. Cái giá: trace của
 		// Phase 4 mang tên cũ nên biểu đồ có một đường gãy tại ngày deploy.
@@ -507,7 +587,8 @@ public class AppStack extends Stack {
 	 * đầu tiên rơi vào request đầu tiên chạm tới flag — trên môi trường thật.
 	 *
 	 * KHÔNG cấp `UpdateItem` cho bất kỳ function nào ở đây. Đường GHI chỉ thuộc
-	 * về `admin` và nó được cấp ở Task 26, tường minh.
+	 * về `admin`, và nó được cấp TƯỜNG MINH tại khối dựng function đó — chứ
+	 * không bằng một tham số boolean thêm vào helper này.
 	 */
 	private static void grantReadFeatureToggles(Role role, ITable featureTogglesTable) {
 		role.addToPolicy(PolicyStatement.Builder.create()
@@ -520,6 +601,10 @@ public class AppStack extends Stack {
 		return webFunction;
 	}
 
+	public Function getAdminFunction() {
+		return adminFunction;
+	}
+
 	public Function getIngestFunction() {
 		return ingestFunction;
 	}
@@ -528,13 +613,28 @@ public class AppStack extends Stack {
 		return summarizeFunction;
 	}
 
-	/** Thứ tự cố định: web, ingest, summarize — chỗ gọi dựa vào nó để đặt tên. */
+	/**
+	 * Thứ tự cố định: web, ingest, summarize, admin — chỗ gọi dựa vào nó để đặt
+	 * tên.
+	 *
+	 * `admin` nối vào CUỐI chứ không chèn sau `web` như thứ tự trong spec, và đó
+	 * là một ràng buộc chứ không phải thẩm mỹ: `CicdStack` chỉ mặt hai function
+	 * scheduled bằng CHỈ SỐ (`get(1)`, `get(2)`) để dựng `SmokeRole`. Chèn vào
+	 * giữa sẽ đẩy chỉ số đi một bậc và `SmokeRole` lặng lẽ đổi sang invoke
+	 * `admin` — synth vẫn xanh, test đếm số vẫn xanh, và không ai biết cho tới
+	 * lần đọc policy tiếp theo.
+	 */
 	public List<Function> getAllFunctions() {
-		return List.of(webFunction, ingestFunction, summarizeFunction);
+		return List.of(webFunction, ingestFunction, summarizeFunction, adminFunction);
 	}
 
 	public FunctionUrl getFunctionUrl() {
 		return functionUrl;
+	}
+
+	/** Origin thứ ba của distribution — behavior `/admin/*` (EdgeStack). */
+	public FunctionUrl getAdminFunctionUrl() {
+		return adminFunctionUrl;
 	}
 
 	public LogGroup getLogGroup() {

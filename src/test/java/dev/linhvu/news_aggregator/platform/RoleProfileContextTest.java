@@ -12,7 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Ba context, ba profile. Không có test này thì một bean thiếu wiring ở profile
+ * Bốn context, bốn profile. Không có test này thì một bean thiếu wiring ở profile
  * `ingest` sẽ xanh suốt CI và chỉ chết ở lần chạy theo lịch đầu tiên trên môi
  * trường thật — cùng chế độ hỏng với bean `@Lazy` của Phase 3, chỉ khác hình
  * dạng: ở đó bean tồn tại mà không ai dựng, ở đây bean không tồn tại mà không
@@ -38,17 +38,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * định của tên đó đỏ.
  *
  * <pre>
- *   bean                   web      ingest   summarize
- *   articleController      CÓ       -        -
- *   sourceController       CÓ       VẮNG     -
- *   myFeedController       CÓ       VẮNG     -
- *   preferencesController  CÓ       -        -
- *   eventsController       VẮNG     CÓ       CÓ
- *   chatClient             VẮNG     -        CÓ
- *   ingestFeedsHandler     -        CÓ       VẮNG
- *   sweepHandler           -        VẮNG     CÓ
- *   summarizeHandler       -        -        CÓ
- *   summarizationQueue     -        CÓ       -
+ *   bean                          web    admin   ingest   summarize
+ *   articleController             CÓ     VẮNG    -        -
+ *   sourceController              CÓ     VẮNG    VẮNG     -
+ *   myFeedController              CÓ     VẮNG    VẮNG     -
+ *   preferencesController         CÓ     VẮNG    -        -
+ *   eventsController              VẮNG   VẮNG    CÓ       CÓ
+ *   chatClient                    VẮNG   -       -        CÓ
+ *   ingestFeedsHandler            -      VẮNG    CÓ       VẮNG
+ *   sweepHandler                  -      -       VẮNG     CÓ
+ *   summarizeHandler              -      -       -        CÓ
+ *   summarizationQueue            -      -       CÓ       -
+ *   filterChain                   CÓ     CÓ      -        -
+ *   ssmClientRegistrationRepository  CÓ  CÓ      -        -
  * </pre>
  *
  * `@ActiveProfiles` chứ không `properties = "spring.profiles.active=…"`: cái
@@ -94,6 +96,59 @@ class RoleProfileContextTest {
 			assertThat(ctx.containsBeanDefinition("eventsController"))
 					.as("`web` không có AWS_LWA_PASS_THROUGH_PATH nên `/events` ở đó là "
 							+ "một đường vào không ai dùng")
+					.isFalse();
+		}
+	}
+
+	/**
+	 * Profile của function thứ tư (ADR-0020), và test này là chốt chặn DUY NHẤT
+	 * cho câu hỏi *"context của `admin` có dựng được không"* trước khi nó lên
+	 * môi trường thật.
+	 *
+	 * `admin` là vai kỳ lạ nhất trong bốn vai: nó không có endpoint nào của
+	 * riêng mình cho tới khi Togglz console được bật, nhưng nó dựng TOÀN BỘ
+	 * chain đăng nhập vì `SecurityConfig` là `@Profile(HTTP)`. Nghĩa là một lỗi
+	 * wiring ở đó chết trên `admin` y hệt như trên `web` — chỉ khác là không
+	 * smoke test nào chạm tới `admin` được (nó nằm sau nhóm `ops`), nên nếu test
+	 * này không dựng context thì KHÔNG GÌ dựng.
+	 *
+	 * Vế phủ định là vế trả lời câu hỏi "vì sao không cứ dùng `web`": mặt phẳng
+	 * vận hành không được phục vụ một byte nội dung nào. Nếu `ArticleController`
+	 * lỡ mang `@Profile(HTTP)`, `/api/articles` sẽ sống trên CẢ `admin` — và
+	 * không có triệu chứng nào, vì CloudFront không route `/api/*` tới đó.
+	 */
+	@SpringBootTest
+	@ActiveProfiles(RoleProfiles.ADMIN)
+	@Import(FlociTestConfiguration.class)
+	static class AdminProfile {
+
+		@Autowired
+		ApplicationContext ctx;
+
+		@Test
+		void admin_co_chain_dang_nhap_va_khong_phuc_vu_noi_dung_nao() {
+			assertThat(ctx.containsBeanDefinition("filterChain"))
+					.as("`SecurityConfig` là @Profile(HTTP) nên `admin` cũng dựng chain "
+							+ "— đó là thứ chặn `/admin/**` sau `ROLE_ops`")
+					.isTrue();
+			assertThat(ctx.containsBeanDefinition("ssmClientRegistrationRepository"))
+					.as("chain của `admin` phải dựng được ClientRegistration — đó là lý "
+							+ "do role của nó có ssm:GetParameter + kms:Decrypt")
+					.isTrue();
+
+			for (String beanPhucVuNoiDung : java.util.List.of("articleController",
+					"sourceController", "myFeedController", "preferencesController")) {
+				assertThat(ctx.containsBeanDefinition(beanPhucVuNoiDung))
+						.as("mặt phẳng vận hành KHÔNG phục vụ nội dung: " + beanPhucVuNoiDung)
+						.isFalse();
+			}
+
+			assertThat(ctx.containsBeanDefinition("eventsController"))
+					.as("`admin` không có AWS_LWA_PASS_THROUGH_PATH — `/events` ở đó là "
+							+ "một đường vào không ai dùng")
+					.isFalse();
+			assertThat(ctx.containsBeanDefinition("ingestFeedsHandler"))
+					.as("`admin` không chạy việc nền nào")
 					.isFalse();
 		}
 	}

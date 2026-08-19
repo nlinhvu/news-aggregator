@@ -28,10 +28,13 @@ public class CicdStack extends Stack {
 				.roleName("AppDeployRole")
 				.assumedBy(hub)
 				.build();
-		// AppDeployRole phải cập nhật được CẢ BA function bằng cùng một digest.
-		// Liệt kê ARN tường minh chứ không wildcard `function:*`: thêm function
-		// thứ tư ở Task 26 phải là một lần sửa CÓ Ý THỨC, không phải tự động
-		// được cấp quyền.
+		// AppDeployRole phải cập nhật được CẢ BỐN function bằng cùng một digest.
+		// Liệt kê ARN tường minh chứ không wildcard `function:*`: một function thứ
+		// năm phải là một lần sửa CÓ Ý THỨC, không phải tự động được cấp quyền.
+		// Danh sách đến từ `AppStack.getAllFunctions()`, nên thêm function ở đó là
+		// đủ — nhưng `app-deploy.yml` thì KHÔNG tự biết: nó liệt kê từng lệnh
+		// `update-function-code` bằng tay và một function thiếu ở đó sẽ chạy code
+		// cũ mà không lệnh nào hỏng.
 		appDeploy.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("lambda:UpdateFunctionCode", "lambda:GetFunction"))
 				.resources(functions.stream().map(IFunction::getFunctionArn).toList())
@@ -96,10 +99,11 @@ public class CicdStack extends Stack {
 				.roleName("SmokeRole")
 				.assumedBy(hub)
 				.build();
-		// SmokeRole chỉ invoke được hai function có đường scheduled — `web` có
-		// Function URL nên smoke test chạm nó bằng `curl`, không cần quyền invoke.
-		// Thứ tự của `getAllFunctions()` là hợp đồng: [0]=web, [1]=ingest,
-		// [2]=summarize.
+		// SmokeRole chỉ invoke được hai function có đường scheduled — `web` và
+		// `admin` có Function URL nên smoke test chạm chúng bằng `curl`, không cần
+		// quyền invoke. Thứ tự của `getAllFunctions()` là hợp đồng: [0]=web,
+		// [1]=ingest, [2]=summarize, [3]=admin — `admin` nối vào CUỐI chính là để
+		// hai chỉ số dưới không bị đẩy đi một bậc.
 		smokeRole.addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("lambda:InvokeFunction"))
 				.resources(List.of(functions.get(1).getFunctionArn(),

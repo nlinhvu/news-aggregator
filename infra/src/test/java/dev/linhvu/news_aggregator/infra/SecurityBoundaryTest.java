@@ -1341,14 +1341,40 @@ class SecurityBoundaryTest {
 	 * gần trọn buổi debug Task 14.
 	 */
 	@Test
+	@SuppressWarnings("unchecked")
 	void oac_co_du_hai_permission_goi_lambda() {
 		Template t = edgeStack();
-		t.resourceCountIs("AWS::Lambda::Permission", 2);
-		for (String action : List.of("lambda:InvokeFunctionUrl", "lambda:InvokeFunction")) {
-			t.hasResourceProperties("AWS::Lambda::Permission", Match.objectLike(Map.of(
-					"Action", action,
-					"Principal", "cloudfront.amazonaws.com")));
+		// HAI origin Function URL × HAI permission mỗi origin.
+		t.resourceCountIs("AWS::Lambda::Permission", 4);
+
+		// Gom theo FUNCTION rồi mới kiểm, chứ không hỏi "template có action X
+		// không". Vế gộp đó XANH KHI SAI và đã đo bằng mutation: đổi permission
+		// của `admin` từ `lambda:InvokeFunction` sang `lambda:InvokeFunctionUrl`
+		// vẫn để lại đủ cả hai action trong template — chúng chỉ cùng thuộc về
+		// `web`. Đúng cái nửa mà test này tồn tại để canh thì lọt.
+		Map<String, Set<String>> actionsPerFunction = new java.util.LinkedHashMap<>();
+		for (Map<String, Object> permission
+				: t.findResources("AWS::Lambda::Permission").values()) {
+			Map<String, Object> props = (Map<String, Object>) permission.get("Properties");
+			assertEquals("cloudfront.amazonaws.com", props.get("Principal"),
+					"permission này không phải của CloudFront: " + props);
+			// `SourceArn` ghim về đúng distribution. Thiếu nó thì MỌI distribution
+			// CloudFront trên thế giới gọi được Function URL của ta.
+			assertTrue(String.valueOf(props.get("SourceArn")).contains("distribution/"),
+					"permission phải ghim SourceArn về distribution, thực tế: " + props);
+			actionsPerFunction
+					.computeIfAbsent(String.valueOf(props.get("FunctionName")),
+							k -> new java.util.TreeSet<>())
+					.add(String.valueOf(props.get("Action")));
 		}
+
+		assertEquals(2, actionsPerFunction.size(),
+				"hai function có Function URL, mỗi cái một nhóm permission, thực tế: "
+						+ actionsPerFunction.keySet());
+		actionsPerFunction.forEach((function, actions) -> assertEquals(
+				Set.of("lambda:InvokeFunction", "lambda:InvokeFunctionUrl"), actions,
+				"function `" + function + "` thiếu permission — CloudFront sẽ ký đúng, "
+						+ "Lambda vẫn nhận, và trả 403 AccessDeniedException"));
 	}
 
 	/**
@@ -1691,6 +1717,46 @@ class SecurityBoundaryTest {
 			"ssm:GetParameter",       // GeminiKeyProvider đọc SecureString
 			"kms:Decrypt");           // giải mã SecureString bằng alias/aws/ssm
 
+	/**
+	 * Tập đóng THỨ TƯ, và là tập duy nhất có đường GHI vào bảng flag.
+	 *
+	 * Bộ action này đọc ra từ MÃ NGUỒN chứ không từ hình dung về việc console
+	 * làm gì — hai chỗ dễ đoán sai nhất:
+	 *
+	 * <ul>
+	 * <li><b>KHÔNG có `dynamodb:Scan`.</b> Danh sách flag mà console hiển thị
+	 * đến từ `EnumBasedFeatureProvider` (enum `NewsFeature`), không từ bảng;
+	 * `DynamoDBStateRepository` 4.6.2 chỉ gọi `describeTable`, `getItem` và
+	 * `updateItem` — không có một lời gọi `scan` nào trong toàn class. Cấp
+	 * `Scan` ở đây là cấp một quyền không đường code nào dùng.</li>
+	 * <li><b>`PutItem` + `DeleteItem` trên `sessions`, KHÔNG phải `UpdateItem`.</b>
+	 * TTL trượt của phiên được `DynamoDbSessionRepository.save()` thực hiện bằng
+	 * `PutItem` ghi đè cả item, và `SessionRepositoryFilter` gọi `save()` ở CUỐI
+	 * mọi request có chạm session — tức mọi request đã đăng nhập vào console.
+	 * `DeleteItem` là nhánh `findById` thấy phiên quá hạn rồi tự dọn. Cấp
+	 * `UpdateItem` thay cho hai cái đó thì console hoạt động đúng một lần rồi
+	 * chết bằng AccessDenied ở request thứ hai — và chỉ trên môi trường thật,
+	 * vì Floci không cưỡng chế IAM.</li>
+	 * </ul>
+	 */
+	private static final Set<String> ADMIN_ACTIONS = Set.of(
+			"logs:CreateLogStream",   // Lambda runtime ghi log
+			"logs:PutLogEvents",      // Lambda runtime ghi log
+			"xray:PutTraceSegments",  // exporter OTLP gửi span tới X-Ray endpoint
+			"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
+			// togglz đọc flag (feature-toggles) VÀ phân giải cookie → phiên
+			// (sessions). Phạm vi theo BẢNG được canh ở
+			// `admin_chi_cham_feature_toggles_va_sessions`.
+			"dynamodb:GetItem",
+			// LÝ DO TỒN TẠI của function này: `DynamoDBStateRepository
+			// .setFeatureState` lật flag bằng `UpdateItem`. Đây là đường ghi
+			// DUY NHẤT vào bảng flag trong toàn hệ thống.
+			"dynamodb:UpdateItem",
+			"dynamodb:PutItem",       // `save()` của phiên — TTL trượt
+			"dynamodb:DeleteItem",    // `findById` dọn phiên đã quá hạn
+			"ssm:GetParameter",       // SsmClientRegistrationRepository
+			"kms:Decrypt");           // giải mã SecureString bằng alias/aws/ssm
+
 	@Test
 	void tap_dong_quyen_cua_web() {
 		assertClosedActionSet("Function", WEB_ACTIONS);
@@ -1704,6 +1770,98 @@ class SecurityBoundaryTest {
 	@Test
 	void tap_dong_quyen_cua_summarize() {
 		assertClosedActionSet("SummarizeFunction", SUMMARIZE_ACTIONS);
+	}
+
+	@Test
+	void tap_dong_quyen_cua_admin() {
+		assertClosedActionSet("AdminFunction", ADMIN_ACTIONS);
+	}
+
+	/**
+	 * Đây là lý do function thứ tư tồn tại. Nếu test này xanh mà ba role kia
+	 * cũng ghi được, cả slice 5 là công cốc.
+	 *
+	 * Vế phủ định quét CẢ BA role còn lại, không riêng `web`: câu mà `AppStack`
+	 * khẳng định là *"đường GHI DUY NHẤT vào bảng flag trong toàn hệ thống"*, và
+	 * hỏi mỗi `web` sẽ để `ingest` hoặc `summarize` mọc thêm `UpdateItem` mà test
+	 * vẫn xanh.
+	 */
+	@Test
+	void chi_admin_ghi_duoc_feature_toggles() {
+		Template template = appStack(EnvConfig.DEV);
+
+		for (String role : List.of("Function", "IngestFunction", "SummarizeFunction")) {
+			List<Map<String, Object>> statements = statementsOfRole(template, role);
+			assertFalse(statements.isEmpty(),
+					"không đọc được statement nào của role `" + role + "` — prefix tra sai?");
+			assertTrue(statements.stream()
+							.noneMatch(s -> actionsOf(s).contains("dynamodb:UpdateItem")
+									&& resourcesOf(s).stream()
+											.anyMatch(r -> r.contains("FeatureTogglesTable"))),
+					"`" + role + "` chỉ ĐỌC feature-toggles — lật flag là việc của `admin`");
+		}
+
+		assertTrue(statementsOfRole(template, "AdminFunction").stream()
+						.anyMatch(s -> actionsOf(s).contains("dynamodb:UpdateItem")
+								&& resourcesOf(s).stream()
+										.anyMatch(r -> r.contains("FeatureTogglesTable"))),
+				"`admin` phải GHI được feature-toggles — không có nó thì console chỉ là "
+						+ "một trang đọc");
+	}
+
+	/**
+	 * Hai bảng, và ĐÚNG hai bảng. `admin` không có việc gì với `articles`,
+	 * `sources` hay `user-preferences`, và một dòng `addToPolicy` chép nhầm từ
+	 * khối `web` ngay bên trên sẽ không tạo ra triệu chứng nào.
+	 */
+	@Test
+	void admin_chi_cham_feature_toggles_va_sessions() {
+		List<Map<String, Object>> statements =
+				statementsOfRole(appStack(EnvConfig.DEV), "AdminFunction");
+		assertFalse(statements.isEmpty(),
+				"không đọc được statement nào của role `admin` — prefix tra sai?");
+
+		for (Map<String, Object> statement : statements) {
+			if (actionsOf(statement).stream().noneMatch(a -> a.startsWith("dynamodb:"))) {
+				continue;
+			}
+			for (String resource : resourcesOf(statement)) {
+				assertTrue(resource.contains("FeatureTogglesTable")
+								|| resource.contains("SessionsTable"),
+						"`admin` chỉ chạm feature-toggles và sessions, thực tế: " + resource);
+			}
+		}
+
+		// Vế ngược: `sessions` KHÔNG được nhận `UpdateItem`. Đó là action mà
+		// `DynamoDbSessionRepository` không bao giờ gọi, nên cấp nó nghĩa là đang
+		// mô tả sai cách phiên trượt hạn — và một mô tả sai trong policy sống rất
+		// lâu vì thừa quyền không hỏng gì.
+		for (Map<String, Object> statement : statements) {
+			if (!actionsOf(statement).contains("dynamodb:UpdateItem")) {
+				continue;
+			}
+			for (String resource : resourcesOf(statement)) {
+				assertFalse(resource.contains("SessionsTable"),
+						"`UpdateItem` trên sessions là quyền chết — repository ghi bằng "
+								+ "PutItem, thực tế: " + resource);
+			}
+		}
+	}
+
+	/**
+	 * Hai Function URL, CẢ HAI private. `admin` mà public là một trang quản trị
+	 * nằm trần trên Internet.
+	 *
+	 * `allResourcesProperties` chứ KHÔNG `hasResourceProperties`: cái sau xanh
+	 * khi CHỈ MỘT resource khớp, nên nó sẽ nói "có AWS_IAM" ngay cả khi URL thứ
+	 * hai để NONE — đúng cái nửa mà test này tồn tại để canh.
+	 */
+	@Test
+	void function_url_cua_admin_cung_la_AWS_IAM() {
+		Template template = appStack(EnvConfig.DEV);
+		template.resourceCountIs("AWS::Lambda::Url", 2);
+		template.allResourcesProperties("AWS::Lambda::Url",
+				Match.objectLike(Map.of("AuthType", "AWS_IAM")));
 	}
 
 	/**
@@ -1749,30 +1907,33 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void ba_function_ba_role_ba_bo_trigger() {
+	void bon_function_bon_role_bon_bo_trigger() {
 		Template template = appStack(EnvConfig.DEV);
 
-		template.resourceCountIs("AWS::Lambda::Function", 3);
-		// Ba function dùng chung một log group thì log của người đọc và log của
-		// lượt summarize trộn vào nhau, và retention/quyền không tách được nữa.
-		template.resourceCountIs("AWS::Logs::LogGroup", 3);
+		template.resourceCountIs("AWS::Lambda::Function", 4);
+		// Bốn function dùng chung một log group thì log của người đọc, log của
+		// lượt summarize và log của mặt phẳng vận hành trộn vào nhau, và
+		// retention/quyền không tách được nữa.
+		template.resourceCountIs("AWS::Logs::LogGroup", 4);
 
-		// Ghim theo TÊN chứ không theo TỔNG SỐ role. Tổng không phải 3: Scheduler
+		// Ghim theo TÊN chứ không theo TỔNG SỐ role. Tổng không phải 4: Scheduler
 		// tự sinh `SchedulerRoleForTarget` cho mỗi function được nhắm, và sau khi
 		// tách thì hai Schedule trỏ hai function khác nhau nên có hai role loại đó
 		// (bản một-function dùng chung một). Đếm tổng sẽ biến một role lạ mọc thêm
 		// thành thứ test phải nới số, thay vì thứ test phải chỉ mặt.
 		Set<String> roleIds = template.findResources("AWS::IAM::Role").keySet();
-		for (String prefix : List.of("FunctionRole", "IngestFunctionRole",
-				"SummarizeFunctionRole")) {
+		for (String prefix : List.of("FunctionRole", "AdminFunctionRole",
+				"IngestFunctionRole", "SummarizeFunctionRole")) {
 			assertTrue(roleIds.stream().anyMatch(id -> id.startsWith(prefix)),
 					"thiếu execution role `" + prefix + "` — đang có: " + roleIds);
 		}
-		// ĐÚNG MỘT Function URL. `ingest` và `summarize` không có đường HTTP nào
-		// từ Internet — đó là nửa còn lại của việc thu hẹp blast radius.
-		template.resourceCountIs("AWS::Lambda::Url", 1);
+		// ĐÚNG HAI Function URL — `web` và `admin`. `ingest` và `summarize` không
+		// có đường HTTP nào từ Internet, đó là nửa còn lại của việc thu hẹp blast
+		// radius. Cả hai URL đều `AWS_IAM`, canh ở
+		// `function_url_cua_admin_cung_la_AWS_IAM`.
+		template.resourceCountIs("AWS::Lambda::Url", 2);
 		// Một ESM (SQS → summarize), hai Schedule (ingest-feeds → ingest,
-		// summarize-sweep → summarize).
+		// summarize-sweep → summarize). `admin` KHÔNG có trigger nào ngoài HTTP.
 		template.resourceCountIs("AWS::Lambda::EventSourceMapping", 1);
 		template.resourceCountIs("AWS::Scheduler::Schedule", 2);
 	}
@@ -1942,28 +2103,136 @@ class SecurityBoundaryTest {
 	}
 
 	/**
-	 * `ingest` và `summarize` KHÔNG mang cấu hình danh tính.
+	 * `ingest` và `summarize` KHÔNG mang cấu hình danh tính; `web` và `admin` thì
+	 * PHẢI mang.
 	 *
-	 * Bốn biến `NEWS_COGNITO_*` và `NEWS_PUBLIC_BASE_URL` nằm ở khối `web` chứ
-	 * không ở `baseEnv`, và khác biệt đó vô hình: đưa chúng vào `baseEnv` thì mọi
-	 * thứ chạy y hệt, chỉ là hai function không có bề mặt đăng nhập bỗng mang
-	 * theo issuer, client id và tên một secret mà chúng không có quyền đọc.
+	 * Bốn biến `NEWS_COGNITO_*` và `NEWS_PUBLIC_BASE_URL` nằm ở khối của hai
+	 * function phục vụ HTTP chứ không ở `baseEnv`, và khác biệt đó vô hình: đưa
+	 * chúng vào `baseEnv` thì mọi thứ chạy y hệt, chỉ là hai function không có bề
+	 * mặt đăng nhập bỗng mang theo issuer, client id và tên một secret mà chúng
+	 * không có quyền đọc.
+	 *
+	 * Vế KHẲNG ĐỊNH cho `admin` không thừa. `SecurityConfig` là `@Profile(HTTP)`
+	 * — tức nó dựng ở CẢ `admin` — và `defaultSuccessUrl`/`failureUrl` đọc
+	 * `news.identity.public-base-url` lúc dựng bean. Thiếu biến, giá trị rơi về
+	 * mặc định `http://localhost:8080` và console đẩy người vận hành về localhost
+	 * sau khi đăng nhập, không lỗi nào nổ ra.
 	 */
 	@Test
-	void chi_web_mang_cau_hinh_cognito() {
+	void chi_web_va_admin_mang_cau_hinh_cognito() {
 		Map<String, Map<String, Object>> functions = appStack()
 				.findResources("AWS::Lambda::Function");
 
+		int mangCauHinh = 0;
 		for (Map.Entry<String, Map<String, Object>> e : functions.entrySet()) {
-			if (e.getKey().startsWith("Function")) {
-				continue;   // `web` — logical id giữ nguyên từ bản Lambdalith
-			}
+			// `web` giữ logical id `Function` từ bản Lambdalith, nên `admin` phải
+			// được loại TRƯỚC — `AdminFunction…` không bắt đầu bằng `Function`.
+			boolean phucVuHttp = e.getKey().startsWith("Function")
+					|| e.getKey().startsWith("AdminFunction");
 			for (String prefix : List.of("NEWS_COGNITO_", "NEWS_PUBLIC_BASE_URL")) {
-				assertFalse(String.valueOf(e.getValue()).contains(prefix),
-						"`" + e.getKey() + "` không được mang cấu hình danh tính ("
-								+ prefix + "): " + e.getValue());
+				if (phucVuHttp) {
+					assertTrue(String.valueOf(e.getValue()).contains(prefix),
+							"`" + e.getKey() + "` phục vụ HTTP nên PHẢI mang " + prefix
+									+ ": " + e.getValue());
+				}
+				else {
+					assertFalse(String.valueOf(e.getValue()).contains(prefix),
+							"`" + e.getKey() + "` không được mang cấu hình danh tính ("
+									+ prefix + "): " + e.getValue());
+				}
+			}
+			if (phucVuHttp) {
+				mangCauHinh++;
 			}
 		}
+		assertEquals(2, mangCauHinh,
+				"đúng HAI function phục vụ HTTP mang cấu hình danh tính, thực tế: "
+						+ mangCauHinh);
+	}
+
+	/**
+	 * Origin THỨ BA của distribution, và nó phải đi kèm ĐÚNG hai tính chất.
+	 *
+	 * <p><b>Không cache.</b> Console lật flag rồi tải lại trang; một response
+	 * được cache biến "đã tắt" thành "vẫn hiện là bật" — người vận hành sẽ lật
+	 * lại lần nữa và tin rằng console hỏng.
+	 *
+	 * <p><b>Origin RIÊNG, không dùng chung với `/api/*`.</b> Trỏ `/admin/*` về
+	 * Function URL của `web` thì mọi thứ vẫn chạy — `SecurityConfig` giống hệt
+	 * nhau ở hai profile — chỉ là ranh giới IAM mà cả slice 5 tồn tại để dựng
+	 * biến mất: `web` sẽ phải có `dynamodb:UpdateItem` trên bảng flag.
+	 */
+	@Test
+	void admin_co_behavior_rieng_khong_cache_va_khong_dung_chung_origin_voi_api() {
+		Map<String, Map<String, Object>> distributions =
+				edgeStack().findResources("AWS::CloudFront::Distribution");
+		assertEquals(1, distributions.size(),
+				"ADR-0005: MỘT distribution, thực tế: " + distributions.keySet());
+
+		@SuppressWarnings("unchecked")
+		Map<String, Object> config = (Map<String, Object>)
+				distributions.values().iterator().next().get("Properties");
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> behaviors = (List<Map<String, Object>>)
+				((Map<String, Object>) config.get("DistributionConfig")).get("CacheBehaviors");
+
+		Map<String, Object> admin = behaviors.stream()
+				.filter(b -> "/admin/*".equals(b.get("PathPattern")))
+				.findFirst()
+				.orElseThrow(() -> new AssertionError(
+						"thiếu behavior `/admin/*` — đang có: " + behaviors));
+		Map<String, Object> api = behaviors.stream()
+				.filter(b -> "/api/*".equals(b.get("PathPattern")))
+				.findFirst()
+				.orElseThrow(() -> new AssertionError("thiếu behavior `/api/*`"));
+
+		assertEquals("4135ea2d-6df8-44a3-9df3-4b5a84be39ad", admin.get("CachePolicyId"),
+				"`/admin/*` phải CACHING_DISABLED, thực tế: " + admin);
+
+		// So DOMAIN của origin chứ KHÔNG so `TargetOriginId`. Mỗi lời gọi
+		// `FunctionUrlOrigin.withOriginAccessControl()` dựng một origin RIÊNG kể
+		// cả khi truyền vào cùng một Function URL, nên hai id luôn khác nhau —
+		// đã đo bằng mutation: trỏ `/admin/*` về `functionUrl` của `web` vẫn cho
+		// hai id khác nhau và assertion cũ vẫn xanh.
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> origins = (List<Map<String, Object>>)
+				((Map<String, Object>) config.get("DistributionConfig")).get("Origins");
+		Map<String, String> domainOf = new java.util.LinkedHashMap<>();
+		origins.forEach(o -> domainOf.put(String.valueOf(o.get("Id")),
+				String.valueOf(o.get("DomainName"))));
+
+		String adminDomain = domainOf.get(String.valueOf(admin.get("TargetOriginId")));
+		String apiDomain = domainOf.get(String.valueOf(api.get("TargetOriginId")));
+		assertFalse(adminDomain.equals(apiDomain),
+				"`/admin/*` phải đi tới Function URL của `admin`, không dùng chung với "
+						+ "`/api/*`: " + adminDomain);
+		assertTrue(adminDomain.contains("AdminFunction"),
+				"origin của `/admin/*` phải là Function URL của `admin`, thực tế: "
+						+ adminDomain);
+
+		// GHIM SLOT, không chỉ ghim "khác nhau". CDK đánh số origin theo THỨ TỰ
+		// LẶP của map `additionalBehaviors`, nên `Map.of` — thứ có thứ tự lặp
+		// ngẫu nhiên hoá theo mỗi lần JVM khởi động — làm cùng một dòng code sinh
+		// ra hai template khác nhau. Đã đo: năm lượt `cdk synth` liên tiếp cho ra
+		// `Origin2 = admin` bốn lần, `Origin2 = web` một lần.
+		//
+		// `/api/*` đang GIỮ `Origin2` trong distribution đang chạy. Đổi số của nó
+		// là đổi `TargetOriginId` của một behavior đang phục vụ traffic thật, kéo
+		// theo cả OAC lẫn `CfnPermission` mà CDK tự sinh theo tên origin — một
+		// lượt cập nhật CloudFront đầy đủ cho một thay đổi KHÔNG CÓ trong code.
+		//
+		// Test này đỏ khi ai đó chèn behavior mới vào TRƯỚC `/api/*`, và đó là
+		// hành vi đúng: behavior mới phải nối vào CUỐI.
+		//
+		// ⚠️ Với `Map.of`, hai vế dưới chỉ đỏ ở KHOẢNG MỘT NỬA số lần chạy (đo
+		// được: 3/6 lượt JVM), vì salt quyết định thứ tự. Một lượt xanh KHÔNG
+		// chứng minh map đang có thứ tự — đọc `EdgeStack` để chắc.
+		assertTrue(String.valueOf(api.get("TargetOriginId")).contains("DistributionOrigin2"),
+				"`/api/*` phải giữ nguyên slot origin thứ 2, thực tế: "
+						+ api.get("TargetOriginId"));
+		assertTrue(String.valueOf(admin.get("TargetOriginId")).contains("DistributionOrigin3"),
+				"`/admin/*` là origin MỚI nên nó lấy slot thứ 3, thực tế: "
+						+ admin.get("TargetOriginId"));
 	}
 
 	/**
@@ -2417,7 +2686,7 @@ class SecurityBoundaryTest {
 		// quyền không bị nới ra trong lúc dời code", không phải một hành vi mới.
 		//
 		// Vế "MỖI function một log group riêng" cần ba function mới kiểm được, nên
-		// nó nằm ở `ba_function_ba_role_ba_bo_trigger` chứ không phải ở đây.
+		// nó nằm ở `bon_function_bon_role_bon_bo_trigger` chứ không phải ở đây.
 		Template template = appStack(EnvConfig.DEV);
 
 		for (Map<String, Object> policy

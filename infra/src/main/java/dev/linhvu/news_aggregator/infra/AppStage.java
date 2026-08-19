@@ -23,7 +23,8 @@ public class AppStage extends Stage {
 				appStack.getIngestLogGroup(),
 				appStack.getScheduleDlq(), appStack.getSummarizeDlq());
 		EdgeStack edge = new EdgeStack(this, "EdgeStack", cfg,
-				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl());
+				dns.getHostedZone(), dns.getCertificate(), appStack.getFunctionUrl(),
+				appStack.getAdminFunctionUrl());
 		new CicdStack(this, "CicdStack", cfg,
 				appStack.getAllFunctions(), edge.getBucket(), edge.getDistribution());
 	}
