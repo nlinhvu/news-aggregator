@@ -1666,13 +1666,17 @@ class SecurityBoundaryTest {
 			// một action trên ba bảng: phạm vi theo BẢNG được canh ở
 			// `web_khong_ghi_duoc_articles_khong_goi_duoc_gemini`.
 			"dynamodb:GetItem",
-			// Ba action ghi dưới đây CHỈ trên bảng `sessions` — đường ghi đầu tiên
-			// của function phục vụ Internet, mở ở Task 7 slice 2.
-			// PutItem trên `sessions` (phiên mới) VÀ `user-preferences` (lưu lựa
-			// chọn nguồn — xem `web_doc_ghi_user_preferences_nhung_khong_xoa`).
+			// PutItem trên `sessions` (phiên mới, VÀ trượt TTL — `save()` ghi đè cả
+			// item) và trên `user-preferences` (lưu lựa chọn nguồn — xem
+			// `web_doc_ghi_user_preferences_nhung_khong_xoa`).
 			"dynamodb:PutItem",
-			"dynamodb:UpdateItem",    // trượt TTL `expiresAt` mỗi lần dùng
 			"dynamodb:DeleteItem",    // đăng xuất — xoá phiên, không chỉ xoá cookie
+			// KHÔNG có `dynamodb:UpdateItem`, và sự vắng mặt đó là CÓ Ý. Bản trước
+			// khai nó với chú thích "trượt TTL `expiresAt`" — mô tả sai:
+			// `DynamoDbSessionRepository` không bao giờ gọi `updateItem`, TTL trượt
+			// bằng `PutItem` ghi đè cả item. Gỡ 2026-08-19, sau khi lộ ra lúc cấp
+			// quyền cho `admin` (Task 26). Nếu nó quay lại, test này đỏ với
+			// "có quyền KHÔNG khai báo" — đó là toàn bộ lý do tập đóng tồn tại.
 			// `Scan` CHỈ trên bảng `sources` (Task 19): `GET /api/sources` dựng hàng
 			// chip cho slice 4. Lần đầu function phục vụ Internet đọc bảng đó —
 			// chấp nhận được vì bảng bị chặn trên ~30 dòng bởi master §2 và endpoint
@@ -1986,6 +1990,53 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * `sessions` là bảng đầu tiên `web` ghi được, và bộ action của nó là ĐÚNG BA —
+	 * không hơn, không kém.
+	 *
+	 * <p><b>Vế KHẲNG ĐỊNH mới là vế quan trọng, và nó từng không tồn tại.</b> Tập
+	 * đóng `WEB_ACTIONS` chỉ hỏi *"role có action nào"*, không hỏi *"action nào
+	 * trên bảng nào"* — mà `PutItem` còn được cấp trên `user-preferences`, nên gỡ
+	 * `PutItem` khỏi ĐÚNG statement này vẫn để tập đóng nguyên vẹn. Đã đo bằng
+	 * mutation 2026-08-19: bỏ `PutItem` khỏi `sessions` ⇒ **mọi lượt đăng nhập
+	 * chết bằng AccessDenied** trên môi trường thật, và toàn bộ suite vẫn xanh.
+	 *
+	 * <p>`PutItem` ở đây gánh HAI việc, và đó là lý do dễ tưởng nó thừa: tạo phiên
+	 * mới, VÀ trượt TTL mỗi lần dùng — `DynamoDbSessionRepository.save()` ghi đè
+	 * cả item, `SessionRepositoryFilter` gọi nó ở cuối mọi request chạm session.
+	 *
+	 * <p>Vế phủ định `UpdateItem`: repository KHÔNG BAO GIỜ gọi `updateItem` trên
+	 * bảng này. Quyền đó được cấp từ Task 7 với chú thích "trượt TTL" — một mô tả
+	 * sai — và sống tới 2026-08-19 vì thừa quyền không tạo triệu chứng nào.
+	 */
+	@Test
+	void web_doc_ghi_xoa_sessions_nhung_khong_update() {
+		Template t = appStack();
+
+		for (String action : List.of("dynamodb:GetItem", "dynamodb:PutItem",
+				"dynamodb:DeleteItem")) {
+			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
+							.anyMatch(resource -> resource.contains("SessionsTable")),
+					"`web` phải được " + action + " trên bảng sessions — thiếu "
+							+ action + " thì " + moTa(action));
+		}
+
+		for (String resource
+				: resourcesForAction(t, "FunctionRoleDefaultPolicy", "dynamodb:UpdateItem")) {
+			assertFalse(resource.contains("SessionsTable"),
+					"`UpdateItem` trên sessions là quyền CHẾT — repository trượt TTL bằng "
+							+ "PutItem ghi đè cả item, thực tế: " + resource);
+		}
+	}
+
+	private static String moTa(String action) {
+		return switch (action) {
+			case "dynamodb:GetItem" -> "không phân giải được cookie thành phiên";
+			case "dynamodb:PutItem" -> "không tạo được phiên VÀ không trượt được TTL";
+			default -> "nút đăng xuất xoá cookie mà không xoá phiên";
+		};
+	}
+
+	/**
 	 * `user-preferences` là bảng THỨ HAI mà function phục vụ Internet ghi được, và
 	 * bộ action của nó hẹp hơn `sessions` đúng một bậc: KHÔNG có `DeleteItem`.
 	 *
@@ -1994,10 +2045,15 @@ class SecurityBoundaryTest {
 	 * không tính năng nào đòi. `UpdateItem` cũng không: `SourcePreferenceRepository`
 	 * ghi đè cả item, vì item chỉ có đúng hai attribute ngoài khoá.
 	 *
-	 * Vế phủ định soi theo BẢNG chứ không theo action — cả `DeleteItem` lẫn
-	 * `UpdateItem` đều là quyền HỢP LỆ của `web` trên `sessions` (đăng xuất, trượt
-	 * TTL), nên "web không có DeleteItem" là câu sai. Câu đúng là "không có trên
-	 * bảng NÀY".
+	 * Vế phủ định soi theo BẢNG chứ không theo action — `DeleteItem` là quyền HỢP
+	 * LỆ của `web` trên `sessions` (đăng xuất), nên "web không có DeleteItem" là
+	 * câu sai. Câu đúng là "không có trên bảng NÀY".
+	 *
+	 * ⚠️ Vòng lặp `UpdateItem` nay xanh RỖNG: từ 2026-08-19 `web` không còn
+	 * `UpdateItem` trên bảng nào cả, nên `resourcesForAction` trả danh sách trống.
+	 * Giữ lại vì nó vẫn đúng và sẽ bắt được ngày ai đó cấp `UpdateItem` trên
+	 * `user-preferences`; nhưng chốt chặn THẬT cho "web không có UpdateItem" là
+	 * tập đóng `WEB_ACTIONS`, không phải dòng này.
 	 */
 	@Test
 	void web_doc_ghi_user_preferences_nhung_khong_xoa() {

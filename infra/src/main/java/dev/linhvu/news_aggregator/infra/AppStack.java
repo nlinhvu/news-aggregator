@@ -132,9 +132,19 @@ public class AppStack extends Stack {
 		// của CHÍNH người đang đăng nhập. `DeleteItem` là cho đăng xuất — thiếu
 		// nó thì nút đăng xuất xoá được cookie nhưng không xoá được phiên, tức là
 		// nó nói dối người dùng.
+		//
+		// KHÔNG có `UpdateItem`, và đó là một lần SỬA chứ không phải một lần bỏ
+		// sót. Bản trước cấp nó với lý do "trượt TTL `expiresAt` mỗi lần dùng" —
+		// một mô tả SAI về cách repository hoạt động: `DynamoDbSessionRepository
+		// .save()` ghi đè CẢ item bằng `PutItem`, và TTL trượt chính là hệ quả
+		// của lần ghi đè đó. Không đường code nào trong hệ gọi `updateItem` trên
+		// bảng này. Đọc ra khi cấp quyền cho `admin` ở Task 26.
+		//
+		// Quyền thừa không tạo ra triệu chứng nào — đó là lý do nó sống được
+		// nhiều slice, và cũng là lý do tập đóng `WEB_ACTIONS` tồn tại.
 		webRole.role().addToPolicy(PolicyStatement.Builder.create()
 				.actions(List.of("dynamodb:GetItem", "dynamodb:PutItem",
-						"dynamodb:UpdateItem", "dynamodb:DeleteItem"))
+						"dynamodb:DeleteItem"))
 				.resources(List.of(sessionsTable.getTableArn()))
 				.build());
 
