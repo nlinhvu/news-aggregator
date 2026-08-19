@@ -233,6 +233,51 @@ class AdminConsoleIT {
 		assertThat(featureManager.isActive(NewsFeature.AI_SUMMARIZATION))
 				.as("POST thân rỗng + query string phải lật được flag THẬT")
 				.isEqualTo(!truoc);
+		// Redirect THỨ HAI của console, và là cái người vận hành gặp ngay sau khi
+		// bấm nút: `EditPageHandler` gọi `sendRedirect("index")` — TƯƠNG ĐỐI THẬT
+		// SỰ, không có dấu `/` đầu. Nối chuỗi thay vì `URI.resolve` sẽ biến nó
+		// thành `/index` (404); để nguyên thì nó mang host của Function URL.
+		assertThat(flip.getHeaders().getLocation().toString())
+				.isEqualTo("http://localhost:8080/admin/togglz/index");
+	}
+
+	/**
+	 * `/admin/togglz` (không có `/index`) là URL người vận hành GÕ VÀO, và chặng
+	 * 302 của nó phải trỏ về DOMAIN CÔNG KHAI.
+	 *
+	 * <p>Redirect này do THƯ VIỆN phát, không phải code của ta:
+	 * `InitialRedirectHandler` gọi `sendRedirect(request.getRequestURI() +
+	 * "/index")` — một đường dẫn TƯƠNG ĐỐI. Servlet container biến nó thành tuyệt
+	 * đối bằng `Host` của REQUEST, mà sau CloudFront thì `Host` là Function URL
+	 * (`ALL_VIEWER_EXCEPT_HOST_HEADER` strip host của viewer vì SigV4 đòi host của
+	 * Function URL).
+	 *
+	 * <p>ĐÃ ĐO trên dev 2026-08-19, với tài khoản ĐÃ ở trong nhóm `ops`:
+	 * <pre>
+	 *   GET https://news.na-dev.linhvu.dev/admin/togglz
+	 *     → 302 https://mmwu…lyvoh.lambda-url.us-east-1.on.aws/admin/togglz/index
+	 *     → Forbidden
+	 * </pre>
+	 * Function URL có `AuthType=AWS_IAM`, trình duyệt không ký SigV4 được. Đăng
+	 * nhập ĐÚNG, nhóm ĐÚNG, phân quyền ĐÚNG — và người vận hành vẫn không vào
+	 * được, với một thông báo không nhắc gì tới ba thứ đó.
+	 *
+	 * <p><b>Test này tái hiện được ở local vì `public-base-url` (`localhost:8080`)
+	 * KHÁC cổng ngẫu nhiên của server test.</b> Đó là điều kiện duy nhất khiến
+	 * lỗi lộ ra — một IT chạy đúng cổng 8080 sẽ xanh trong khi prod hỏng.
+	 */
+	@Test
+	void chang_302_cua_console_tro_ve_domain_cong_khai_khong_phai_host_cua_request() {
+		String cookie = dangNhap();
+
+		ResponseEntity<Void> toIndex = exchange(at("/admin/togglz"),
+				HttpMethod.GET, cookie, Void.class);
+
+		assertThat(toIndex.getStatusCode()).isEqualTo(HttpStatus.FOUND);
+		assertThat(toIndex.getHeaders().getLocation().toString())
+				.as("dựng từ host của REQUEST thì sau CloudFront nó là Function URL, "
+						+ "và trình duyệt nhận Forbidden")
+				.isEqualTo("http://localhost:8080/admin/togglz/index");
 	}
 
 	/**

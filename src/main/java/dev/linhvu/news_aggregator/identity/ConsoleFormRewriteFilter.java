@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator.identity;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
@@ -14,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletResponseWrapper;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -64,6 +66,13 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 	private static final RequestMatcher CONSOLE =
 			PathPatternRequestMatcher.pathPattern("/admin/togglz/**");
 
+	private final String publicBaseUrl;
+
+	ConsoleFormRewriteFilter(
+			@Value("${news.identity.public-base-url}") String publicBaseUrl) {
+		this.publicBaseUrl = publicBaseUrl;
+	}
+
 	/**
 	 * `capture: true` để chặn được submit TRƯỚC mọi handler khác, và
 	 * `preventDefault()` để trình duyệt không gửi bản gốc có body.
@@ -95,8 +104,15 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 	protected void doFilterInternal(HttpServletRequest request,
 			HttpServletResponse response, FilterChain chain)
 			throws ServletException, IOException {
-		BufferingResponse buffered = new BufferingResponse(response);
+		BufferingResponse buffered =
+				new BufferingResponse(response, request, publicBaseUrl);
 		chain.doFilter(request, buffered);
+
+		if (buffered.daChuyenHuong()) {
+			// Không có thân để chèn script, và response đã commit — chạm vào nữa
+			// chỉ tạo một `IllegalStateException` ở chỗ không ai đọc.
+			return;
+		}
 
 		byte[] body = buffered.body();
 		String contentType = buffered.getContentType();
@@ -138,11 +154,72 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 	private static final class BufferingResponse extends HttpServletResponseWrapper {
 
 		private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		private final HttpServletRequest request;
+		private final String publicBaseUrl;
 		private ServletOutputStream stream;
 		private PrintWriter writer;
+		private boolean daChuyenHuong;
 
-		private BufferingResponse(HttpServletResponse response) {
+		private BufferingResponse(HttpServletResponse response,
+				HttpServletRequest request, String publicBaseUrl) {
 			super(response);
+			this.request = request;
+			this.publicBaseUrl = publicBaseUrl;
+		}
+
+		boolean daChuyenHuong() {
+			return daChuyenHuong;
+		}
+
+		/**
+		 * Biến `Location` TƯƠNG ĐỐI của console thành TUYỆT ĐỐI theo
+		 * `public-base-url`.
+		 *
+		 * <p><b>Không có lớp này thì người vận hành ĐÚNG nhóm `ops` vẫn không vào
+		 * được console.</b> ĐÃ ĐO trên dev 2026-08-19:
+		 *
+		 * <pre>
+		 *   GET https://news.na-dev.linhvu.dev/admin/togglz
+		 *     → 302 https://mmwu…lyvoh.lambda-url.us-east-1.on.aws/admin/togglz/index
+		 *     → Forbidden
+		 * </pre>
+		 *
+		 * <p>Console gọi `sendRedirect` với đường dẫn tương đối
+		 * (`InitialRedirectHandler` dùng `getRequestURI() + "/index"`,
+		 * `EditPageHandler` dùng thẳng `"index"`), và servlet container biến nó
+		 * thành tuyệt đối bằng `Host` của REQUEST — mà sau CloudFront, `Host` đó
+		 * là Function URL với `AuthType=AWS_IAM`. Đăng nhập đúng, nhóm đúng, phân
+		 * quyền đúng, và trình duyệt vẫn nhận Forbidden.
+		 *
+		 * <p>Đây là cùng một cái bẫy mà `AuthController.login()` và
+		 * `SecurityConfig.defaultSuccessUrl` đã tránh bằng cách tự dựng URL tuyệt
+		 * đối. Khác biệt duy nhất: redirect này do THƯ VIỆN phát, nên chặn ở
+		 * response là chỗ duy nhất với tới được.
+		 *
+		 * <p>`URI.resolve` chứ không nối chuỗi: nó xử lý đúng CẢ HAI dạng theo
+		 * luật RFC 3986 — `/admin/togglz/index` (tuyệt đối trong host) và `index`
+		 * (tương đối với thư mục của request hiện tại). Nối chuỗi sẽ biến dạng thứ
+		 * hai thành `/index`, tức 404.
+		 */
+		@Override
+		public void sendRedirect(String location) throws IOException {
+			this.daChuyenHuong = true;
+			super.sendRedirect(tuyetDoi(location));
+		}
+
+		@Override
+		public void sendRedirect(String location, int sc, boolean clearBuffer)
+				throws IOException {
+			this.daChuyenHuong = true;
+			super.sendRedirect(tuyetDoi(location), sc, clearBuffer);
+		}
+
+		private String tuyetDoi(String location) {
+			if (location.startsWith("http://") || location.startsWith("https://")) {
+				return location;
+			}
+			return URI.create(publicBaseUrl + request.getRequestURI())
+					.resolve(location).toString();
 		}
 
 		byte[] body() throws IOException {
