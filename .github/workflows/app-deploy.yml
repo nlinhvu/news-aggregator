@@ -112,15 +112,21 @@ jobs:
           # Ghi digest TRƯỚC, để lần `cdk deploy` sau không kéo lùi phiên bản.
           aws ssm put-parameter --name /news/dev/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
-          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
-          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
-          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
-          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          # BỐN lệnh viết tường minh, không vòng lặp. Cả bốn phải thành công thì
+          # mới coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới,
+          # `ingest` cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn
+          # ngay tại lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          #
+          # `admin` là function DUY NHẤT không có bước smoke nào chạm tới: nó
+          # nằm sau nhóm `ops` nên `smoke.yml` không gọi được. Bỏ sót nó ở đây
+          # nghĩa là console chạy code cũ vô thời hạn mà không lệnh nào hỏng.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_ADMIN_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           # `-v2` CỐ Ý: waiter `function-updated` poll `GetFunctionConfiguration`,
           # còn `function-updated-v2` poll `GetFunction` — đúng action mà
@@ -129,6 +135,7 @@ jobs:
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_ADMIN_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
@@ -174,19 +181,26 @@ jobs:
           export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
           aws ssm put-parameter --name /news/qa/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
-          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
-          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
-          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
-          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          # BỐN lệnh viết tường minh, không vòng lặp. Cả bốn phải thành công thì
+          # mới coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới,
+          # `ingest` cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn
+          # ngay tại lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          #
+          # `admin` là function DUY NHẤT không có bước smoke nào chạm tới: nó
+          # nằm sau nhóm `ops` nên `smoke.yml` không gọi được. Bỏ sót nó ở đây
+          # nghĩa là console chạy code cũ vô thời hạn mà không lệnh nào hỏng.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_ADMIN_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_ADMIN_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
@@ -232,19 +246,26 @@ jobs:
           export AWS_SESSION_TOKEN=$(echo $creds | jq -r .SessionToken)
           aws ssm put-parameter --name /news/prod/image-digest --type String \
             --value "${{ needs.build.outputs.digest }}" --overwrite
-          # BA lệnh viết tường minh, không vòng lặp. Cả ba phải thành công thì mới
-          # coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới, `ingest`
-          # cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn ngay tại
-          # lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          # BỐN lệnh viết tường minh, không vòng lặp. Cả bốn phải thành công thì
+          # mới coi là deploy xong — trạng thái deploy MỘT PHẦN (`web` mới,
+          # `ingest` cũ) là kịch bản mới kể từ ADR-0020, và `set -e` phải chặn
+          # ngay tại lệnh đầu hỏng. Đã xảy ra thật trên `dev` ngày 2026-08-13.
+          #
+          # `admin` là function DUY NHẤT không có bước smoke nào chạm tới: nó
+          # nằm sau nhóm `ops` nên `smoke.yml` không gọi được. Bỏ sót nó ở đây
+          # nghĩa là console chạy code cũ vô thời hạn mà không lệnh nào hỏng.
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda update-function-code --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }} \
             --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
+          aws lambda update-function-code --function-name ${{ vars.LAMBDA_ADMIN_NAME }} \
+            --image-uri $ECR_REGISTRY/$ECR_REPO@${{ needs.build.outputs.digest }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_INGEST_NAME }}
           aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_SUMMARIZE_NAME }}
+          aws lambda wait function-updated-v2 --function-name ${{ vars.LAMBDA_ADMIN_NAME }}
       # Đường scheduled không có URL public nào dẫn tới nó (thiết kế, không phải
       # thiếu sót), nên `curl` trong smoke.yml không chạm được. Chạy ở ĐÂY vì job
       # này đã có `environment:` — điều kiện để OIDC token mang claim
