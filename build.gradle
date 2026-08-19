@@ -118,6 +118,14 @@ dependencies {
 	implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 	implementation "org.togglz:togglz-spring-boot-starter:${togglzVersion}"
 	implementation "org.togglz:togglz-dynamodb:${togglzVersion}"
+	// Starter KHÔNG kéo console theo — nó chỉ kéo autoconfigure/spring-core/
+	// spring-web/servlet/core. Mà `TogglzAutoConfiguration$TogglzConsoleConfiguration`
+	// là `@ConditionalOnClass(TogglzConsoleServlet.class)`, nên thiếu dòng này thì
+	// `togglz.console.enabled: true` IM LẶNG không làm gì: không bean, không
+	// servlet, `/admin/togglz` trả 404 và không log nào nói vì sao. Cùng chế độ
+	// hỏng với `spring-session-core` ở Task 9 — "thêm property" không phải là
+	// "bật tính năng" khi auto-config nằm sau một `@ConditionalOnClass`.
+	implementation "org.togglz:togglz-console:${togglzVersion}"
 	// KHÔNG ghim version: BOM của Boot quản. Kéo theo woodstox-core + stax2-api.
 	implementation 'tools.jackson.dataformat:jackson-dataformat-xml'
 

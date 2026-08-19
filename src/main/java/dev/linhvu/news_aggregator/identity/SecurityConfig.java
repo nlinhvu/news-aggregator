@@ -16,6 +16,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.authority.mapping.GrantedAuthoritiesMapper;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -51,6 +53,7 @@ class SecurityConfig {
 
 	@Bean
 	SecurityFilterChain filterChain(HttpSecurity http,
+			GrantedAuthoritiesMapper authoritiesMapper,
 			@Value("${news.identity.public-base-url}") String publicBaseUrl,
 			@Value("${news.identity.secure-cookies}") boolean secureCookies)
 			throws Exception {
@@ -80,6 +83,19 @@ class SecurityConfig {
 					.requestMatchers("/admin/**").hasAuthority("ROLE_ops")
 					.anyRequest().authenticated())
 			.oauth2Login(oauth -> oauth
+					// `hasAuthority("ROLE_ops")` ngay bên trên KHÔNG BAO GIỜ đúng
+					// nếu thiếu BEAN `OpsAuthoritiesMapper` — Spring Security dựng
+					// authority từ scope và không đọc claim tuỳ biến nào.
+					//
+					// Dòng này KHÔNG phải thứ bật cơ chế đó: `OAuth2LoginConfigurer`
+					// tự dò một bean `GrantedAuthoritiesMapper` trong context, nên
+					// xoá riêng nó đi thì mọi thứ vẫn chạy — ĐÃ ĐO bằng mutation.
+					// Nó tồn tại để đổi một chế độ hỏng IM LẶNG thành một chế độ
+					// hỏng ỒN ÀO: tham số `authoritiesMapper` của `filterChain` là
+					// bắt buộc, nên bean biến mất ⇒ context KHÔNG DỰNG ĐƯỢC ⇒ mọi
+					// `@SpringBootTest` đỏ, thay vì người vận hành lặng lẽ nhận 403
+					// và đi tìm ở Cognito.
+					.userInfoEndpoint(u -> u.userAuthoritiesMapper(authoritiesMapper))
 					// Hai baseUri này là lý do đường callback nằm trong /api/*.
 					// Mặc định của Spring Security là /oauth2/authorization/* và
 					// /login/oauth2/code/*, cả hai nằm ngoài /api/* nên CloudFront
@@ -98,10 +114,10 @@ class SecurityConfig {
 					// nhập ĐÃ THÀNH CÔNG ở phía server.
 					.defaultSuccessUrl(publicBaseUrl + "/", true)
 					.failureUrl(publicBaseUrl + "/?login=failed"))
-			// 401 chứ KHÔNG 302 cho mọi request chưa xác thực. SPA gọi bằng
-			// `fetch`; một redirect sang HTML là thứ nó không xử lý được.
+			// HAI câu trả lời cho "chưa xác thực", chọn theo NGƯỜI GỌI chứ không
+			// theo sở thích — xem `EntryPointTheoNguoiGoi`.
 			.exceptionHandling(e -> e.authenticationEntryPoint(
-					new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+					new EntryPointTheoNguoiGoi(publicBaseUrl)))
 			// TẮT request cache, và đây là một quyết định về CHI PHÍ.
 			//
 			// `ExceptionTranslationFilter` gọi `HttpSessionRequestCache.saveRequest()`
@@ -275,6 +291,61 @@ class SecurityConfig {
 			catch (RuntimeException e) {
 				return false;
 			}
+		}
+	}
+
+	/**
+	 * `/admin/**` → CHUYỂN HƯỚNG sang đăng nhập; mọi đường khác → `401`.
+	 *
+	 * <p>Không phải hai sở thích, mà là hai NGƯỜI GỌI khác nhau. `/api/**` được
+	 * SPA gọi bằng `fetch`, và với `fetch` thì một 302 sang HTML là thứ không xử
+	 * lý được: nó hoặc thành lỗi CORS khó hiểu, hoặc thành một trang đăng nhập
+	 * nhét vào chỗ đang chờ JSON. `/admin/**` thì ngược lại — người vận hành GÕ
+	 * ĐỊA CHỈ vào trình duyệt, và 401 thân rỗng ở đó là một TRANG TRẮNG, không
+	 * một chữ nào nói phải làm gì tiếp.
+	 *
+	 * <p>Đã đo trên dev 2026-08-19, trước khi có lớp này:
+	 * <pre>
+	 *   curl -sD - https://news.na-dev.linhvu.dev/admin/togglz
+	 *   HTTP/2 401
+	 *   content-length: 0
+	 * </pre>
+	 *
+	 * <p><b>Tự viết chứ không dùng `defaultAuthenticationEntryPointFor`.</b> Cơ
+	 * chế đó của `ExceptionHandlingConfigurer` bị VÔ HIỆU hoàn toàn khi
+	 * `authenticationEntryPoint(...)` được gọi — `getAuthenticationEntryPoint`
+	 * trả thẳng entry point đã set và không bao giờ đọc tới bảng mapping. Một
+	 * cấu hình dùng cả hai trông rất hợp lý và im lặng bỏ qua một nửa.
+	 *
+	 * <p><b>URL TUYỆT ĐỐI</b>, dựng từ `public-base-url` — cùng lý do với
+	 * `AuthController.login()`: sau CloudFront, host của request là Function URL
+	 * (`AuthType=AWS_IAM`), nên `sendRedirect` với đường dẫn tương đối đẩy trình
+	 * duyệt tới chỗ nó nhận 403.
+	 */
+	private static final class EntryPointTheoNguoiGoi implements AuthenticationEntryPoint {
+
+		private static final RequestMatcher CONSOLE =
+				PathPatternRequestMatcher.pathPattern("/admin/**");
+
+		private final AuthenticationEntryPoint choApi =
+				new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED);
+
+		private final String loginUrl;
+
+		private EntryPointTheoNguoiGoi(String publicBaseUrl) {
+			this.loginUrl = publicBaseUrl + "/api/auth/login/"
+					+ SsmClientRegistrationRepository.REGISTRATION_ID;
+		}
+
+		@Override
+		public void commence(HttpServletRequest request, HttpServletResponse response,
+				org.springframework.security.core.AuthenticationException failed)
+				throws IOException, ServletException {
+			if (CONSOLE.matches(request)) {
+				response.sendRedirect(loginUrl);
+				return;
+			}
+			choApi.commence(request, response, failed);
 		}
 	}
 

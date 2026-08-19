@@ -150,4 +150,33 @@ news:
 togglz:
   feature-enums: dev.linhvu.news_aggregator.platform.NewsFeature
   console:
-    enabled: false   # Phase 4 mới bật, và phải bảo vệ trước
+    enabled: true
+    # Nằm dưới `/admin/*` để CloudFront route sang function `admin` (origin thứ
+    # ba, Task 26) và để `SecurityConfig` khoá nó bằng MỘT dòng
+    # `requestMatchers("/admin/**").hasAuthority("ROLE_ops")`.
+    path: /admin/togglz
+    # Phân quyền là việc của Spring Security, KHÔNG phải của Togglz. Để `true`
+    # thì `TogglzConsoleServlet` tự kiểm `UserProvider.isFeatureAdmin()`, mà
+    # `UserProvider` của ta là `NoOpUserProvider` (xem `TogglzConfig`) nên nó
+    # sẽ chặn SẠCH mọi người — kể cả nhóm `ops`. Hai cổng chồng nhau, cổng thứ
+    # hai luôn đóng.
+    secured: false
+    # `use-management-port` mặc định `true` trong `TogglzProperties`, nhưng
+    # `@ConditionalOnProperty(havingValue="false", matchIfMissing=true)` khiến
+    # console vẫn đăng ký trên cổng ứng dụng khi property VẮNG MẶT. Khai tường
+    # minh `false` để hành vi không phụ thuộc vào sự khác nhau giữa "giá trị
+    # mặc định của bean" và "matchIfMissing của condition".
+    use-management-port: false
+    # CSRF do Spring Security lo, KHÔNG do Togglz — và đây là quyết định về
+    # KIẾN TRÚC, không phải về sở thích.
+    #
+    # `TogglzCSRFTokenCache` là một `PassiveExpiringMap` STATIC trong JVM với
+    # TTL 10 phút. Trên Lambda, token phát ra ở execution environment này không
+    # có trong cache của environment kia, nên lượt POST lật flag chết bằng một
+    # trang lỗi 401 mỗi khi nó rơi vào instance khác — một lỗi ngắt quãng,
+    # không tái hiện được, và không log nào của ta nói tới.
+    #
+    # Thay vào đó `SpringCsrfTokenProvider` đưa token của Spring Security vào
+    # đúng form ấy: token nằm trong cookie `XSRF-TOKEN` nên nó KHÔNG phụ thuộc
+    # instance, và nó là cùng một cơ chế mà `/api/**` đã dùng.
+    validate-csrf-token: false

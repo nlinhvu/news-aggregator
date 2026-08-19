@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator.infra;
 import java.util.List;
 
 import software.amazon.awscdk.CfnOutput;
+import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
@@ -14,6 +15,7 @@ import software.amazon.awscdk.services.cloudfront.Distribution;
 import software.amazon.awscdk.services.cloudfront.OriginRequestPolicy;
 import software.amazon.awscdk.services.cloudfront.ViewerProtocolPolicy;
 import software.amazon.awscdk.services.cloudfront.origins.FunctionUrlOrigin;
+import software.amazon.awscdk.services.cloudfront.origins.FunctionUrlOriginWithOACProps;
 import software.amazon.awscdk.services.cloudfront.origins.S3BucketOrigin;
 import software.amazon.awscdk.services.lambda.CfnPermission;
 import software.amazon.awscdk.services.lambda.FunctionUrl;
@@ -92,7 +94,26 @@ public class EdgeStack extends Stack {
 						// hiện là bật" — người vận hành sẽ lật lại lần nữa và tin rằng
 						// console hỏng.
 						"/admin/*", BehaviorOptions.builder()
-								.origin(FunctionUrlOrigin.withOriginAccessControl(adminUrl))
+								.origin(FunctionUrlOrigin.withOriginAccessControl(adminUrl,
+										FunctionUrlOriginWithOACProps.builder()
+												// 60s thay vì 30s mặc định, CHỈ ở đây.
+												//
+												// Cold start của `admin` đo được 24–27s
+												// trên dev (Init Duration chạm trần 10s
+												// rồi Lambda chạy lại init trong invoke),
+												// và function này KHÔNG có traffic nên nó
+												// luôn nguội. Với 30s, lần vào console
+												// đầu tiên của người vận hành trả 504 —
+												// đã gặp hai lần trong lượt đo
+												// 2026-08-19. Đúng lúc sự cố thì một
+												// trang lỗi CloudFront là thứ tệ nhất có
+												// thể hiện ra.
+												//
+												// KHÔNG nới cho `/api/*`: ở đó một request
+												// 25s là TRIỆU CHỨNG, và che nó bằng
+												// timeout dài hơn là bịt mất tín hiệu.
+												.readTimeout(Duration.seconds(60))
+												.build()))
 								.viewerProtocolPolicy(ViewerProtocolPolicy.REDIRECT_TO_HTTPS)
 								.cachePolicy(CachePolicy.CACHING_DISABLED)
 								.originRequestPolicy(

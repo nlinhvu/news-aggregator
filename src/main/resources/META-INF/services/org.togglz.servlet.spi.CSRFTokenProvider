@@ -1,0 +1,5 @@
+# ServiceLoader gộp mọi file cùng tên trên classpath, nên provider của chính
+# togglz-console (`togglz_csrf`) vẫn còn và form mang CẢ HAI hidden field.
+# Xoá dòng dưới đi thì `SpringCsrfTokenProvider` im lặng không bao giờ chạy và
+# mọi lượt lật flag trả 403 — không lỗi nào trỏ về đây.
+dev.linhvu.news_aggregator.identity.SpringCsrfTokenProvider

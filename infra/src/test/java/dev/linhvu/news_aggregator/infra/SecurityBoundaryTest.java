@@ -2233,6 +2233,32 @@ class SecurityBoundaryTest {
 		assertTrue(String.valueOf(admin.get("TargetOriginId")).contains("DistributionOrigin3"),
 				"`/admin/*` là origin MỚI nên nó lấy slot thứ 3, thực tế: "
 						+ admin.get("TargetOriginId"));
+
+		// Origin timeout NỚI cho `/admin/*` và CHỈ cho nó. Cold start của `admin`
+		// đo được 24–27s trên dev và function này không có traffic nên luôn nguội;
+		// với 30s mặc định, lần vào console đầu tiên trả 504 (đã gặp hai lần).
+		//
+		// Vế thứ hai mới là vế đáng canh: `/api/*` KHÔNG được nới theo. Ở đó một
+		// request 25s là TRIỆU CHỨNG, và che nó bằng timeout dài hơn là bịt mất
+		// tín hiệu — một thay đổi không ai thấy cho tới lần sự cố sau.
+		@SuppressWarnings("unchecked")
+		Map<String, Object> adminOrigin = origins.stream()
+				.filter(o -> String.valueOf(o.get("Id"))
+						.equals(String.valueOf(admin.get("TargetOriginId"))))
+				.findFirst().orElseThrow();
+		@SuppressWarnings("unchecked")
+		Map<String, Object> apiOrigin = origins.stream()
+				.filter(o -> String.valueOf(o.get("Id"))
+						.equals(String.valueOf(api.get("TargetOriginId"))))
+				.findFirst().orElseThrow();
+
+		assertEquals(60, ((Map<String, Object>) adminOrigin.get("CustomOriginConfig"))
+						.get("OriginReadTimeout"),
+				"`/admin/*` phải chờ được cold start ~25s, thực tế: " + adminOrigin);
+		assertFalse(((Map<String, Object>) apiOrigin.get("CustomOriginConfig"))
+						.containsKey("OriginReadTimeout"),
+				"`/api/*` giữ nguyên 30s mặc định — request 25s ở đó là triệu chứng, "
+						+ "thực tế: " + apiOrigin);
 	}
 
 	/**
