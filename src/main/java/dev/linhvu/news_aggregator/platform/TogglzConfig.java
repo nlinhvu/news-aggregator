@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.togglz.core.Feature;
 import org.togglz.core.repository.FeatureState;
 import org.togglz.core.repository.StateRepository;
@@ -115,13 +117,57 @@ public class TogglzConfig {
 		}
 
 		/**
-		 * Đường GHI duy nhất là Togglz console, đang tắt; execution role của Lambda
-		 * cũng không có `dynamodb:UpdateItem`. Không bọc try/catch ở đây là cố ý:
-		 * một lệnh ghi thất bại phải nổ ra chứ không được im lặng.
+		 * Đường GHI duy nhất trong toàn hệ thống — Togglz console trên function
+		 * `admin`, thứ duy nhất có `dynamodb:UpdateItem` trên bảng này.
+		 *
+		 * <p>Không bọc try/catch là cố ý: một lệnh ghi thất bại phải nổ ra chứ
+		 * không được im lặng. Đọc flag hỏng thì fail-closed; GHI flag hỏng mà im
+		 * lặng thì người vận hành tin rằng mình vừa tắt một thứ vẫn đang bật.
+		 *
+		 * <p><b>Một dòng log cho mỗi lần đổi, và đây là chỗ DUY NHẤT ghi được
+		 * nó.</b> Togglz không phát event nào khi trạng thái đổi, và
+		 * `UpdateItem` của nó không lưu ai đã gọi. Không có dòng này thì câu hỏi
+		 * *"ai tắt `AI_SUMMARIZATION` lúc 3 giờ sáng"* không có chỗ nào trả lời
+		 * được — CloudTrail chỉ thấy execution role của `admin`, tức cùng một
+		 * danh tính cho mọi người vận hành.
+		 *
+		 * <p>Ghi `sub` chứ KHÔNG ghi email — cùng danh sách cấm với token và
+		 * client secret (TDD §14.2), giống hệt `LoginAuditListener`.
+		 *
+		 * <p>Giá trị CŨ đọc trước khi ghi, và lời gọi đó được bọc riêng: một lỗi
+		 * khi đọc để ghi log KHÔNG được làm hỏng lệnh ghi thật. Cái giá là một
+		 * `GetItem` mỗi lần lật flag — vài lần một tháng.
 		 */
 		@Override
 		public void setFeatureState(FeatureState featureState) {
+			String truoc = trangThaiHienTai(featureState.getFeature());
 			delegate().setFeatureState(featureState);
+			log.info("đổi feature flag sub={} flag={} truoc={} sau={}",
+					nguoiGoi(), featureState.getFeature().name(), truoc,
+					featureState.isEnabled() ? "ON" : "OFF");
+		}
+
+		/** `"?"` khi chưa có item hoặc đọc hỏng — log không được cản đường ghi. */
+		private String trangThaiHienTai(Feature feature) {
+			try {
+				FeatureState hienTai = delegate().getFeatureState(feature);
+				return hienTai == null ? "chua-co" : (hienTai.isEnabled() ? "ON" : "OFF");
+			}
+			catch (RuntimeException e) {
+				return "?";
+			}
+		}
+
+		/**
+		 * `SecurityContextHolder` chứ không tham số: Togglz gọi
+		 * `setFeatureState` thẳng từ servlet của nó, không có chỗ nào để truyền
+		 * người gọi vào. Trả `"khong-ro"` khi không có phiên — đường CLI và test
+		 * đi lối đó, và một `NullPointerException` ở đây sẽ làm hỏng đúng lệnh
+		 * ghi mà nó chỉ định mô tả.
+		 */
+		private static String nguoiGoi() {
+			Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+			return auth == null ? "khong-ro" : auth.getName();
 		}
 
 		private StateRepository delegate() {

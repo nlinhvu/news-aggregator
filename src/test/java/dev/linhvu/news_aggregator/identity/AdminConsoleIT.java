@@ -5,12 +5,15 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
 import dev.linhvu.news_aggregator.platform.NewsFeature;
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.togglz.core.context.FeatureContext;
 import org.togglz.core.manager.FeatureManager;
 import org.togglz.core.repository.FeatureState;
@@ -278,6 +281,54 @@ class AdminConsoleIT {
 				.as("dựng từ host của REQUEST thì sau CloudFront nó là Function URL, "
 						+ "và trình duyệt nhận Forbidden")
 				.isEqualTo("http://localhost:8080/admin/togglz/index");
+	}
+
+	/**
+	 * Mỗi lần đổi flag để lại ĐÚNG một dòng log có `sub`, tên flag, giá trị cũ và
+	 * mới — mục Observability của walkthrough slice 5.
+	 *
+	 * <p>Đây là chỗ duy nhất trả lời được *"ai tắt `AI_SUMMARIZATION` lúc 3 giờ
+	 * sáng"*. CloudTrail chỉ thấy execution role của `admin`, tức cùng một danh
+	 * tính cho mọi người vận hành.
+	 *
+	 * <p>Test phải chạy trên luồng THẬT: `SecurityContextHolder` chỉ có principal
+	 * trong thread xử lý request của một phiên đã đăng nhập. Gọi thẳng
+	 * `setFeatureState` trong một unit test sẽ log `sub=khong-ro` và xanh vì lý
+	 * do sai.
+	 */
+	@Test
+	void moi_lan_doi_flag_de_lai_mot_dong_log_co_sub_va_gia_tri_cu_moi() {
+		String cookie = dangNhap();
+		ResponseEntity<String> index = exchange(at("/admin/togglz/index"),
+				HttpMethod.GET, cookie, String.class);
+		String csrf = csrfValue(index.getBody());
+		boolean truoc = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
+
+		ListAppender<ILoggingEvent> logs = new ListAppender<>();
+		ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+				LoggerFactory.getLogger(
+						"dev.linhvu.news_aggregator.platform.TogglzConfig$FailClosedDynamoDbStateRepository");
+		logs.start();
+		logger.addAppender(logs);
+		try {
+			rest.exchange(at("/admin/togglz/edit?f=" + NewsFeature.AI_SUMMARIZATION.name()
+							+ (truoc ? "" : "&enabled=enabled") + "&_csrf=" + csrf),
+					HttpMethod.POST, new HttpEntity<>(cookieHeaders(cookie)), String.class);
+		}
+		finally {
+			logger.detachAppender(logs);
+			logs.stop();
+		}
+
+		assertThat(logs.list).singleElement()
+				.extracting(ILoggingEvent::getFormattedMessage).asString()
+				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
+				.contains("flag=" + NewsFeature.AI_SUMMARIZATION.name())
+				.contains("truoc=" + (truoc ? "ON" : "OFF"))
+				.contains("sau=" + (truoc ? "OFF" : "ON"))
+				// ID token của mock server mang `email: dev@local`, nên vế này đo
+				// trên dữ liệu thật chứ không trên một map tự dựng.
+				.doesNotContain("dev@local");
 	}
 
 	/**
