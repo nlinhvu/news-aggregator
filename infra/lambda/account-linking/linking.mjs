@@ -73,14 +73,31 @@ export async function linkAccount(event, cognito, log = console) {
 		const providerName = request?.providerName;
 		const email = emailOf(request);
 
+		if (!userPoolId || !userName || !providerName) {
+			log.warn('[account-linking] event thiếu trường bắt buộc, bỏ qua');
+			return event;
+		}
+
+		// MỘT dòng cho MỌI lượt federated sign-in, ghi TRƯỚC mọi nhánh thoát.
+		//
+		// Đây là nguồn sự thật DUY NHẤT về "người này vào bằng đường nào", và nó
+		// nằm ở đây vì ID token KHÔNG mang thông tin đó. Đo trên dev 2026-08-20,
+		// ba lượt Google/Facebook/OTP của cùng một user đã liên kết:
+		//
+		//   amr              → không tồn tại ở cả ba
+		//   identities       → [Google, Facebook] ở CẢ BA (nó là attribute của
+		//                      profile, không phải của lượt đăng nhập)
+		//   cognito:username → cùng một UUID ở cả ba
+		//
+		// `username` ở đây CHÍNH LÀ `sub` trong log của ứng dụng, nên hai log
+		// group nối được với nhau bằng `sub` + mốc thời gian. Lượt đăng nhập
+		// native không gọi hàm này, nên KHÔNG có dòng nào ở đây nghĩa là
+		// `provider=cognito`.
+		log.info('[account-linking] federated sign-in', { providerName, userName });
 		if (!email) {
 			// Tài khoản Facebook đăng ký bằng số điện thoại, hoặc Hide My Email
 			// của Apple — không có khoá để gộp (ADR-0021 §7).
 			log.warn('[account-linking] không có email, bỏ qua', { providerName });
-			return event;
-		}
-		if (!userPoolId || !userName || !providerName) {
-			log.warn('[account-linking] event thiếu trường bắt buộc, bỏ qua');
 			return event;
 		}
 		if (!isFilterSafe(email)) {

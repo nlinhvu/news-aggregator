@@ -67,22 +67,22 @@ class LoginAuditListenerTest {
 	}
 
 	@Test
-	void dang_nhap_bang_email_otp_ghi_provider_cognito() {
+	void tai_khoan_chua_noi_idp_nao_thi_danh_sach_rong() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(
 				token(Map.of("sub", "848814a8-4041-7031-3fff-9de5cdcb5e6c"))));
 
 		assertThat(auditLine())
 				.contains("848814a8-4041-7031-3fff-9de5cdcb5e6c")
-				.contains("provider=cognito");
+				.contains("idpDaLienKet=[]");
 	}
 
 	/**
-	 * `identities` chỉ có ở user liên kết từ IdP ngoài, và tên provider nằm
-	 * TRONG claim đó — suy từ `registrationId` là ra `cognito` cho cả ba đường,
-	 * tức đếm được tổng số lượt đăng nhập mà không biết đường nào.
+	 * Tài khoản mới nối MỘT IdP. Đây là hình dạng mà bản trước xử lý đúng, và nó
+	 * phải tiếp tục đúng — nhưng ý nghĩa đã đổi: danh sách này là "đã nối những
+	 * IdP nào", không phải "lần này vào bằng đường nào".
 	 */
 	@Test
-	void dang_nhap_bang_social_ghi_ten_provider_lay_tu_claim_identities() {
+	void tai_khoan_noi_mot_idp_thi_ghi_ten_idp_do() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
 				"sub", "c4d8f4a8-1234-70e5-afc4-0beffd64149d",
 				"identities", List.of(Map.of(
@@ -91,7 +91,7 @@ class LoginAuditListenerTest {
 						"providerType", "Google",
 						"primary", "true"))))));
 
-		assertThat(auditLine()).contains("provider=Google");
+		assertThat(auditLine()).contains("idpDaLienKet=[Google]");
 	}
 
 	/**
@@ -129,19 +129,17 @@ class LoginAuditListenerTest {
 	}
 
 	/**
-	 * Chế độ hỏng ĐANG CÓ TRÊN DEV, và fixture cũ mù với nó: mọi fixture ở trên
-	 * chỉ có MỘT identity, nên `identities.get(0)` luôn đúng một cách tình cờ.
+	 * Hình dạng ĐANG CÓ TRÊN DEV sau ADR-0021: một profile, nhiều identity.
 	 *
-	 * Sau Task 18B, profile gốc mang HAI identity và thứ tự mảng là thứ tự LIÊN
-	 * KẾT, không phải thứ tự đăng nhập. Đo trên dev 2026-08-20: lượt Facebook ghi
-	 * `provider=Google`, và lượt email OTP cũng vậy.
+	 * Mọi fixture khác chỉ có MỘT identity, nên `identities.get(0)` của bản trước
+	 * luôn đúng một cách tình cờ và test xanh vĩnh viễn. Đo trên dev 2026-08-20:
+	 * lượt Facebook VÀ lượt email OTP đều bị ghi thành `provider=Google`.
 	 *
-	 * Test này ĐỎ cho tới khi `providerOf(...)` được sửa. Nó ở đây để cái sai
-	 * không im lặng nữa; bản đúng chờ kết quả đo claim thật.
+	 * Vế phủ định là vế quan trọng: dòng log KHÔNG được khẳng định một provider
+	 * duy nhất, vì ID token không biết lượt này đi đường nào.
 	 */
 	@Test
-	@org.junit.jupiter.api.Disabled("đỏ có chủ ý — chờ số đo claim, xem plan Task 18B Step 5")
-	void user_lien_ket_hai_identity_phai_ghi_dung_provider_cua_luot_nay() {
+	void tai_khoan_noi_hai_idp_thi_ghi_ca_hai_va_khong_khang_dinh_duong_nao() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
 				"sub", "44f894c8-90a1-70d4-db21-e4b74f44aff3",
 				"identities", List.of(
@@ -154,7 +152,9 @@ class LoginAuditListenerTest {
 								"providerType", "Facebook",
 								"primary", "false"))))));
 
-		assertThat(auditLine()).contains("provider=Facebook");
+		assertThat(auditLine())
+				.contains("idpDaLienKet=[Google, Facebook]")
+				.doesNotContain("provider=");
 	}
 
 	private static OAuth2AuthenticationToken token(Map<String, Object> claims) {

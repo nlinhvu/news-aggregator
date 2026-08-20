@@ -81,6 +81,46 @@ function federatedUser(providerName, userId) {
 	};
 }
 
+test('MỌI nhánh thoát đều ghi đúng MỘT dòng federated sign-in', async () => {
+	// Từ 2026-08-20 đây là nguồn sự thật DUY NHẤT về provider của một lượt đăng
+	// nhập: ID token không mang thông tin đó (`amr` không tồn tại, `identities`
+	// giống hệt nhau ở cả ba đường). Sót một nhánh là lượt đăng nhập đó biến mất
+	// khỏi audit, và không có gì đỏ ở đâu cả.
+	const nhanh = {
+		'liên kết mới': { users: [] },
+		'đã liên kết rồi': { users: [{ ...nativeUser, Attributes: [
+			{ Name: 'identities', Value: JSON.stringify([
+				{ providerName: 'Google', userId: '104556631362906539049' }]) }] }] },
+		'danh tính đã có profile riêng': {
+			users: [federatedUser('Google', '104556631362906539049')] },
+		'lỗi SDK': { throwOn: 'listUsers' },
+	};
+
+	for (const [ten, cauHinh] of Object.entries(nhanh)) {
+		const log = recordingLog();
+		await linkAccount(googleSignIn(), fakeCognito(cauHinh), log);
+
+		const dong = log.infos.filter(([msg]) => msg.includes('federated sign-in'));
+		assert.equal(dong.length, 1, `nhánh "${ten}" phải ghi đúng một dòng`);
+		assert.deepEqual(dong[0][1], {
+			providerName: 'Google', userName: '104556631362906539049' });
+	}
+});
+
+test('event thiếu providerName thì KHÔNG ghi dòng federated sign-in', async () => {
+	// Nhánh duy nhất được phép im lặng: chưa biết provider thì ghi ra cũng vô
+	// nghĩa, và một dòng `providerName: undefined` trong audit còn tệ hơn không
+	// có dòng nào.
+	const event = googleSignIn();
+	delete event.request.providerName;
+	const log = recordingLog();
+
+	await linkAccount(event, fakeCognito(), log);
+
+	assert.deepEqual(log.infos.filter(([m]) => m.includes('federated sign-in')), []);
+	assert.equal(log.warns.length, 1);
+});
+
 test('chọn user NATIVE làm gốc khi ListUsers trả cả hai loại', async () => {
 	// Chọn nhầm profile federated làm gốc là vẫn tách tài khoản, chỉ khác chỗ
 	// tách. Thứ tự mảng cố ý để federated ĐỨNG TRƯỚC — `find` lấy phần tử đầu

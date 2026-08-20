@@ -14,14 +14,42 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Component;
 
 /**
- * Một dòng log cho mỗi lượt đăng nhập thành công — `sub` và provider, không gì
- * khác (TDD §14.2).
+ * Một dòng log cho mỗi lượt đăng nhập thành công — `sub`, và danh sách IdP đã
+ * liên kết vào tài khoản đó (TDD §14.2).
  *
- * Đây là chỗ DUY NHẤT biết được đường nào đang được dùng. Cognito chỉ ghi log
- * hoạt động đăng nhập ở tier trả tiền, bảng `sessions` khoá theo `sub` và không
- * lưu provider, còn `registrationId` phía Spring là `cognito` cho cả ba đường vì
- * ứng dụng chỉ nói chuyện với user pool. Tên provider thật nằm trong claim
- * `identities` của ID token, và chỉ user liên kết từ IdP ngoài mới có claim đó.
+ * <h2>Vì sao KHÔNG có `provider` của lượt đăng nhập này</h2>
+ *
+ * Vì ID token không mang thông tin đó. Đo trên dev 2026-08-20 với ba lượt đăng
+ * nhập Google, Facebook và email OTP của CÙNG một tài khoản đã liên kết:
+ *
+ * <pre>
+ *   amr               → không tồn tại ở cả ba lượt
+ *   identities        → [Google, Facebook] ở CẢ BA
+ *   cognito:username  → cùng một UUID ở cả ba
+ *   khác biệt duy nhất → `event_id` chỉ có ở lượt native
+ * </pre>
+ *
+ * Lý do có thật: liên kết tài khoản làm cả ba đường cùng đăng nhập vào MỘT
+ * profile, và token mô tả PROFILE chứ không mô tả lượt đăng nhập. Claim
+ * `identities` là attribute của profile — nó trả lời *"tài khoản này đã nối với
+ * những IdP nào"*, không phải *"lần này vào bằng đường nào"*.
+ *
+ * Bản trước đọc `identities.get(0)` và gọi nó là provider. Đúng một cách tình cờ
+ * khi mỗi profile có đúng một identity; từ khi liên kết tài khoản được bật
+ * (ADR-0021), profile gốc mang nhiều identity xếp theo thứ tự LIÊN KẾT, nên cả
+ * ba đường đều bị ghi thành `provider=Google`.
+ *
+ * <h2>Provider của một lượt đăng nhập đọc ở đâu</h2>
+ *
+ * Ở log của hàm `account-linking` (log group `Dev-IdentityStack-AccountLinking…`):
+ * nó chạy đồng bộ trong MỌI lượt federated sign-in và biết chắc `providerName`.
+ * `userName` nó ghi CHÍNH LÀ `sub` ở đây, nên hai log group nối được bằng
+ * `sub` + mốc thời gian:
+ *
+ * <pre>
+ *   có dòng của account-linking  → provider là giá trị trong dòng đó
+ *   KHÔNG có dòng nào            → đăng nhập native (email OTP hoặc passkey)
+ * </pre>
  *
  * Đếm bằng CloudWatch Logs Insights; metric `identity.login.total{provider}` của
  * TDD §14.2 phải đợi một `MeterRegistry`, mà bean đó đi kèm actuator — thứ TDD
@@ -32,9 +60,6 @@ import org.springframework.stereotype.Component;
 class LoginAuditListener {
 
 	private static final Logger log = LoggerFactory.getLogger(LoginAuditListener.class);
-
-	/** Người dùng của chính user pool: đăng nhập bằng email OTP hoặc passkey. */
-	private static final String NATIVE_PROVIDER = "cognito";
 
 	/**
 	 * `AuthenticationSuccessEvent` bắn cho MỌI kiểu xác thực, nên `instanceof`
@@ -48,49 +73,25 @@ class LoginAuditListener {
 		}
 		// KHÔNG log email: nó nằm cùng danh sách cấm với token và client secret
 		// (TDD §14.2), và module này cố ý không sở hữu email.
-		log.info("đăng nhập thành công sub={} provider={}", user.getSubject(), providerOf(user));
-		doClaimTam(user);
+		log.info("đăng nhập thành công sub={} idpDaLienKet={}",
+				user.getSubject(), idpDaLienKet(user));
 	}
 
 	/**
-	 * ⚠️ TẠM THỜI — XOÁ SAU KHI ĐO XONG.
+	 * Tên các IdP đã nối vào tài khoản này, rỗng với tài khoản chưa nối IdP nào.
 	 *
-	 * `providerOf(...)` báo sai provider từ khi Task 18B bật liên kết tài khoản:
-	 * đo trên dev 2026-08-20, cả ba đường (Google, Facebook, email OTP) đều ra
-	 * `provider=Google`. Nguyên nhân: claim `identities` chỉ là attribute của
-	 * profile, nên nó GIỐNG HỆT NHAU bất kể đăng nhập đường nào.
-	 *
-	 * Câu hỏi cần đo, và không tài liệu nào của AWS trả lời: ID token của user đã
-	 * liên kết có claim nào chỉ ra provider của LƯỢT NÀY không. Payload mẫu trong
-	 * developer guide không có `amr`, nhưng payload mẫu không phải danh sách đầy
-	 * đủ.
-	 *
-	 * Chỉ ghi TÊN claim, `amr`, và `providerName` — không ghi giá trị claim nào
-	 * khác. `email` và token nằm trong danh sách cấm (TDD §14.2), và `userId` bên
-	 * provider cũng không cần cho phép đo này.
+	 * Tên biến và tên field trong log CỐ Ý dài: `provider` là cái tên đã làm bản
+	 * trước sai suốt, vì nó đọc như *"đường đăng nhập lần này"*.
 	 */
-	private static void doClaimTam(OidcUser user) {
-		List<String> providers = user.getClaim("identities") instanceof List<?> identities
-				? identities.stream()
-						.filter(Map.class::isInstance)
-						.map(identity -> String.valueOf(((Map<?, ?>) identity).get("providerName")))
-						.toList()
-				: List.of();
-
-		log.info("ĐO-CLAIM-TAM sub={} tenClaim={} amr={} providerNames={}",
-				user.getSubject(),
-				user.getClaims().keySet().stream().sorted().toList(),
-				user.getClaim("amr"),
-				providers);
-	}
-
-	private static String providerOf(OidcUser user) {
-		if (user.getClaim("identities") instanceof List<?> identities
-				&& !identities.isEmpty()
-				&& identities.get(0) instanceof Map<?, ?> primary
-				&& primary.get("providerName") instanceof String providerName) {
-			return providerName;
+	private static List<String> idpDaLienKet(OidcUser user) {
+		if (!(user.getClaim("identities") instanceof List<?> identities)) {
+			return List.of();
 		}
-		return NATIVE_PROVIDER;
+		return identities.stream()
+				.filter(Map.class::isInstance)
+				.map(identity -> ((Map<?, ?>) identity).get("providerName"))
+				.filter(String.class::isInstance)
+				.map(String.class::cast)
+				.toList();
 	}
 }

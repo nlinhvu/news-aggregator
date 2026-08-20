@@ -260,7 +260,10 @@ class LoginFlowIT {
 		assertThat(dong).filteredOn(line -> line.startsWith("đăng nhập thành công"))
 				.singleElement().asString()
 				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
-				.contains("provider=cognito");
+				// User của mock server chưa nối IdP nào. Provider của LƯỢT NÀY
+				// không đọc được từ token — nó nằm ở log của hàm account-linking,
+				// và hàm đó không chạy cho đăng nhập native.
+				.contains("idpDaLienKet=[]");
 
 		// MỌI dòng, không chỉ dòng audit. ID token của mock server mang
 		// `email: dev@local`, nên vế này đo trên dữ liệu thật chứ không trên một
