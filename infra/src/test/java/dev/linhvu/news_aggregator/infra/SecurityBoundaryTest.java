@@ -2742,6 +2742,104 @@ class SecurityBoundaryTest {
 	}
 
 	/**
+	 * Trigger liên kết tài khoản phải ĐƯỢC NỐI vào pool, và nối bằng đúng
+	 * `LambdaVersion`.
+	 *
+	 * `V1_0` là giá trị hợp lệ DUY NHẤT của trigger này (API reference:
+	 * *"You must use a LambdaVersion of V1_0 with an inbound federation
+	 * function"*). Sai nó thì synth vẫn xanh — property chỉ là chuỗi — và lỗi rơi
+	 * ở DEPLOY.
+	 *
+	 * `LambdaArn` được ghim vào ĐÚNG function chứ không chỉ "có mặt": nối nhầm
+	 * sang function khác cũng deploy sạch, và triệu chứng ở tầng người dùng là
+	 * mỗi lượt đăng nhập social lại đẻ thêm một tài khoản — không lỗi ở đâu cả.
+	 */
+	@Test
+	@SuppressWarnings("unchecked")
+	void inbound_federation_trigger_noi_vao_user_pool() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
+				Map.of("LambdaConfig", Match.objectLike(
+						Map.of("InboundFederation", Match.objectLike(
+								Map.of("LambdaVersion", "V1_0")))))));
+
+		Map<String, Object> pool = template.findResources("AWS::Cognito::UserPool")
+				.values().iterator().next();
+		Map<String, Object> props = (Map<String, Object>) pool.get("Properties");
+		Map<String, Object> lambdaConfig =
+				(Map<String, Object>) props.get("LambdaConfig");
+		Map<String, Object> inbound =
+				(Map<String, Object>) lambdaConfig.get("InboundFederation");
+		String arn = String.valueOf(inbound.get("LambdaArn"));
+
+		assertTrue(arn.contains("AccountLinking"),
+				"`LambdaArn` phải trỏ vào function liên kết tài khoản, thực tế: " + arn);
+	}
+
+	/**
+	 * Cognito phải ĐƯỢC PHÉP gọi hàm, và chỉ từ pool này.
+	 *
+	 * Thiếu `AWS::Lambda::Permission` thì Cognito không gọi được, và người dùng
+	 * KHÔNG thấy lỗi gì — họ chỉ lặng lẽ có thêm một tài khoản nữa. Đây là chế độ
+	 * hỏng tệ nhất của cả task: nó trông y hệt lúc chưa làm gì.
+	 *
+	 * Thiếu `SourceArn` thì BẤT KỲ user pool nào trong account cũng gọi được hàm
+	 * — mà hàm này có quyền `AdminLinkProviderForUser`, tức quyền cho một danh
+	 * tính ngoài đăng nhập thành một user có sẵn.
+	 */
+	@Test
+	void cognito_duoc_phep_goi_ham_va_chi_tu_pool_nay() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		template.resourceCountIs("AWS::Lambda::Permission", 1);
+		template.hasResourceProperties("AWS::Lambda::Permission", Match.objectLike(Map.of(
+				"Action", "lambda:InvokeFunction",
+				"Principal", "cognito-idp.amazonaws.com",
+				"SourceArn", Match.anyValue())));
+	}
+
+	/**
+	 * Hàm liên kết được ĐÚNG BA quyền `cognito-idp`, và không quyền nào trỏ vào
+	 * `*`.
+	 *
+	 * `cognito-idp:*` là đường tắt hấp dẫn ở đây vì handler gọi ba API khác nhau
+	 * và tên chúng dài. Nó cũng cấp luôn `AdminSetUserPassword`, `AdminDeleteUser`
+	 * và `AdminUpdateUserAttributes` cho một hàm chạy ĐỒNG BỘ trong đường đăng
+	 * nhập — tức mọi lượt đăng nhập social đều đi qua một hàm có quyền xoá user.
+	 *
+	 * Tập đóng chứ không phải `arrayWith`: thêm một action thứ tư phải làm test
+	 * đỏ, kèm tên action đó trong thông báo, chứ không im lặng đi qua.
+	 */
+	@Test
+	void ham_lien_ket_chi_duoc_ba_quyen_va_chi_tren_pool_nay() {
+		Template template = identityStack(EnvConfig.DEV);
+
+		Set<String> cognitoActions = new java.util.TreeSet<>();
+		for (Map<String, Object> policy
+				: template.findResources("AWS::IAM::Policy").values()) {
+			for (Map<String, Object> statement : statementsOf(policy)) {
+				List<String> actions = actionsOf(statement).stream()
+						.filter(a -> a.startsWith("cognito-idp:"))
+						.toList();
+				if (actions.isEmpty()) {
+					continue;
+				}
+				cognitoActions.addAll(actions);
+				assertFalse(resourcesOf(statement).contains("*"),
+						"quyền cognito-idp không bao giờ được trỏ vào `*` —"
+								+ " statement: " + statement);
+			}
+		}
+
+		assertEquals(Set.of(
+				"cognito-idp:AdminCreateUser",
+				"cognito-idp:AdminLinkProviderForUser",
+				"cognito-idp:ListUsers"), cognitoActions,
+				"đúng ba action của ADR-0021 §3, không hơn");
+	}
+
+	/**
 	 * Lấy statement của role thuộc về một function, tìm theo logical-id prefix.
 	 * Tìm theo prefix chứ không theo tên role: role do CDK sinh tên, còn logical
 	 * id thì ta đặt và test phải ghim vào thứ ta kiểm soát.

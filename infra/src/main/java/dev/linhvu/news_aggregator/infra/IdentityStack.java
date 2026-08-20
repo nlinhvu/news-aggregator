@@ -7,6 +7,7 @@ import java.util.List;
 import software.amazon.awscdk.CfnDynamicReference;
 import software.amazon.awscdk.CfnDynamicReferenceService;
 import software.amazon.awscdk.CfnOutput;
+import software.amazon.awscdk.Duration;
 import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.SecretValue;
 import software.amazon.awscdk.Stack;
@@ -15,6 +16,7 @@ import software.amazon.awscdk.services.cognito.AllowedFirstAuthFactors;
 import software.amazon.awscdk.services.cognito.AttributeMapping;
 import software.amazon.awscdk.services.cognito.AuthFlow;
 import software.amazon.awscdk.services.cognito.CfnManagedLoginBranding;
+import software.amazon.awscdk.services.cognito.CfnUserPool;
 import software.amazon.awscdk.services.cognito.CfnUserPoolGroup;
 import software.amazon.awscdk.services.cognito.CognitoDomainOptions;
 import software.amazon.awscdk.services.cognito.FeaturePlan;
@@ -36,6 +38,14 @@ import software.amazon.awscdk.services.cognito.UserPoolDomain;
 import software.amazon.awscdk.services.cognito.UserPoolDomainOptions;
 import software.amazon.awscdk.services.cognito.UserPoolIdentityProviderFacebook;
 import software.amazon.awscdk.services.cognito.UserPoolIdentityProviderGoogle;
+import software.amazon.awscdk.services.iam.Policy;
+import software.amazon.awscdk.services.iam.PolicyStatement;
+import software.amazon.awscdk.services.iam.ServicePrincipal;
+import software.amazon.awscdk.services.lambda.Code;
+import software.amazon.awscdk.services.lambda.Function;
+import software.amazon.awscdk.services.lambda.Permission;
+import software.amazon.awscdk.services.lambda.Runtime;
+import software.amazon.awscdk.services.s3.assets.AssetOptions;
 import software.constructs.Construct;
 
 /**
@@ -262,6 +272,111 @@ public class IdentityStack extends Stack {
 						.email(ProviderAttribute.GOOGLE_EMAIL)
 						.build())
 				.build();
+
+		// ---------- liên kết tài khoản: một người = một `sub` ----------
+		//
+		// Cognito KHÔNG BAO GIỜ tự gộp user theo email. Nó chỉ tìm profile đã được
+		// liên kết TƯỜNG MINH với danh tính đang đăng nhập; không thấy thì tạo
+		// profile mới. Ràng buộc unique của `UsernameAttributes` chỉ áp cho đăng
+		// ký native — user liên kết từ IdP ngoài có username `Provider_userId` nên
+		// không chạm vào ràng buộc đó.
+		//
+		// Đã ĐO trên dev 2026-08-18: cùng một email, Google rồi Facebook ra HAI
+		// user, HAI `sub`; native + Google cũng tách y hệt. Hệ quả tệ hơn dữ liệu
+		// tách đôi là một ngõ cụt CÂM — người vào bằng social rồi gõ chính email
+		// đó để nhận OTP sẽ không bao giờ nhận được mã, và màn hình không báo gì.
+		// Quyết định và các phương án bị loại: ADR-0021.
+		//
+		// HÀM NODE RIÊNG, không dùng lại image Spring của `web`, và con số quyết
+		// định chuyện đó là cold start: image Spring ~25,5 giây (đo trên dev
+		// 2026-08-18) so với ngân sách 5 giây mà Cognito cho trigger — không đổi
+		// được. Đây là ngoại lệ đầu tiên của ADR-0020 "một image, bốn function",
+		// và ranh giới của nó là: chỉ cho code nằm ĐỒNG BỘ trong đường đăng nhập.
+		LambdaRole accountLinkingRole = LambdaRole.create(this, "AccountLinking", cfg);
+
+		// ĐÚNG BA action, và `Resource` là ARN của CHÍNH pool này.
+		// `cognito-idp:*` cấp luôn `AdminSetUserPassword` và `AdminDeleteUser` cho
+		// một hàm chạy ở mọi lượt đăng nhập social — xem `SecurityBoundaryTest`.
+		//
+		// `Policy` RIÊNG chứ không phải `role.addToPolicy(...)`, và đây là ràng
+		// buộc của CloudFormation chứ không phải khẩu vị. `addToPolicy` ghi vào
+		// DefaultPolicy — con của Role — và `Function` phụ thuộc vào cả cây con
+		// của role nó dùng. Ba cạnh đó khép thành vòng, và synth từ chối:
+		//
+		//   Template is undeployable, these resources have a dependency cycle:
+		//   UserPool -> AccountLinkingFunction -> AccountLinkingRoleDefaultPolicy
+		//   -> UserPool
+		//
+		// Policy đứng riêng ở scope của stack thì Function không phụ thuộc vào nó
+		// nữa, và vòng đứt. Cái giá: trong một khoảnh khắc giữa lượt deploy ĐẦU,
+		// function đã tồn tại mà quyền chưa gắn xong. Nếu đúng lúc đó có người
+		// đăng nhập bằng social thì SDK trả AccessDenied, handler nuốt lỗi và trả
+		// `event` — họ vào được, chỉ là lượt đó không liên kết. Đúng chế độ hỏng
+		// mà ADR-0021 §5 đã chọn, không phải một chế độ hỏng mới.
+		Policy.Builder.create(this, "AccountLinkingCognitoPolicy")
+				.roles(List.of(accountLinkingRole.role()))
+				.statements(List.of(PolicyStatement.Builder.create()
+						.actions(List.of(
+								"cognito-idp:AdminCreateUser",
+								"cognito-idp:AdminLinkProviderForUser",
+								"cognito-idp:ListUsers"))
+						.resources(List.of(userPool.getUserPoolArn()))
+						.build()))
+				.build();
+
+		Function accountLinking = Function.Builder.create(this, "AccountLinkingFunction")
+				.runtime(Runtime.NODEJS_24_X)
+				.handler("index.handler")
+				// Đường tương đối tính từ thư mục `infra/` — cả `cdk deploy` trong
+				// CI lẫn `./gradlew test` đều chạy từ đó.
+				//
+				// Loại file test khỏi gói, và lý do lớn hơn "đừng ship test lên
+				// prod": asset hash tính trên NỘI DUNG thư mục, nên không loại thì
+				// sửa một dòng test là đổi hash, là CloudFormation thay code của
+				// một function nằm trong đường đăng nhập — một lượt deploy có rủi
+				// ro thật để đổi một thứ không chạy ở đó.
+				.code(Code.fromAsset("lambda/account-linking", AssetOptions.builder()
+						.exclude(List.of("*.test.mjs"))
+						.build()))
+				// Bằng đúng ngân sách của Cognito. Đặt cao hơn không mua thêm giây
+				// nào (Cognito bỏ cuộc ở giây thứ 5), chỉ làm log khó đọc: hàm chạy
+				// tiếp trong khi người dùng đã nhận lỗi.
+				.timeout(Duration.seconds(5))
+				.role(accountLinkingRole.role())
+				.logGroup(accountLinkingRole.logGroup())
+				.build();
+
+		// Escape hatch trên L2 chứ không phải L1: `UserPoolOperation` KHÔNG có hằng
+		// số cho trigger này (enum dừng ở `USER_MIGRATION`), và `addTrigger` cũng
+		// không diễn đạt được vì property là object `{LambdaArn, LambdaVersion}`
+		// chứ không phải một chuỗi ARN. Dựng lại pool bằng `CfnUserPool` L1 thì mất
+		// toàn bộ `UserPool` L2 đang có — managed login v2, `SignInPolicy`,
+		// `standardAttributes`.
+		//
+		// HAI lời gọi đường-chấm chứ không phải một `Map.of`: thứ tự lặp của
+		// `Map.of` ngẫu nhiên hoá theo từng lần JVM chạy, và synth không tất định
+		// là thứ repo này đã trả giá một lần rồi.
+		//
+		// `V1_0` là giá trị hợp lệ DUY NHẤT của trigger này. Sai nó thì synth vẫn
+		// xanh và deploy mới chết.
+		CfnUserPool cfnUserPool = (CfnUserPool) userPool.getNode().getDefaultChild();
+		cfnUserPool.addPropertyOverride(
+				"LambdaConfig.InboundFederation.LambdaArn",
+				accountLinking.getFunctionArn());
+		cfnUserPool.addPropertyOverride(
+				"LambdaConfig.InboundFederation.LambdaVersion", "V1_0");
+
+		// `addTrigger` của L2 tự dựng resource này; escape hatch thì KHÔNG. Thiếu
+		// nó, Cognito không gọi được hàm và người dùng không thấy lỗi gì — họ chỉ
+		// lặng lẽ có thêm một tài khoản nữa, tức trông y hệt lúc chưa làm gì.
+		//
+		// `sourceArn` thu quyền về đúng pool này; thiếu nó thì bất kỳ pool nào
+		// trong account cũng gọi được một hàm có `AdminLinkProviderForUser`.
+		accountLinking.addPermission("CognitoInvoke", Permission.builder()
+				.principal(new ServicePrincipal("cognito-idp.amazonaws.com"))
+				.action("lambda:InvokeFunction")
+				.sourceArn(userPool.getUserPoolArn())
+				.build());
 
 		this.client = userPool.addClient("WebClient", UserPoolClientOptions.builder()
 				// Confidential client: backend giữ secret, trình duyệt không bao

@@ -26,6 +26,24 @@ application {
     mainClass = 'dev.linhvu.news_aggregator.infra.NewsAggregatorApp'
 }
 
+/**
+ * Test của handler `account-linking`, chạy bằng test runner có sẵn của Node.
+ *
+ * Không `package.json`, không `node_modules`, không bundler: logic nằm ở
+ * `linking.mjs` và KHÔNG import AWS SDK (runtime `nodejs22.x` cấp sẵn SDK, còn
+ * ở đây thì không cần vì test tiêm client giả).
+ *
+ * Treo vào `test` chứ không để thành một task rời: CI gọi `./gradlew test` và
+ * chỉ thế thôi — một task phải nhớ gọi tay là một task sẽ không được gọi.
+ */
+def lambdaTest = tasks.register('lambdaTest', Exec) {
+    group = 'verification'
+    description = 'node --test cho handler account-linking'
+    workingDir = file('lambda/account-linking')
+    commandLine 'node', '--test'
+}
+
 tasks.named('test') {
     useJUnitPlatform()
+    dependsOn lambdaTest
 }

@@ -31,7 +31,12 @@ jobs:
         with:
           distribution: liberica
           java-version: '25'
-      - name: Test infra (T3 — Template assertions + cdk-nag)
+      # Ghim Node 22 vì `./gradlew test` nay chạy cả `node --test` cho handler
+      # account-linking, và handler đó chạy trên runtime `nodejs24.x`. Không ghim
+      # thì test chạy trên bản Node bất kỳ mà runner tình cờ cài sẵn.
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Test infra (T3 — Template assertions + cdk-nag + node --test)
         run: cd infra && ./gradlew test
       - name: Synth cả 3 môi trường, không credential
         run: cd infra && npx --yes aws-cdk@2.1134.0 synth --quiet
