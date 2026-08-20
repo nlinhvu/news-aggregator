@@ -50,12 +50,28 @@ class LoginAuditListenerTest {
 		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
 	}
 
+	/**
+	 * Dòng audit, lọc theo nội dung chứ không phải theo vị trí. Listener có thể
+	 * ghi nhiều dòng cho một lượt đăng nhập, và `singleElement()` biến việc thêm
+	 * một dòng bất kỳ thành ba test đỏ ở chỗ không liên quan.
+	 */
+	private String auditLine() {
+		return logEvents().stream()
+				.filter(line -> line.startsWith("đăng nhập thành công"))
+				.reduce((a, b) -> {
+					throw new AssertionError("phải có ĐÚNG MỘT dòng audit mỗi lượt"
+							+ " đăng nhập, thực tế: " + logEvents());
+				})
+				.orElseThrow(() -> new AssertionError(
+						"không có dòng audit nào, thực tế: " + logEvents()));
+	}
+
 	@Test
 	void dang_nhap_bang_email_otp_ghi_provider_cognito() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(
 				token(Map.of("sub", "848814a8-4041-7031-3fff-9de5cdcb5e6c"))));
 
-		assertThat(logEvents()).singleElement().asString()
+		assertThat(auditLine())
 				.contains("848814a8-4041-7031-3fff-9de5cdcb5e6c")
 				.contains("provider=cognito");
 	}
@@ -75,7 +91,7 @@ class LoginAuditListenerTest {
 						"providerType", "Google",
 						"primary", "true"))))));
 
-		assertThat(logEvents()).singleElement().asString().contains("provider=Google");
+		assertThat(auditLine()).contains("provider=Google");
 	}
 
 	/**
@@ -89,8 +105,13 @@ class LoginAuditListenerTest {
 				"sub", "848814a8-4041-7031-3fff-9de5cdcb5e6c",
 				"email", "nguoi-doc@example.com"))));
 
-		assertThat(logEvents()).singleElement().asString()
-				.doesNotContain("nguoi-doc@example.com").doesNotContain("@");
+		// MỌI dòng, không chỉ dòng audit: listener ghi bao nhiêu dòng cũng được,
+		// nhưng không dòng nào được mang email. Bản trước dùng `singleElement()`
+		// nên nó chỉ canh đúng một dòng — thêm dòng thứ hai là lời hứa này hết
+		// hiệu lực mà không có gì đỏ.
+		assertThat(logEvents()).isNotEmpty()
+				.allSatisfy(line -> assertThat(line)
+						.doesNotContain("nguoi-doc@example.com").doesNotContain("@"));
 	}
 
 	/**
@@ -105,6 +126,35 @@ class LoginAuditListenerTest {
 						AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"))));
 
 		assertThat(logEvents()).isEmpty();
+	}
+
+	/**
+	 * Chế độ hỏng ĐANG CÓ TRÊN DEV, và fixture cũ mù với nó: mọi fixture ở trên
+	 * chỉ có MỘT identity, nên `identities.get(0)` luôn đúng một cách tình cờ.
+	 *
+	 * Sau Task 18B, profile gốc mang HAI identity và thứ tự mảng là thứ tự LIÊN
+	 * KẾT, không phải thứ tự đăng nhập. Đo trên dev 2026-08-20: lượt Facebook ghi
+	 * `provider=Google`, và lượt email OTP cũng vậy.
+	 *
+	 * Test này ĐỎ cho tới khi `providerOf(...)` được sửa. Nó ở đây để cái sai
+	 * không im lặng nữa; bản đúng chờ kết quả đo claim thật.
+	 */
+	@Test
+	@org.junit.jupiter.api.Disabled("đỏ có chủ ý — chờ số đo claim, xem plan Task 18B Step 5")
+	void user_lien_ket_hai_identity_phai_ghi_dung_provider_cua_luot_nay() {
+		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
+				"sub", "44f894c8-90a1-70d4-db21-e4b74f44aff3",
+				"identities", List.of(
+						Map.of("userId", "104556631362906539049",
+								"providerName", "Google",
+								"providerType", "Google",
+								"primary", "false"),
+						Map.of("userId", "122135814387161914",
+								"providerName", "Facebook",
+								"providerType", "Facebook",
+								"primary", "false"))))));
+
+		assertThat(auditLine()).contains("provider=Facebook");
 	}
 
 	private static OAuth2AuthenticationToken token(Map<String, Object> claims) {

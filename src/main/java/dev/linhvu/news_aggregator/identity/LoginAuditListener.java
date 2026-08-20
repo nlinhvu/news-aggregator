@@ -49,6 +49,39 @@ class LoginAuditListener {
 		// KHÔNG log email: nó nằm cùng danh sách cấm với token và client secret
 		// (TDD §14.2), và module này cố ý không sở hữu email.
 		log.info("đăng nhập thành công sub={} provider={}", user.getSubject(), providerOf(user));
+		doClaimTam(user);
+	}
+
+	/**
+	 * ⚠️ TẠM THỜI — XOÁ SAU KHI ĐO XONG.
+	 *
+	 * `providerOf(...)` báo sai provider từ khi Task 18B bật liên kết tài khoản:
+	 * đo trên dev 2026-08-20, cả ba đường (Google, Facebook, email OTP) đều ra
+	 * `provider=Google`. Nguyên nhân: claim `identities` chỉ là attribute của
+	 * profile, nên nó GIỐNG HỆT NHAU bất kể đăng nhập đường nào.
+	 *
+	 * Câu hỏi cần đo, và không tài liệu nào của AWS trả lời: ID token của user đã
+	 * liên kết có claim nào chỉ ra provider của LƯỢT NÀY không. Payload mẫu trong
+	 * developer guide không có `amr`, nhưng payload mẫu không phải danh sách đầy
+	 * đủ.
+	 *
+	 * Chỉ ghi TÊN claim, `amr`, và `providerName` — không ghi giá trị claim nào
+	 * khác. `email` và token nằm trong danh sách cấm (TDD §14.2), và `userId` bên
+	 * provider cũng không cần cho phép đo này.
+	 */
+	private static void doClaimTam(OidcUser user) {
+		List<String> providers = user.getClaim("identities") instanceof List<?> identities
+				? identities.stream()
+						.filter(Map.class::isInstance)
+						.map(identity -> String.valueOf(((Map<?, ?>) identity).get("providerName")))
+						.toList()
+				: List.of();
+
+		log.info("ĐO-CLAIM-TAM sub={} tenClaim={} amr={} providerNames={}",
+				user.getSubject(),
+				user.getClaims().keySet().stream().sorted().toList(),
+				user.getClaim("amr"),
+				providers);
 	}
 
 	private static String providerOf(OidcUser user) {

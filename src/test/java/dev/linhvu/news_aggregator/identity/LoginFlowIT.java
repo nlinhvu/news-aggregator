@@ -252,13 +252,21 @@ class LoginFlowIT {
 			logs.stop();
 		}
 
-		assertThat(logs.list).singleElement()
-				.extracting(ILoggingEvent::getFormattedMessage).asString()
+		List<String> dong = logs.list.stream()
+				.map(ILoggingEvent::getFormattedMessage).toList();
+
+		// Lọc dòng audit theo NỘI DUNG, không theo vị trí: listener ghi thêm dòng
+		// nào cũng được, nhưng phải có đúng một dòng audit.
+		assertThat(dong).filteredOn(line -> line.startsWith("đăng nhập thành công"))
+				.singleElement().asString()
 				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
-				.contains("provider=cognito")
-				// ID token của mock server mang `email: dev@local`, nên vế này
-				// đo trên dữ liệu thật chứ không trên một map tự dựng.
-				.doesNotContain("dev@local");
+				.contains("provider=cognito");
+
+		// MỌI dòng, không chỉ dòng audit. ID token của mock server mang
+		// `email: dev@local`, nên vế này đo trên dữ liệu thật chứ không trên một
+		// map tự dựng — và nó phải đúng với cả dòng listener thêm về sau.
+		assertThat(dong).isNotEmpty().allSatisfy(line ->
+				assertThat(line).doesNotContain("dev@local"));
 	}
 
 	/**
