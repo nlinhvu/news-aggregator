@@ -7,7 +7,7 @@
 // dựng ApplicationModules, trước cả khi kiểm được cạnh nào.
 //
 // Cạnh do event tạo ra vì thế là VÔ HÌNH với `verify()`. Thứ duy nhất còn canh
-// nó là `event_record_chi_chua_string`; không được nới test đó.
+// nó là `event_record_contains_only_strings`; không được nới test đó.
 @ApplicationModule(displayName = "catalog", allowedDependencies = { "platform" })
 package dev.linhvu.news_aggregator.catalog;
 

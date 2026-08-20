@@ -88,19 +88,19 @@ export function useCurrentUser(): {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let huy = false
+    let cancelled = false
     fetchCurrentUser()
       // Lỗi mạng ⇒ coi như ẩn danh. Trang tin phải đọc được kể cả khi đường
       // danh tính hỏng — đó là driver #3 của ADR-0018.
       .catch(() => null)
       .then(u => {
-        if (!huy) {
+        if (!cancelled) {
           setState(u)
           setLoading(false)
         }
       })
     return () => {
-      huy = true
+      cancelled = true
     }
   }, [])
 

@@ -26,7 +26,7 @@ class DataStackTest {
 	 * ở đây.
 	 */
 	@Test
-	void gsi_projection_la_INCLUDE_khong_phai_ALL() {
+	void the_gsi_projection_is_INCLUDE_not_ALL() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
@@ -56,7 +56,7 @@ class DataStackTest {
 	 * chia làm hai lượt deploy, đúng như migrate v1 → v2 đã phải làm.
 	 */
 	@Test
-	void bang_articles_co_dung_hai_gsi() {
+	void the_articles_table_has_exactly_two_gsis() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayEquals(List.of(
@@ -85,7 +85,7 @@ class DataStackTest {
 	 * cả partition rồi tự sắp xếp.
 	 */
 	@Test
-	void gsi_by_source_dung_projection_ALL() {
+	void gsi_by_source_uses_projection_ALL() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
@@ -110,7 +110,7 @@ class DataStackTest {
 	 * lần deploy đầu, nên sửa dòng này rồi deploy là làm gãy môi trường.
 	 */
 	@Test
-	void gsi_v2_project_ca_excerpt() {
+	void gsi_v2_projects_the_excerpt_too() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"GlobalSecondaryIndexes", Match.arrayWith(List.of(
@@ -126,7 +126,7 @@ class DataStackTest {
 
 	/** On-demand billing — master §6.3 cấm mọi thứ tính tiền theo giờ. */
 	@Test
-	void billing_la_on_demand() {
+	void billing_is_on_demand() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of("BillingMode", "PAY_PER_REQUEST")));
 	}
@@ -136,7 +136,7 @@ class DataStackTest {
 	 * Đây là lý do DataStack được tách ra khỏi các stack khác.
 	 */
 	@Test
-	void prod_bao_ve_du_lieu_dev_thi_khong() {
+	void prod_protects_the_data_and_dev_does_not() {
 		dataStack(EnvConfig.PROD).hasResource("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of("DeletionPolicy", "Retain")));
 		dataStack(EnvConfig.DEV).hasResource("AWS::DynamoDB::Table",
@@ -157,7 +157,7 @@ class DataStackTest {
 	 * giữa tên attribute và thư viện.
 	 */
 	@Test
-	void partition_key_cua_bang_toggles_dung_hop_dong_cua_togglz() {
+	void the_toggles_table_partition_key_follows_the_togglz_contract() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"KeySchema", List.of(Map.of(
@@ -175,7 +175,7 @@ class DataStackTest {
 	 * đích danh vào bảng cần kiểm.
 	 */
 	@Test
-	void pitr_cua_bang_toggles_bat_o_prod_tat_o_dev() {
+	void pitr_on_the_toggles_table_is_on_in_prod_and_off_in_dev() {
 		for (Map.Entry<EnvConfig, Boolean> e
 				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
 			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
@@ -198,7 +198,7 @@ class DataStackTest {
 	 * recovery — một mất mát chỉ lộ ra đúng lúc cần khôi phục dữ liệu.
 	 */
 	@Test
-	void pitr_bat_o_prod_tat_o_dev() {
+	void pitr_is_on_in_prod_and_off_in_dev() {
 		dataStack(EnvConfig.PROD).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of("PointInTimeRecoverySpecification",
 						Map.of("PointInTimeRecoveryEnabled", true))));
@@ -218,7 +218,7 @@ class DataStackTest {
 	 * tên "không có GSI" mà không kiểm gì về GSI cả.
 	 */
 	@Test
-	void bang_sources_khong_co_gsi() {
+	void the_sources_table_has_no_gsi() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"KeySchema", List.of(Map.of(
@@ -237,7 +237,7 @@ class DataStackTest {
 	 * làm cho xanh sẵn — bảng thứ ba cấu hình thế nào cũng không đổi kết quả.
 	 */
 	@Test
-	void prod_giu_lai_bang_sources_khi_xoa_stack() {
+	void prod_retains_the_sources_table_when_the_stack_is_deleted() {
 		for (Map.Entry<EnvConfig, String> e
 				: Map.of(EnvConfig.PROD, "Retain", EnvConfig.DEV, "Delete").entrySet()) {
 			dataStack(e.getKey()).hasResource("AWS::DynamoDB::Table",
@@ -259,7 +259,7 @@ class DataStackTest {
 	 * bỗng chạy lại.
 	 */
 	@Test
-	void pitr_cua_bang_sources_bat_o_prod_tat_o_dev() {
+	void pitr_on_the_sources_table_is_on_in_prod_and_off_in_dev() {
 		for (Map.Entry<EnvConfig, Boolean> e
 				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
 			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
@@ -283,7 +283,7 @@ class DataStackTest {
 	 * không nói được nó thuộc bảng nào.
 	 */
 	@Test
-	void bang_sessions_co_ttl_tren_dung_attribute_expiresAt() {
+	void the_sessions_table_has_ttl_on_the_expiresAt_attribute() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"KeySchema", List.of(Map.of(
@@ -309,7 +309,7 @@ class DataStackTest {
 	 * sang, vì công thức chung là `cfg.terminationProtection()`.
 	 */
 	@Test
-	void sessions_khong_bao_gio_bat_pitr_ke_ca_o_prod() {
+	void sessions_never_enables_pitr_not_even_in_prod() {
 		for (EnvConfig cfg : List.of(EnvConfig.PROD, EnvConfig.DEV)) {
 			dataStack(cfg).hasResourceProperties("AWS::DynamoDB::Table",
 					Match.objectLike(Map.of(
@@ -338,7 +338,7 @@ class DataStackTest {
 	 * không-TTL kia làm cho xanh sẵn.
 	 */
 	@Test
-	void bang_user_preferences_khoa_bang_userId_khong_gsi_khong_ttl() {
+	void the_user_preferences_table_is_keyed_by_userId_with_no_gsi_and_no_ttl() {
 		dataStack(EnvConfig.DEV).hasResourceProperties("AWS::DynamoDB::Table",
 				Match.objectLike(Map.of(
 						"KeySchema", List.of(Map.of(
@@ -359,7 +359,7 @@ class DataStackTest {
 	 * cách nào dựng lại nếu mất.
 	 */
 	@Test
-	void pitr_cua_bang_user_preferences_bat_o_prod_tat_o_dev() {
+	void pitr_on_the_user_preferences_table_is_on_in_prod_and_off_in_dev() {
 		for (Map.Entry<EnvConfig, Boolean> e
 				: Map.of(EnvConfig.PROD, true, EnvConfig.DEV, false).entrySet()) {
 			dataStack(e.getKey()).hasResourceProperties("AWS::DynamoDB::Table",
@@ -375,10 +375,10 @@ class DataStackTest {
 	/**
 	 * `user-preferences` RETAIN ở prod, DELETE ở dev — ghim đích danh bằng
 	 * `KeySchema` lồng trong `Properties`, đúng lý do đã ghi ở
-	 * `prod_giu_lai_bang_sources_khi_xoa_stack`.
+	 * `prod_retains_the_sources_table_when_the_stack_is_deleted`.
 	 */
 	@Test
-	void prod_giu_lai_bang_user_preferences_khi_xoa_stack() {
+	void prod_retains_the_user_preferences_table_when_the_stack_is_deleted() {
 		for (Map.Entry<EnvConfig, String> e
 				: Map.of(EnvConfig.PROD, "Retain", EnvConfig.DEV, "Delete").entrySet()) {
 			dataStack(e.getKey()).hasResource("AWS::DynamoDB::Table",

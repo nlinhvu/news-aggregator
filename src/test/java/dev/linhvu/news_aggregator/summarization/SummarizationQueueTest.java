@@ -44,7 +44,7 @@ class SummarizationQueueTest {
 	/**
 	 * FeatureManager THẬT do `TogglzAutoConfiguration` dựng. Phải giữ tham chiếu
 	 * vì trong test nó KHÔNG tự đến tay `FeatureContext` — xem
-	 * {@link #dungFeatureManagerThat()}.
+	 * {@link #useRealFeatureManager()}.
 	 */
 	@Autowired
 	FeatureManager featureManager;
@@ -66,7 +66,7 @@ class SummarizationQueueTest {
 		sqs.purgeQueue(PurgeQueueRequest.builder().queueUrl(queueUrl).build()).join();
 		// Bean singleton sống qua nhiều test y hệt cách nó sống qua nhiều lượt
 		// invoke Lambda. Không reset thì hạn mức của test này đã bị test chạy
-		// trước ăn mất, và `chan_dung_han_muc_moi_luot` ra 24 thay vì 25.
+		// trước ăn mất, và `stops_exactly_at_the_per_run_quota` ra 24 thay vì 25.
 		metrics.reset();
 	}
 
@@ -76,7 +76,7 @@ class SummarizationQueueTest {
 	 * thì manager rò qua lại giữa các test class — kèm cả Spring context đã đóng.
 	 */
 	@AfterEach
-	void traLaiFeatureManagerVeNguyenTrang() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
@@ -88,19 +88,19 @@ class SummarizationQueueTest {
 	 * "BẬT HẾT": `togglz-testing` (kéo vào theo `togglz-junit`, không tách được
 	 * vì `@AllEnabled` nằm cùng jar) đăng ký `FallbackTestFeatureManagerProvider`
 	 * và `FallbackTestFeatureManager.isActive` trả TRUE cho mọi feature. Không
-	 * gọi hàm này thì `khong_gui_gi_khi_flag_tat` đỏ vì thư viện test, không phải
-	 * vì code sai. Lập luận đầy đủ ở `TogglzGateTest#dungFeatureManagerThat`.
+	 * gọi hàm này thì `sends_nothing_when_the_flag_is_off` đỏ vì thư viện test, không phải
+	 * vì code sai. Lập luận đầy đủ ở `TogglzGateTest#useRealFeatureManager`.
 	 *
 	 * Gọi trong THÂN test chứ không phải `@BeforeEach`: callback của
 	 * `@AllEnabled` chạy TRƯỚC `@BeforeEach`, nên đặt ở đó sẽ đè mất
 	 * TestFeatureManager và giết luôn hai test kia.
 	 */
-	private void dungFeatureManagerThat() {
+	private void useRealFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(featureManager);
 		FeatureContext.clearCache();
 	}
 
-	private int soMessageTrongQueue() {
+	private int messagesInQueue() {
 		return sqs.receiveMessage(ReceiveMessageRequest.builder()
 				.queueUrl(queueUrl).maxNumberOfMessages(10)
 				.waitTimeSeconds(1).build()).join().messages().size();
@@ -112,7 +112,7 @@ class SummarizationQueueTest {
 	 * như khi producer quên ghi — hai nguyên nhân rất khác nhau, cùng một triệu
 	 * chứng.
 	 */
-	private Message nhanMotMessage() {
+	private Message receiveOneMessage() {
 		List<Message> messages = sqs.receiveMessage(ReceiveMessageRequest.builder()
 				.queueUrl(queueUrl).maxNumberOfMessages(10)
 				.messageAttributeNames("All")
@@ -122,7 +122,7 @@ class SummarizationQueueTest {
 	}
 
 	/** Dựng lại hình dạng event Lambda giao cho handler, từ message SDK đọc được. */
-	private static Map<String, Object> nhuLambdaGiao(Message message) {
+	private static Map<String, Object> asLambdaDelivers(Message message) {
 		return Map.of("Records", List.of(Map.of(
 				"messageId", message.messageId(),
 				"eventSource", "aws:sqs",
@@ -134,7 +134,7 @@ class SummarizationQueueTest {
 	}
 
 	/** Trả về `traceId` của span bao quanh — thứ phải xuất hiện trong attribute. */
-	private String enqueueTrongMotSpan(String articleId) {
+	private String enqueueInsideASpan(String articleId) {
 		var span = tracer.nextSpan().name("ingest");
 		try (var ignored = tracer.withSpan(span.start())) {
 			queue.enqueue(articleId);
@@ -147,9 +147,9 @@ class SummarizationQueueTest {
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void gui_message_khi_flag_bat() {
+	void sends_a_message_when_the_flag_is_on() {
 		assertThat(queue.enqueue("a1")).isTrue();
-		assertThat(soMessageTrongQueue()).isEqualTo(1);
+		assertThat(messagesInQueue()).isEqualTo(1);
 	}
 
 	/**
@@ -164,11 +164,11 @@ class SummarizationQueueTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void duong_tuoi_day_message_khi_co_article_moi() {
-		publisher.publishEvent(new ArticleAdded("a-moi", "Nguồn Test",
+	void the_live_path_pushes_a_message_when_a_new_article_arrives() {
+		publisher.publishEvent(new ArticleAdded("a-new", "Nguồn Test",
 				"https://a.test/moi", "Tiêu đề", "2026-08-10T10:00:00Z"));
 
-		assertThat(soMessageTrongQueue()).isEqualTo(1);
+		assertThat(messagesInQueue()).isEqualTo(1);
 	}
 
 	/**
@@ -178,18 +178,18 @@ class SummarizationQueueTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void body_van_chi_chua_article_id() {
-		enqueueTrongMotSpan("abc");
+	void the_body_still_carries_only_the_article_id() {
+		enqueueInsideASpan("abc");
 
-		assertThat(nhanMotMessage().body()).isEqualTo("{\"articleId\":\"abc\"}");
+		assertThat(receiveOneMessage().body()).isEqualTo("{\"articleId\":\"abc\"}");
 	}
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void ghi_traceparent_khi_dang_co_span() {
-		String traceId = enqueueTrongMotSpan("abc");
+	void writes_the_traceparent_while_a_span_is_active() {
+		String traceId = enqueueInsideASpan("abc");
 
-		Message message = nhanMotMessage();
+		Message message = receiveOneMessage();
 		assertThat(message.messageAttributes()).containsKey("traceparent");
 		assertThat(message.messageAttributes().get("traceparent").stringValue())
 				.contains(traceId);
@@ -202,10 +202,10 @@ class SummarizationQueueTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void khong_co_span_thi_khong_ghi_traceparent() {
+	void no_span_means_no_traceparent_is_written() {
 		queue.enqueue("abc");
 
-		assertThat(nhanMotMessage().messageAttributes()).isEmpty();
+		assertThat(receiveOneMessage().messageAttributes()).isEmpty();
 	}
 
 	/**
@@ -214,15 +214,15 @@ class SummarizationQueueTest {
 	 *
 	 * Hai đầu nằm ở hai lớp không thấy nhau, nối bằng một chuỗi tên — `traceparent`
 	 * và `stringValue`. Gõ lệch một chữ ở một đầu thì cả `SqsBatchTest` lẫn
-	 * `ghi_traceparent_khi_dang_co_span` vẫn xanh, vì mỗi bên tự nhất quán với
+	 * `writes_the_traceparent_while_a_span_is_active` vẫn xanh, vì mỗi bên tự nhất quán với
 	 * fixture của chính mình.
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void consumer_doc_lai_dung_thu_producer_ghi() {
-		String traceId = enqueueTrongMotSpan("abc");
+	void the_consumer_reads_back_exactly_what_the_producer_wrote() {
+		String traceId = enqueueInsideASpan("abc");
 
-		List<SqsBatch.Message> parsed = SqsBatch.parse(nhuLambdaGiao(nhanMotMessage()));
+		List<SqsBatch.Message> parsed = SqsBatch.parse(asLambdaDelivers(receiveOneMessage()));
 
 		assertThat(parsed).singleElement().satisfies(m -> {
 			assertThat(m.articleId()).isEqualTo("abc");
@@ -240,11 +240,11 @@ class SummarizationQueueTest {
 	 * Và nhờ ADR-0014, tắt flag KHÔNG mất bài: sweep sẽ nhặt lại khi bật.
 	 */
 	@Test
-	void khong_gui_gi_khi_flag_tat() {
-		dungFeatureManagerThat();
+	void sends_nothing_when_the_flag_is_off() {
+		useRealFeatureManager();
 
 		assertThat(queue.enqueue("a1")).isFalse();
-		assertThat(soMessageTrongQueue()).isZero();
+		assertThat(messagesInQueue()).isZero();
 	}
 
 	/**
@@ -256,7 +256,7 @@ class SummarizationQueueTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void chan_dung_han_muc_moi_luot() {
+	void stops_exactly_at_the_per_run_quota() {
 		List<String> ids = IntStream.range(0, 40).mapToObj(i -> "a" + i).toList();
 
 		int sent = queue.enqueueAll(ids);

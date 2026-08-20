@@ -45,7 +45,7 @@ class ArticleCatalogServiceTest {
 	 * paginated, xoá ngay trong lúc duyệt là sửa đúng cái đang được duyệt.
 	 */
 	@AfterEach
-	void donBang() {
+	void cleanTable() {
 		DynamoDbTable<Article> table =
 				enhancedClient.table(tableName, TableSchema.fromBean(Article.class));
 		table.scan().items().stream().toList().forEach(table::deleteItem);
@@ -54,10 +54,10 @@ class ArticleCatalogServiceTest {
 	/**
 	 * PHẢI dài hơn `min-excerpt-chars` (200) thật, không chỉ đọc như thể dài.
 	 * Một chuỗi 29 ký tự đặt tên là "đủ dài" làm mọi test dưới đây xanh hoặc đỏ
-	 * vì lý do sai: nặng nhất là `tra_ve_rong_khi_da_co_summary` — nó vẫn xanh
+	 * vì lý do sai: nặng nhất là `returns_empty_when_a_summary_already_exists` — nó vẫn xanh
 	 * kể cả khi chốt chặn idempotent bị gỡ, vì excerpt ngắn đã tự loại bài rồi.
 	 */
-	private static final String EXCERPT_DU_DAI = "Đoạn trích đủ dài để tóm tắt. ".repeat(7);
+	private static final String LONG_ENOUGH_EXCERPT = "Đoạn trích đủ dài để tóm tắt. ".repeat(7);
 
 	private Article article(String id, String excerpt, String summary) {
 		Article a = new Article();
@@ -78,18 +78,18 @@ class ArticleCatalogServiceTest {
 		return a;
 	}
 
-	private static String gioTruoc(int hours) {
+	private static String hoursAgo(int hours) {
 		return Instant.now().minus(Duration.ofHours(hours)).toString();
 	}
 
 	@Test
-	void tra_ve_bai_co_excerpt_va_chua_co_summary() {
-		repository.save(article("can-tom-tat", EXCERPT_DU_DAI, null));
+	void returns_articles_with_an_excerpt_and_no_summary_yet() {
+		repository.save(article("needs-summary", LONG_ENOUGH_EXCERPT, null));
 
-		assertThat(catalog.findSummarizable("can-tom-tat")).hasValueSatisfying(v -> {
-			assertThat(v.articleId()).isEqualTo("can-tom-tat");
-			assertThat(v.title()).isEqualTo("Tiêu đề can-tom-tat");
-			assertThat(v.excerpt()).isEqualTo(EXCERPT_DU_DAI);
+		assertThat(catalog.findSummarizable("needs-summary")).hasValueSatisfying(v -> {
+			assertThat(v.articleId()).isEqualTo("needs-summary");
+			assertThat(v.title()).isEqualTo("Tiêu đề needs-summary");
+			assertThat(v.excerpt()).isEqualTo(LONG_ENOUGH_EXCERPT);
 		});
 	}
 
@@ -101,21 +101,21 @@ class ArticleCatalogServiceTest {
 	 * Nếu chỗ này trả về giá trị thay vì rỗng, model bị gọi lại và ta trả tiền
 	 * hai lần — mà triệu chứng duy nhất là hoá đơn: trang vẫn hiển thị đúng.
 	 *
-	 * Excerpt PHẢI là `EXCERPT_DU_DAI`: chỉ khi bài đủ điều kiện về mọi mặt
+	 * Excerpt PHẢI là `LONG_ENOUGH_EXCERPT`: chỉ khi bài đủ điều kiện về mọi mặt
 	 * khác thì `isEmpty()` mới chứng minh được đúng một thứ — `summary` đã có.
 	 */
 	@Test
-	void tra_ve_rong_khi_da_co_summary() {
-		repository.save(article("da-xong", EXCERPT_DU_DAI, "Tóm tắt đã có."));
+	void returns_empty_when_a_summary_already_exists() {
+		repository.save(article("done", LONG_ENOUGH_EXCERPT, "Tóm tắt đã có."));
 
-		assertThat(catalog.findSummarizable("da-xong")).isEmpty();
+		assertThat(catalog.findSummarizable("done")).isEmpty();
 	}
 
 	@Test
-	void tra_ve_rong_khi_khong_co_excerpt() {
-		repository.save(article("bai-phase-2", null, null));
+	void returns_empty_when_there_is_no_excerpt() {
+		repository.save(article("article-phase-2", null, null));
 
-		assertThat(catalog.findSummarizable("bai-phase-2")).isEmpty();
+		assertThat(catalog.findSummarizable("article-phase-2")).isEmpty();
 	}
 
 	/**
@@ -123,15 +123,15 @@ class ArticleCatalogServiceTest {
 	 * một lời gọi model để đổi lấy gần như không gì (TDD §17 #13).
 	 */
 	@Test
-	void tra_ve_rong_khi_excerpt_ngan_hon_nguong() {
-		repository.save(article("qua-ngan", "Ngắn.", null));
+	void returns_empty_when_the_excerpt_is_below_the_threshold() {
+		repository.save(article("too-short", "Ngắn.", null));
 
-		assertThat(catalog.findSummarizable("qua-ngan")).isEmpty();
+		assertThat(catalog.findSummarizable("too-short")).isEmpty();
 	}
 
 	@Test
-	void tra_ve_rong_khi_khong_co_bai() {
-		assertThat(catalog.findSummarizable("khong-ton-tai")).isEmpty();
+	void returns_empty_when_there_are_no_articles() {
+		assertThat(catalog.findSummarizable("does-not-exist")).isEmpty();
 	}
 
 	/**
@@ -140,28 +140,28 @@ class ArticleCatalogServiceTest {
 	 * bẫy mà `sourcesSync` của Phase 2 đã gặp với `etag`.
 	 */
 	@Test
-	void attach_summary_khong_dung_toi_field_khac() {
-		repository.save(article("gan-summary", EXCERPT_DU_DAI, null));
+	void attach_summary_does_not_touch_other_fields() {
+		repository.save(article("attach-summary", LONG_ENOUGH_EXCERPT, null));
 
-		repository.attachSummary("gan-summary", "Tóm tắt tiếng Việt.");
+		repository.attachSummary("attach-summary", "Tóm tắt tiếng Việt.");
 
-		Article after = repository.findById("gan-summary").orElseThrow();
+		Article after = repository.findById("attach-summary").orElseThrow();
 		assertThat(after.getSummary()).isEqualTo("Tóm tắt tiếng Việt.");
-		assertThat(after.getExcerpt()).isEqualTo(EXCERPT_DU_DAI);
-		assertThat(after.getTitle()).isEqualTo("Tiêu đề gan-summary");
-		assertThat(after.getCanonicalUrl()).isEqualTo("https://a.test/gan-summary");
+		assertThat(after.getExcerpt()).isEqualTo(LONG_ENOUGH_EXCERPT);
+		assertThat(after.getTitle()).isEqualTo("Tiêu đề attach-summary");
+		assertThat(after.getCanonicalUrl()).isEqualTo("https://a.test/attach-summary");
 	}
 
 	@Test
-	void quet_tra_ve_bai_can_tom_tat_trong_cua_so() {
-		repository.save(article("moi-can-lam", gioTruoc(2), EXCERPT_DU_DAI, null));
-		repository.save(article("moi-da-xong", gioTruoc(3), EXCERPT_DU_DAI,
+	void sweep_returns_articles_needing_a_summary_inside_the_window() {
+		repository.save(article("new-needs-work", hoursAgo(2), LONG_ENOUGH_EXCERPT, null));
+		repository.save(article("new-already-done", hoursAgo(3), LONG_ENOUGH_EXCERPT,
 				"Đã có tóm tắt."));
-		repository.save(article("moi-khong-excerpt", gioTruoc(4), null, null));
+		repository.save(article("new-no-excerpt", hoursAgo(4), null, null));
 
 		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25))
 				.extracting(SummarizableArticle::articleId)
-				.containsExactly("moi-can-lam");
+				.containsExactly("new-needs-work");
 	}
 
 	/**
@@ -170,8 +170,8 @@ class ArticleCatalogServiceTest {
 	 * giới đó.
 	 */
 	@Test
-	void quet_khong_lay_bai_ngoai_cua_so() {
-		repository.save(article("qua-cu", gioTruoc(72), EXCERPT_DU_DAI, null));
+	void sweep_skips_articles_outside_the_window() {
+		repository.save(article("too-old", hoursAgo(72), LONG_ENOUGH_EXCERPT, null));
 
 		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25)).isEmpty();
 	}
@@ -184,8 +184,8 @@ class ArticleCatalogServiceTest {
 	 * `SummarizeHandler` bỏ qua ở consumer — `enqueued` đếm việc không có thật.
 	 */
 	@Test
-	void quet_khong_lay_bai_excerpt_ngan_hon_nguong() {
-		repository.save(article("quet-qua-ngan", gioTruoc(2), "Ngắn.", null));
+	void sweep_skips_articles_whose_excerpt_is_below_the_threshold() {
+		repository.save(article("sweep-too-short", hoursAgo(2), "Ngắn.", null));
 
 		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25)).isEmpty();
 	}
@@ -207,22 +207,22 @@ class ArticleCatalogServiceTest {
 	 * trang. Đó chính xác là phạm vi nó bảo vệ, không hơn.
 	 */
 	@Test
-	void quet_doc_tiep_trang_khi_limit_bi_filter_an_het() {
+	void sweep_reads_the_next_page_when_the_filter_hides_the_whole_limit() {
 		for (int i = 0; i < 30; i++) {
-			repository.save(article("da-xong-" + i, gioTruoc(1 + i), EXCERPT_DU_DAI,
+			repository.save(article("done-" + i, hoursAgo(1 + i), LONG_ENOUGH_EXCERPT,
 					"Tóm tắt " + i));
 		}
-		repository.save(article("con-sot-lai", gioTruoc(40), EXCERPT_DU_DAI, null));
+		repository.save(article("left-over", hoursAgo(40), LONG_ENOUGH_EXCERPT, null));
 
 		assertThat(catalog.findSummarizable(Duration.ofHours(48), 25))
 				.extracting(SummarizableArticle::articleId)
-				.containsExactly("con-sot-lai");
+				.containsExactly("left-over");
 	}
 
 	@Test
-	void quet_ton_trong_limit() {
+	void sweep_respects_limit() {
 		for (int i = 0; i < 10; i++) {
-			repository.save(article("can-lam-" + i, gioTruoc(1 + i), EXCERPT_DU_DAI,
+			repository.save(article("can-lam-" + i, hoursAgo(1 + i), LONG_ENOUGH_EXCERPT,
 					null));
 		}
 

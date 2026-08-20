@@ -52,7 +52,7 @@ public class XmlConfig {
 	 * trả lời trung thực — ta không phục vụ XML.
 	 */
 	@Bean
-	public WebMvcConfigurer khongPhucVuXmlQuaHttp() {
+	public WebMvcConfigurer doesNotServeXmlOverHttp() {
 		return new WebMvcConfigurer() {
 			@Override
 			public void extendMessageConverters(List<HttpMessageConverter<?>> converters) {

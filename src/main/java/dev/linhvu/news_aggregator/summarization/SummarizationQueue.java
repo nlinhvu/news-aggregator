@@ -59,15 +59,15 @@ class SummarizationQueue {
 	boolean enqueue(String articleId) {
 		// Fail-closed: đọc flag lỗi thì coi như OFF. Không tiêu tiền vì một lần
 		// đọc DynamoDB hỏng — cùng lập luận `ArticleController` dùng từ Phase 1.
-		boolean bat;
+		boolean enabled;
 		try {
-			bat = NewsFeature.AI_SUMMARIZATION.isActive();
+			enabled = NewsFeature.AI_SUMMARIZATION.isActive();
 		}
 		catch (RuntimeException e) {
 			log.warn("không đọc được AI_SUMMARIZATION, coi như OFF: {}", e.toString());
 			return false;
 		}
-		if (!bat) {
+		if (!enabled) {
 			return false;
 		}
 		if (metrics.enqueued() >= maxPerRun) {

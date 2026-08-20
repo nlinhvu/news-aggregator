@@ -71,7 +71,7 @@ class RoleProfileContextTest {
 		ApplicationContext ctx;
 
 		@Test
-		void web_co_duong_doc_va_khong_co_duong_nao_toi_model() {
+		void web_has_read_paths_and_no_path_to_the_model() {
 			assertThat(ctx.containsBeanDefinition("articleController"))
 					.as("`web` phục vụ GET /api/articles")
 					.isTrue();
@@ -126,7 +126,7 @@ class RoleProfileContextTest {
 		ApplicationContext ctx;
 
 		@Test
-		void admin_co_chain_dang_nhap_va_khong_phuc_vu_noi_dung_nao() {
+		void admin_has_a_login_chain_and_serves_no_content() {
 			assertThat(ctx.containsBeanDefinition("filterChain"))
 					.as("`SecurityConfig` là @Profile(HTTP) nên `admin` cũng dựng chain "
 							+ "— đó là thứ chặn `/admin/**` sau `ROLE_ops`")
@@ -136,10 +136,10 @@ class RoleProfileContextTest {
 							+ "do role của nó có ssm:GetParameter + kms:Decrypt")
 					.isTrue();
 
-			for (String beanPhucVuNoiDung : java.util.List.of("articleController",
+			for (String contentServingBeans : java.util.List.of("articleController",
 					"sourceController", "myFeedController", "preferencesController")) {
-				assertThat(ctx.containsBeanDefinition(beanPhucVuNoiDung))
-						.as("mặt phẳng vận hành KHÔNG phục vụ nội dung: " + beanPhucVuNoiDung)
+				assertThat(ctx.containsBeanDefinition(contentServingBeans))
+						.as("mặt phẳng vận hành KHÔNG phục vụ nội dung: " + contentServingBeans)
 						.isFalse();
 			}
 
@@ -162,7 +162,7 @@ class RoleProfileContextTest {
 		ApplicationContext ctx;
 
 		@Test
-		void ingest_co_handler_va_co_duong_day_hang_doi() {
+		void ingest_has_a_handler_and_a_path_into_the_queue() {
 			assertThat(ctx.containsBeanDefinition("eventsController")).isTrue();
 			assertThat(ctx.containsBeanDefinition("ingestFeedsHandler")).isTrue();
 
@@ -202,7 +202,7 @@ class RoleProfileContextTest {
 		ApplicationContext ctx;
 
 		@Test
-		void summarize_co_ca_handler_sqs_lan_sweep() {
+		void summarize_has_both_the_sqs_handler_and_the_sweep() {
 			assertThat(ctx.containsBeanDefinition("summarizeHandler")).isTrue();
 			assertThat(ctx.containsBeanDefinition("sweepHandler")).isTrue();
 			// Vế khẳng định cho `chatClient`, thứ chứng minh cái tên trong vế phủ

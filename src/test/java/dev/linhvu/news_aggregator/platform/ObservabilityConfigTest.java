@@ -28,7 +28,7 @@ class ObservabilityConfigTest {
 	 * filter có được gọi đúng một lần mỗi request và có gọi flush không.
 	 */
 	@Test
-	void filter_flush_dung_mot_lan_moi_request() throws Exception {
+	void the_filter_flushes_exactly_once_per_request() throws Exception {
 		AtomicInteger flushes = new AtomicInteger();
 		Filter filter = new ObservabilityConfig().traceFlushFilter(flushes::incrementAndGet);
 
@@ -43,7 +43,7 @@ class ObservabilityConfigTest {
 	 * đáng giá nhất — mất nó ở đúng chỗ đó là mất toàn bộ giá trị.
 	 */
 	@Test
-	void filter_van_flush_khi_chuoi_nem() {
+	void the_filter_still_flushes_when_the_chain_throws() {
 		AtomicInteger flushes = new AtomicInteger();
 		Filter filter = new ObservabilityConfig().traceFlushFilter(flushes::incrementAndGet);
 
@@ -70,7 +70,7 @@ class ObservabilityConfigTest {
 		ApplicationContext context;
 
 		@Test
-		void ung_dung_van_khoi_dong_duoc() {
+		void the_application_still_starts_up() {
 			assertThat(context.getBeanNamesForType(SdkTracerProvider.class))
 					.as("cờ tắt phải thật sự gỡ bean, nếu không test này không canh gì cả")
 					.isEmpty();
@@ -85,13 +85,13 @@ class ObservabilityConfigTest {
 	 */
 	@Nested
 	@SpringBootTest
-	class KhiOTelBat {
+	class WhenOTelEnabled {
 
 		@Autowired
 		ApplicationContext context;
 
 		@Test
-		void co_tracer_provider_that_de_ma_flush() {
+		void a_real_tracer_provider_exists_so_flush_can_work() {
 			assertThat(context.getBeanNamesForType(SdkTracerProvider.class)).hasSize(1);
 			assertThat(context.getBean("traceFlushFilterRegistration")).isNotNull();
 		}

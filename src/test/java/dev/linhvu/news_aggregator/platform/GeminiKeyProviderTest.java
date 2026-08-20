@@ -30,20 +30,20 @@ class GeminiKeyProviderTest {
 	 * `GOOGLE_API_KEY` mà không phải seed key vào Floci sau mỗi lần restart.
 	 */
 	@Test
-	void property_thang_va_khong_cham_ssm() {
-		assertThat(provider("key-tu-property").apiKey()).isEqualTo("key-tu-property");
+	void a_direct_property_never_touches_ssm() {
+		assertThat(provider("key-from-property").apiKey()).isEqualTo("key-from-property");
 
 		verifyNoInteractions(ssm);
 	}
 
 	@Test
-	void doc_ssm_khi_property_rong() {
+	void reads_ssm_when_the_property_is_empty() {
 		given(ssm.getParameter(any(GetParameterRequest.class)))
 				.willReturn(GetParameterResponse.builder()
-						.parameter(Parameter.builder().value("key-tu-ssm").build())
+						.parameter(Parameter.builder().value("key-from-ssm").build())
 						.build());
 
-		assertThat(provider("").apiKey()).isEqualTo("key-tu-ssm");
+		assertThat(provider("").apiKey()).isEqualTo("key-from-ssm");
 	}
 
 	/**
@@ -52,7 +52,7 @@ class GeminiKeyProviderTest {
 	 * lần trả tiền KMS decrypt và 10 lần độ trễ, để đổi lấy cùng một chuỗi.
 	 */
 	@Test
-	void chi_doc_ssm_mot_lan() {
+	void reads_ssm_only_once() {
 		AtomicInteger calls = new AtomicInteger();
 		given(ssm.getParameter(any(GetParameterRequest.class)))
 				.willAnswer(inv -> {
@@ -76,7 +76,7 @@ class GeminiKeyProviderTest {
 	 * cho tới khi Gemini trả 400. Đây là chế độ hỏng "trông như key sai".
 	 */
 	@Test
-	void luon_yeu_cau_giai_ma() {
+	void always_asks_for_decryption() {
 		given(ssm.getParameter(any(GetParameterRequest.class)))
 				.willReturn(GetParameterResponse.builder()
 						.parameter(Parameter.builder().value("key").build())

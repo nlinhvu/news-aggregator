@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * `bootRun` dùng. Không có lời gọi mạng nào ở đây: `Client.builder()` chỉ dựng
  * đối tượng, và không test nào gọi model.
  */
-@SpringBootTest(properties = "news.summarization.api-key=key-gia-cho-test")
+@SpringBootTest(properties = "news.summarization.api-key=fake-key-for-test")
 // Cả chuỗi bean này nay là `@Profile(SUMMARIZE)` — chỉ function `summarize`
 // có đường tới model.
 @ActiveProfiles(RoleProfiles.SUMMARIZE)
@@ -35,18 +35,18 @@ class ChatClientConfigTest {
 	ApplicationContext context;
 
 	@Test
-	void dung_duoc_ca_chuoi_bean_lazy() {
+	void builds_the_whole_chain_of_lazy_beans() {
 		assertThat(context.getBean(ChatClient.class)).isNotNull();
 	}
 
 	@Test
-	void ssm_client_co_that_tren_context() {
+	void a_real_ssm_client_exists_on_the_context() {
 		assertThat(context.getBean(SsmClient.class)).isNotNull();
 	}
 
 	@Test
-	void property_thang_nen_khong_cham_ssm() {
+	void a_direct_property_means_ssm_is_never_touched() {
 		assertThat(context.getBean(GeminiKeyProvider.class).apiKey())
-				.isEqualTo("key-gia-cho-test");
+				.isEqualTo("fake-key-for-test");
 	}
 }

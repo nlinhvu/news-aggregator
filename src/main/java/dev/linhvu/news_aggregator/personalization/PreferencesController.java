@@ -67,16 +67,16 @@ class PreferencesController {
 			return ResponseEntity.status(401).build();
 		}
 
-		List<String> chon = body == null || body.sourceIds() == null
+		List<String> selected = body == null || body.sourceIds() == null
 				? List.of() : body.sourceIds();
-		Set<String> hopLe = sources.options().stream()
+		Set<String> valid = sources.options().stream()
 				.map(SourceOptionDto::sourceId)
 				.collect(java.util.stream.Collectors.toSet());
-		if (!hopLe.containsAll(chon)) {
+		if (!valid.containsAll(selected)) {
 			return ResponseEntity.badRequest().build();
 		}
 
-		repository.save(sub.get(), chon);
+		repository.save(sub.get(), selected);
 		return ResponseEntity.noContent().build();
 	}
 

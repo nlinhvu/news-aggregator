@@ -58,7 +58,7 @@ class ArticleIngestListenerTest {
 	}
 
 	@Test
-	void ghi_article_moi_va_dem_vao_metrics() {
+	void writes_a_new_article_and_counts_it_into_metrics() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 
 		assertThat(table.scan().items()).hasSize(1);
@@ -71,7 +71,7 @@ class ArticleIngestListenerTest {
 	 * thì mọi cơ chế retry ở TDD §12 đều nguy hiểm.
 	 */
 	@Test
-	void item_trung_khong_ghi_lai_va_khong_dem() {
+	void a_duplicate_item_is_neither_rewritten_nor_counted() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 		metrics.reset();
 
@@ -82,7 +82,7 @@ class ArticleIngestListenerTest {
 	}
 
 	@Test
-	void url_khac_nhau_thanh_hai_article() {
+	void different_urls_become_two_articles() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 		publisher.publishEvent(discovered("https://a.test/2"));
 
@@ -91,7 +91,7 @@ class ArticleIngestListenerTest {
 	}
 
 	@Test
-	void article_ghi_ra_co_du_truong_va_listBucket_hang_so() {
+	void the_written_article_has_every_field_and_a_constant_listBucket() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 
 		Article saved = table.scan().items().iterator().next();
@@ -123,7 +123,7 @@ class ArticleIngestListenerTest {
 	 * của Phase 3 cũng sẽ dùng nó để đọc lại article.
 	 */
 	@Test
-	void phat_ArticleAdded_khi_article_that_su_moi() {
+	void publishes_ArticleAdded_when_the_article_is_really_new() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 
 		Article saved = table.scan().items().iterator().next();
@@ -145,7 +145,7 @@ class ArticleIngestListenerTest {
 	 * được ngoài hoá đơn.
 	 */
 	@Test
-	void KHONG_phat_ArticleAdded_khi_item_trung() {
+	void does_NOT_publish_ArticleAdded_for_a_duplicate_item() {
 		publisher.publishEvent(discovered("https://a.test/1"));
 		addedSpy.events.clear();
 

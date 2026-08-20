@@ -38,7 +38,7 @@ class SummarizeHandlerTest {
 	// `NOOP` chứ không phải mock: mọi test ở lớp ngoài đo hành vi batch, và một
 	// `Propagator` mock phải stub cả chuỗi `extract().name().start()` mới chạy
 	// được — công sức đó không mua thêm assertion nào. Phần tracing THẬT nằm ở
-	// `NoiTraceQuaSqs`.
+	// `TraceAcrossSqs`.
 	private final SummarizeHandler handler = new SummarizeHandler(catalog, summarizer,
 			events, Tracer.NOOP, Propagator.NOOP, 3);
 
@@ -57,12 +57,12 @@ class SummarizeHandlerTest {
 	}
 
 	@Test
-	void nhan_payload_sqs() {
+	void accepts_an_sqs_payload() {
 		assertThat(handler.supports(sqsPayload("a1"))).isTrue();
 	}
 
 	@Test
-	void khong_nhan_records_cua_nguon_khac() {
+	void does_not_accept_records_from_another_producer() {
 		assertThat(handler.supports(Map.of("Records", List.of(
 				Map.of("eventSource", "aws:s3"))))).isFalse();
 		assertThat(handler.supports(Map.of("job", "ingest-feeds"))).isFalse();
@@ -70,7 +70,7 @@ class SummarizeHandlerTest {
 	}
 
 	@Test
-	void tom_tat_xong_thi_phat_event() {
+	void publishes_an_event_once_the_summary_is_done() {
 		given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
 		given(summarizer.summarize(any())).willReturn(Optional.of("Tóm tắt a1."));
 
@@ -95,7 +95,7 @@ class SummarizeHandlerTest {
 	 * mục đích của mình, chỉ là bởi một lượt khác.
 	 */
 	@Test
-	void khong_goi_model_khi_bai_da_co_summary() {
+	void does_not_call_the_model_when_the_article_already_has_a_summary() {
 		given(catalog.findSummarizable("a1")).willReturn(Optional.empty());
 
 		Object result = handler.handle(sqsPayload("a1"));
@@ -111,7 +111,7 @@ class SummarizeHandlerTest {
 	 * vòng lặp (ADR-0014).
 	 */
 	@Test
-	void model_hong_thi_bao_dung_message_do() {
+	void a_broken_model_reports_exactly_that_message() {
 		given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
 		given(catalog.findSummarizable("a2")).willReturn(Optional.of(article("a2")));
 		given(summarizer.summarize(any()))
@@ -137,7 +137,7 @@ class SummarizeHandlerTest {
 	 * và chính việc gọi hết mới là thứ làm invoke chết vì timeout.
 	 */
 	@Test
-	void bo_phan_con_lai_sau_k_lan_hong_lien_tiep() {
+	void drops_the_remainder_after_k_consecutive_failures() {
 		for (String id : List.of("a1", "a2", "a3", "a4", "a5")) {
 			given(catalog.findSummarizable(id)).willReturn(Optional.of(article(id)));
 		}
@@ -160,7 +160,7 @@ class SummarizeHandlerTest {
 	 * nó là phản ứng thái quá và làm mất thông lượng.
 	 */
 	@Test
-	void hong_xen_ke_khong_lam_dung_batch() {
+	void interleaved_failures_do_not_stall_the_batch() {
 		for (String id : List.of("a1", "a2", "a3", "a4")) {
 			given(catalog.findSummarizable(id)).willReturn(Optional.of(article(id)));
 		}
@@ -181,7 +181,7 @@ class SummarizeHandlerTest {
 	/**
 	 * Một lời gọi THÀNH CÔNG reset bộ đếm — nó là bằng chứng model còn sống.
 	 *
-	 * `hong_xen_ke_khong_lam_dung_batch` KHÔNG ghim được điều này: với K=3 và
+	 * `interleaved_failures_do_not_stall_the_batch` KHÔNG ghim được điều này: với K=3 và
 	 * chỉ 4 bài, bộ đếm không reset vẫn chưa chạm ngưỡng, nên bỏ hẳn dòng reset
 	 * đi thì test đó vẫn xanh. Chuỗi hỏng-hỏng-XONG-hỏng-hỏng-hỏng dưới đây là
 	 * chuỗi ngắn nhất phân biệt được: có reset thì chạm ngưỡng ở bài THỨ SÁU và
@@ -189,7 +189,7 @@ class SummarizeHandlerTest {
 	 * không bao giờ được gọi model.
 	 */
 	@Test
-	void mot_lan_thanh_cong_reset_bo_dem() {
+	void a_single_success_resets_the_counter() {
 		for (String id : List.of("a1", "a2", "a3", "a4", "a5", "a6")) {
 			given(catalog.findSummarizable(id)).willReturn(Optional.of(article(id)));
 		}
@@ -213,7 +213,7 @@ class SummarizeHandlerTest {
 	 * độ hỏng mà cơ chế này tồn tại để chặn.
 	 */
 	@Test
-	void bai_bi_bo_qua_khong_reset_bo_dem() {
+	void a_skipped_article_does_not_reset_the_counter() {
 		given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
 		given(catalog.findSummarizable("a2")).willReturn(Optional.empty());
 		given(catalog.findSummarizable("a3")).willReturn(Optional.of(article("a3")));
@@ -234,16 +234,16 @@ class SummarizeHandlerTest {
 	 * thì mọi test khác vẫn xanh, chỉ là X-Ray hiện HAI trace rời rạc thay vì một.
 	 *
 	 * Cần `Tracer` và `Propagator` THẬT nên là `@SpringBootTest`; `Propagator.NOOP`
-	 * không parse gì cả. Cùng khuôn với `IngestionRunnerTest.TraceContextSangVirtualThread`.
+	 * không parse gì cả. Cùng khuôn với `IngestionRunnerTest.TraceContextIntoVirtualThread`.
 	 */
 	@Nested
 	@SpringBootTest
-	class NoiTraceQuaSqs {
+	class TraceAcrossSqs {
 
 		private static final String TRACEPARENT =
 				"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 
-		private static final String TRACE_ID_CHA = "0af7651916cd43dd8448eb211c80319c";
+		private static final String PARENT_TRACE_ID = "0af7651916cd43dd8448eb211c80319c";
 
 		@Autowired
 		Tracer tracer;
@@ -252,7 +252,7 @@ class SummarizeHandlerTest {
 		Propagator propagator;
 
 		/** Đo TRONG lúc xử lý — sau khi `span.end()` thì không còn gì để hỏi. */
-		private AtomicReference<String> traceIdLucXuLy() {
+		private AtomicReference<String> traceIdWhileHandling() {
 			AtomicReference<String> traceId = new AtomicReference<>();
 			given(summarizer.summarize(any())).willAnswer(inv -> {
 				traceId.set(tracer.currentSpan().context().traceId());
@@ -261,23 +261,23 @@ class SummarizeHandlerTest {
 			return traceId;
 		}
 
-		private SummarizeHandler handlerThat() {
+		private SummarizeHandler realHandler() {
 			return new SummarizeHandler(catalog, summarizer, events, tracer, propagator, 3);
 		}
 
 		@Test
-		void span_summarize_nam_trong_trace_cua_luot_ingest() {
+		void the_summarize_span_sits_inside_the_ingest_run_trace() {
 			given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
-			AtomicReference<String> traceId = traceIdLucXuLy();
+			AtomicReference<String> traceId = traceIdWhileHandling();
 
-			handlerThat().handle(Map.of("Records", List.of(Map.of(
+			realHandler().handle(Map.of("Records", List.of(Map.of(
 					"messageId", "msg-a1",
 					"eventSource", "aws:sqs",
 					"body", "{\"articleId\":\"a1\"}",
 					"messageAttributes", Map.of("traceparent", Map.of(
 							"stringValue", TRACEPARENT, "dataType", "String"))))));
 
-			assertThat(traceId).hasValue(TRACE_ID_CHA);
+			assertThat(traceId).hasValue(PARENT_TRACE_ID);
 		}
 
 		/**
@@ -286,13 +286,13 @@ class SummarizeHandlerTest {
 		 * chạy ngoài mọi span, vì lúc đó dòng log của lượt xử lý mất `trace_id`.
 		 */
 		@Test
-		void khong_co_traceparent_thi_bat_dau_trace_moi() {
+		void no_traceparent_starts_a_brand_new_trace() {
 			given(catalog.findSummarizable("a1")).willReturn(Optional.of(article("a1")));
-			AtomicReference<String> traceId = traceIdLucXuLy();
+			AtomicReference<String> traceId = traceIdWhileHandling();
 
-			handlerThat().handle(sqsPayload("a1"));
+			realHandler().handle(sqsPayload("a1"));
 
-			assertThat(traceId.get()).isNotBlank().isNotEqualTo(TRACE_ID_CHA);
+			assertThat(traceId.get()).isNotBlank().isNotEqualTo(PARENT_TRACE_ID);
 		}
 	}
 }

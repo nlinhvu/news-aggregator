@@ -25,14 +25,14 @@ class ArticleControllerTest {
 	MockMvc mockMvc;
 
 	@Test
-	void tra_ve_mang_rong_khi_chua_co_du_lieu() throws Exception {
+	void returns_an_empty_array_when_there_is_no_data() throws Exception {
 		mockMvc.perform(get("/api/articles"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$").isArray());
 	}
 
 	@Test
-	void kep_limit_vao_khoang_hop_le() throws Exception {
+	void clamps_limit_into_the_valid_range() throws Exception {
 		// limit vô lý không được làm hỏng request, chỉ bị kẹp lại.
 		mockMvc.perform(get("/api/articles?limit=99999"))
 				.andExpect(status().isOk());

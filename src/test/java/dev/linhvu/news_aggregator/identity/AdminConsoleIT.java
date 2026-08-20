@@ -77,7 +77,7 @@ class AdminConsoleIT {
 	private TestRestTemplate rest;
 
 	@BeforeEach
-	void khongDiTheoRedirect() {
+	void doNotFollowRedirects() {
 		this.rest = autowired.withRedirects(HttpRedirects.DONT_FOLLOW);
 	}
 
@@ -97,7 +97,7 @@ class AdminConsoleIT {
 	 * flag nào được khai".
 	 */
 	@BeforeEach
-	void dungFeatureManagerThatChuKhongPhaiFallback() {
+	void useRealFeatureManagerNotFallback() {
 		TestFeatureManagerProvider.setFeatureManager(featureManager);
 		FeatureContext.clearCache();
 		// Bật `USER_ACCOUNTS` trong state repository THẬT (bảng `feature-toggles`
@@ -121,7 +121,7 @@ class AdminConsoleIT {
 	 * sang class khác kèm cả Spring context đã đóng.
 	 */
 	@AfterEach
-	void traLaiFeatureManagerVeNguyenTrang() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
@@ -136,8 +136,8 @@ class AdminConsoleIT {
 	 * một dòng log.
 	 */
 	@Test
-	void nguoi_thuoc_ops_mo_duoc_console_va_thay_du_flag() {
-		String cookie = dangNhap();
+	void an_ops_member_opens_the_console_and_sees_every_flag() {
+		String cookie = login();
 
 		ResponseEntity<String> index = exchange(at("/admin/togglz/index"),
 				HttpMethod.GET, cookie, String.class);
@@ -164,8 +164,8 @@ class AdminConsoleIT {
 	 * field nào — mà "template có render hay không" chính là điều cần kiểm.
 	 */
 	@Test
-	void lat_flag_tu_console_di_lot_csrf_va_doi_that_trang_thai() {
-		String cookie = dangNhap();
+	void flipping_a_flag_from_the_console_passes_csrf_and_really_changes_state() {
+		String cookie = login();
 		ResponseEntity<String> index = exchange(at("/admin/togglz/index"),
 				HttpMethod.GET, cookie, String.class);
 
@@ -173,10 +173,10 @@ class AdminConsoleIT {
 				.as("form của console phải mang field CSRF của Spring, không chỉ togglz_csrf")
 				.isEqualTo("_csrf");
 
-		boolean truoc = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
+		boolean before = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
 
 		ResponseEntity<String> flip = post(at("/admin/togglz/edit"), cookie,
-				formLatFlag(index.getBody(), NewsFeature.AI_SUMMARIZATION, !truoc));
+				formFlipFlag(index.getBody(), NewsFeature.AI_SUMMARIZATION, !before));
 
 		assertThat(flip.getStatusCode())
 				.as("403 ở đây nghĩa là CsrfFilter chặn — form thiếu token của Spring")
@@ -185,7 +185,7 @@ class AdminConsoleIT {
 		// đúng nhưng không ghi được xuống bảng vẫn thoả mọi vế ở trên.
 		assertThat(featureManager.isActive(NewsFeature.AI_SUMMARIZATION))
 				.as("lật flag phải đổi trạng thái THẬT trong state repository")
-				.isEqualTo(!truoc);
+				.isEqualTo(!before);
 	}
 
 	/**
@@ -203,8 +203,8 @@ class AdminConsoleIT {
 	 * nên trình duyệt vẫn gửi bản có body. Phải có CẢ HAI.
 	 */
 	@Test
-	void console_mang_script_rewrite_va_lat_duoc_flag_bang_query_string() {
-		String cookie = dangNhap();
+	void the_console_carries_the_rewrite_script_and_can_flip_a_flag_by_query_string() {
+		String cookie = login();
 		ResponseEntity<String> index = exchange(at("/admin/togglz/index"),
 				HttpMethod.GET, cookie, String.class);
 
@@ -223,11 +223,11 @@ class AdminConsoleIT {
 				.isEqualTo(index.getBody().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
 
 		String csrf = csrfValue(index.getBody());
-		boolean truoc = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
+		boolean before = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
 
 		// ĐÚNG hình dạng script gửi: tham số ở query string, thân RỖNG.
 		String query = "?f=" + NewsFeature.AI_SUMMARIZATION.name()
-				+ (truoc ? "" : "&enabled=enabled")
+				+ (before ? "" : "&enabled=enabled")
 				+ "&_csrf=" + csrf;
 		ResponseEntity<String> flip = rest.exchange(at("/admin/togglz/edit" + query),
 				HttpMethod.POST, new HttpEntity<>(cookieHeaders(cookie)), String.class);
@@ -235,7 +235,7 @@ class AdminConsoleIT {
 		assertThat(flip.getStatusCode()).isNotEqualTo(HttpStatus.FORBIDDEN);
 		assertThat(featureManager.isActive(NewsFeature.AI_SUMMARIZATION))
 				.as("POST thân rỗng + query string phải lật được flag THẬT")
-				.isEqualTo(!truoc);
+				.isEqualTo(!before);
 		// Redirect THỨ HAI của console, và là cái người vận hành gặp ngay sau khi
 		// bấm nút: `EditPageHandler` gọi `sendRedirect("index")` — TƯƠNG ĐỐI THẬT
 		// SỰ, không có dấu `/` đầu. Nối chuỗi thay vì `URI.resolve` sẽ biến nó
@@ -270,8 +270,8 @@ class AdminConsoleIT {
 	 * lỗi lộ ra — một IT chạy đúng cổng 8080 sẽ xanh trong khi prod hỏng.
 	 */
 	@Test
-	void chang_302_cua_console_tro_ve_domain_cong_khai_khong_phai_host_cua_request() {
-		String cookie = dangNhap();
+	void the_console_302_points_at_the_public_domain_not_the_request_host() {
+		String cookie = login();
 
 		ResponseEntity<Void> toIndex = exchange(at("/admin/togglz"),
 				HttpMethod.GET, cookie, Void.class);
@@ -293,16 +293,27 @@ class AdminConsoleIT {
 	 *
 	 * <p>Test phải chạy trên luồng THẬT: `SecurityContextHolder` chỉ có principal
 	 * trong thread xử lý request của một phiên đã đăng nhập. Gọi thẳng
-	 * `setFeatureState` trong một unit test sẽ log `sub=khong-ro` và xanh vì lý
+	 * `setFeatureState` trong một unit test sẽ log `sub=unknown` và xanh vì lý
 	 * do sai.
 	 */
 	@Test
-	void moi_lan_doi_flag_de_lai_mot_dong_log_co_sub_va_gia_tri_cu_moi() {
-		String cookie = dangNhap();
+	void every_flag_change_leaves_one_log_line_with_sub_and_the_old_and_new_values() {
+		// Ghi TRẠNG THÁI NỀN trước khi đo, cùng đường ghi thật mà `@BeforeEach`
+		// dùng cho `USER_ACCOUNTS`.
+		//
+		// `featureManager.isActive` trả `false` cho CẢ HAI trường hợp "có item ghi
+		// OFF" và "chưa có item nào", nhưng audit log phân biệt chúng — `truoc=OFF`
+		// với `truoc=missing`. Thiếu dòng này thì test chỉ xanh khi một test khác
+		// đã kịp ghi `AI_SUMMARIZATION` trước nó, mà JUnit sắp thứ tự method theo
+		// TÊN: đổi tên một test bất kỳ trong class là đủ để nó đỏ.
+		featureManager.setFeatureState(
+				new FeatureState(NewsFeature.AI_SUMMARIZATION, false));
+
+		String cookie = login();
 		ResponseEntity<String> index = exchange(at("/admin/togglz/index"),
 				HttpMethod.GET, cookie, String.class);
 		String csrf = csrfValue(index.getBody());
-		boolean truoc = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
+		boolean before = featureManager.isActive(NewsFeature.AI_SUMMARIZATION);
 
 		ListAppender<ILoggingEvent> logs = new ListAppender<>();
 		ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
@@ -312,7 +323,7 @@ class AdminConsoleIT {
 		logger.addAppender(logs);
 		try {
 			rest.exchange(at("/admin/togglz/edit?f=" + NewsFeature.AI_SUMMARIZATION.name()
-							+ (truoc ? "" : "&enabled=enabled") + "&_csrf=" + csrf),
+							+ (before ? "" : "&enabled=enabled") + "&_csrf=" + csrf),
 					HttpMethod.POST, new HttpEntity<>(cookieHeaders(cookie)), String.class);
 		}
 		finally {
@@ -324,8 +335,8 @@ class AdminConsoleIT {
 				.extracting(ILoggingEvent::getFormattedMessage).asString()
 				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
 				.contains("flag=" + NewsFeature.AI_SUMMARIZATION.name())
-				.contains("truoc=" + (truoc ? "ON" : "OFF"))
-				.contains("sau=" + (truoc ? "OFF" : "ON"))
+				.contains("truoc=" + (before ? "ON" : "OFF"))
+				.contains("sau=" + (before ? "OFF" : "ON"))
 				// ID token của mock server mang `email: dev@local`, nên vế này đo
 				// trên dữ liệu thật chứ không trên một map tự dựng.
 				.doesNotContain("dev@local");
@@ -339,12 +350,12 @@ class AdminConsoleIT {
 	 * nếu tên claim đọc sai thì test này đỏ còn test kia vẫn xanh.
 	 */
 	@Test
-	void an_danh_bi_day_sang_dang_nhap_chu_khong_nhan_trang_trang() {
-		ResponseEntity<Void> anDanh = exchange(at("/admin/togglz/index"),
+	void anonymous_is_pushed_to_login_instead_of_getting_a_blank_page() {
+		ResponseEntity<Void> anonymous = exchange(at("/admin/togglz/index"),
 				HttpMethod.GET, null, Void.class);
 
-		assertThat(anDanh.getStatusCode()).isEqualTo(HttpStatus.FOUND);
-		assertThat(anDanh.getHeaders().getLocation().toString())
+		assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.FOUND);
+		assertThat(anonymous.getHeaders().getLocation().toString())
 				.isEqualTo("http://localhost:8080/api/auth/login/cognito");
 	}
 
@@ -355,8 +366,8 @@ class AdminConsoleIT {
 	 * cách một checkbox HTML hoạt động, không phải `enabled=false`. Gửi `false`
 	 * sẽ được đọc là "có mặt" và flag bật lên, tức test xanh theo chiều ngược.
 	 */
-	private MultiValueMap<String, String> formLatFlag(String html, NewsFeature feature,
-			boolean bat) {
+	private MultiValueMap<String, String> formFlipFlag(String html, NewsFeature feature,
+			boolean enabled) {
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		Matcher matcher = HIDDEN_FIELD.matcher(html);
 		while (matcher.find()) {
@@ -365,7 +376,7 @@ class AdminConsoleIT {
 			}
 		}
 		form.add("f", feature.name());
-		if (bat) {
+		if (enabled) {
 			form.add("enabled", "enabled");
 		}
 		return form;
@@ -398,7 +409,7 @@ class AdminConsoleIT {
 	}
 
 	/** Trọn luồng authorization code, trả về cookie phiên — khuôn của `LoginFlowIT`. */
-	private String dangNhap() {
+	private String login() {
 		ResponseEntity<Void> toEntryPoint = get(at("/api/auth/login"), null);
 		String cookie = sessionCookie(toEntryPoint, null);
 

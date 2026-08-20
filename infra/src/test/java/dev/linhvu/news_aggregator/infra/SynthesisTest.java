@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SynthesisTest {
 
 	@Test
-	void ca_ba_stage_synth_duoc_khong_can_credential() {
+	void all_three_stages_synth_without_credentials() {
 		App app = new App();
 		new AppStage(app, EnvConfig.DEV);
 		new AppStage(app, EnvConfig.QA);

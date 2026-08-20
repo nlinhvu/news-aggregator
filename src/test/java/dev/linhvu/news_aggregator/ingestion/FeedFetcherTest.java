@@ -36,7 +36,7 @@ class FeedFetcherTest {
 	private final FeedFetcher fetcher = new FeedFetcher(builder.build(), 5_242_880);
 
 	@Test
-	void gui_ca_hai_header_khi_da_co_trang_thai() {
+	void sends_both_headers_once_state_exists() {
 		server.expect(requestTo(FEED))
 				.andExpect(header("If-None-Match", "\"abc\""))
 				.andExpect(header("If-Modified-Since", "Mon, 04 Aug 2026 00:00:00 GMT"))
@@ -54,7 +54,7 @@ class FeedFetcherTest {
 	 * làm hỏng đúng nguồn này.
 	 */
 	@Test
-	void chi_gui_if_none_match_khi_chi_co_etag() {
+	void sends_only_if_none_match_when_only_the_etag_is_known() {
 		server.expect(requestTo(FEED))
 				.andExpect(header("If-None-Match", "\"abc\""))
 				.andExpect(headerDoesNotExist("If-Modified-Since"))
@@ -71,7 +71,7 @@ class FeedFetcherTest {
 	 * là bỏ hẳn một nửa số nguồn thật.
 	 */
 	@Test
-	void chi_gui_if_modified_since_khi_chi_co_last_modified() {
+	void sends_only_if_modified_since_when_only_last_modified_is_known() {
 		server.expect(requestTo(FEED))
 				.andExpect(headerDoesNotExist("If-None-Match"))
 				.andExpect(header("If-Modified-Since", "Mon, 04 Aug 2026 00:00:00 GMT"))
@@ -89,7 +89,7 @@ class FeedFetcherTest {
 	 * chạy được lần đầu".
 	 */
 	@Test
-	void khong_gui_header_khi_chua_co_trang_thai() {
+	void sends_no_header_while_there_is_no_state_yet() {
 		server.expect(requestTo(FEED))
 				.andExpect(headerDoesNotExist("If-None-Match"))
 				.andExpect(headerDoesNotExist("If-Modified-Since"))
@@ -112,7 +112,7 @@ class FeedFetcherTest {
 	 * unconditional — tức Task 16 tự vô hiệu hoá mà không có lỗi nào.
 	 */
 	@Test
-	void tra_ve_not_modified_khi_304_va_giu_nguyen_validator() {
+	void returns_not_modified_on_304_and_keeps_the_validators() {
 		server.expect(requestTo(FEED)).andRespond(withStatus(HttpStatus.NOT_MODIFIED));
 
 		FetchOutcome outcome = fetcher.fetch(new SourceView("a", "A", FEED,
@@ -130,14 +130,14 @@ class FeedFetcherTest {
 	 * đỏ để mà nhìn.
 	 */
 	@Test
-	void lay_validator_moi_tu_response_khi_200() {
+	void takes_the_new_validators_from_a_200_response() {
 		server.expect(requestTo(FEED))
 				.andRespond(withSuccess(XML, MediaType.APPLICATION_XML)
 						.header("ETag", "\"moi\"")
 						.header("Last-Modified", "Tue, 05 Aug 2026 00:00:00 GMT"));
 
 		FetchOutcome outcome = fetcher.fetch(new SourceView("a", "A", FEED,
-				"\"cu\"", "Mon, 04 Aug 2026 00:00:00 GMT"));
+				"\"old\"", "Mon, 04 Aug 2026 00:00:00 GMT"));
 
 		assertThat(outcome).isInstanceOfSatisfying(FetchOutcome.Body.class, body -> {
 			assertThat(body.etag()).isEqualTo("\"moi\"");

@@ -84,7 +84,7 @@ public class MockOAuth2ServerConfiguration {
 	InitializingBean cognitoSecretParameter(SsmClient ssm) {
 		return () -> ssm.putParameter(PutParameterRequest.builder()
 				.name("/news/local/cognito-client-secret")
-				.value("local-secret-khong-duoc-kiem")
+				.value("local-secret-not-verified")
 				.type(ParameterType.SECURE_STRING)
 				.overwrite(true)
 				.build());

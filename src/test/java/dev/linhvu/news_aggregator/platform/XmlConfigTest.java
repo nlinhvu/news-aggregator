@@ -32,7 +32,7 @@ class XmlConfigTest {
 	 * role. Đây không phải rủi ro lý thuyết.
 	 */
 	@Test
-	void tu_choi_external_entity() {
+	void rejects_external_entities() {
 		String xxe = """
 				<?xml version="1.0"?>
 				<!DOCTYPE rss [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
@@ -51,7 +51,7 @@ class XmlConfigTest {
 	 * phải một.
 	 */
 	@Test
-	void tu_choi_entity_noi_bo_lam_no_bo_nho() {
+	void rejects_the_internal_entity_that_blows_up_memory() {
 		String lol = """
 				<?xml version="1.0"?>
 				<!DOCTYPE lolz [
@@ -88,21 +88,21 @@ class XmlConfigTest {
 	 * đã chặn trước: nó là lớp cuối cùng nếu có ai bật lại DTD. Mutation test
 	 * cho thấy lật riêng nó thì không test nào đỏ — đúng và vô hại, vì lật
 	 * riêng nó cũng không khai thác được. Lật CẢ HAI thì
-	 * `tu_choi_external_entity` đỏ ngay.
+	 * `rejects_external_entities` đỏ ngay.
 	 */
 	@Test
-	void doi_chung_mapper_khong_siet_thi_entity_duoc_giai() {
+	void a_control_mapper_without_hardening_does_expand_the_entity() {
 		String xml = """
 				<?xml version="1.0"?>
 				<!DOCTYPE rss [ <!ENTITY greeting "xin chào"> ]>
 				<rss version="2.0"><channel><item><title>&greeting;</title></item></channel></rss>
 				""";
 
-		XmlMapper khongSiet = XmlMapper.builder(
+		XmlMapper unhardened = XmlMapper.builder(
 				tools.jackson.dataformat.xml.XmlFactory.builder()
-						.xmlInputFactory(dtdBatLai()).build()).build();
+						.xmlInputFactory(dtdReEnabled()).build()).build();
 
-		assertThat(khongSiet.readValue(bytes(xml), JsonNode.class)
+		assertThat(unhardened.readValue(bytes(xml), JsonNode.class)
 				.path("channel").path("item").path("title").asString())
 				.isEqualTo("xin chào");
 
@@ -111,7 +111,7 @@ class XmlConfigTest {
 				.isNotNull();
 	}
 
-	private static javax.xml.stream.XMLInputFactory dtdBatLai() {
+	private static javax.xml.stream.XMLInputFactory dtdReEnabled() {
 		javax.xml.stream.XMLInputFactory f = javax.xml.stream.XMLInputFactory.newFactory();
 		f.setProperty(javax.xml.stream.XMLInputFactory.SUPPORT_DTD, true);
 		f.setProperty(javax.xml.stream.XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, true);
@@ -125,7 +125,7 @@ class XmlConfigTest {
 	 * cả nguồn.
 	 */
 	@Test
-	void chap_nhan_element_khong_khai_bao() {
+	void accepts_undeclared_elements() {
 		String xml = """
 				<?xml version="1.0"?>
 				<rss xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">

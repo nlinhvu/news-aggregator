@@ -71,14 +71,14 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 	 * không liên quan gì tới ký SigV4.
 	 */
 	ComponentLoader componentLoader() {
-		ComponentLoader mac_dinh = ComponentLoader.forClassLoader(getClass().getClassLoader());
+		ComponentLoader defaultLoader = ComponentLoader.forClassLoader(getClass().getClassLoader());
 		return new ComponentLoader() {
 			@Override
 			@SuppressWarnings("unchecked")
 			public <T> Iterable<T> load(Class<T> spi) {
 				return spi == HttpSenderProvider.class
 						? (Iterable<T>) List.of(SigV4HttpSenderProvider.this)
-						: mac_dinh.load(spi);
+						: defaultLoader.load(spi);
 			}
 		};
 	}
@@ -103,7 +103,7 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 		 * phải mẹo: JDK tự sinh `Host` và `Content-Length` với đúng giá trị mà chữ ký
 		 * đã bao gồm, nên chữ ký vẫn khớp.
 		 */
-		private static final Set<String> JDK_TU_DAT = Set.of(
+		private static final Set<String> JDK_SET_BY_US = Set.of(
 				"host", "content-length", "connection", "expect", "upgrade");
 
 		private final HttpSenderConfig config;
@@ -112,7 +112,7 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 
 		private final String region;
 
-		private final boolean ky;
+		private final boolean signing;
 
 		private final HttpClient http;
 
@@ -121,7 +121,7 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 			this.config = config;
 			this.credentials = credentials;
 			this.region = region;
-			this.ky = config.getEndpoint().getHost().endsWith(AWS_HOST_SUFFIX);
+			this.signing = config.getEndpoint().getHost().endsWith(AWS_HOST_SUFFIX);
 			this.http = HttpClient.newBuilder()
 					.connectTimeout(config.getConnectTimeout())
 					.build();
@@ -163,8 +163,8 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 				writer.writeMessage(buffer);
 			}
 			else {
-				try (OutputStream nen = compressor.compress(buffer)) {
-					writer.writeMessage(nen);
+				try (OutputStream compressed = compressor.compress(buffer)) {
+					writer.writeMessage(compressed);
 				}
 			}
 			return buffer.toByteArray();
@@ -174,9 +174,9 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 			HttpRequest.Builder request = HttpRequest.newBuilder(this.config.getEndpoint())
 					.timeout(this.config.getTimeout())
 					.POST(BodyPublishers.ofByteArray(body));
-			headers(body).forEach((ten, gia_tri) -> {
-				if (!JDK_TU_DAT.contains(ten.toLowerCase(Locale.ROOT))) {
-					gia_tri.forEach(v -> request.header(ten, v));
+			headers(body).forEach((name, value) -> {
+				if (!JDK_SET_BY_US.contains(name.toLowerCase(Locale.ROOT))) {
+					value.forEach(v -> request.header(name, v));
 				}
 			});
 			return request.build();
@@ -194,7 +194,7 @@ class SigV4HttpSenderProvider implements HttpSenderProvider {
 				headers.put("Content-Encoding", List.of(compressor.getEncoding()));
 			}
 			this.config.getHeadersSupplier().get().forEach(headers::putIfAbsent);
-			return this.ky ? signed(body, headers) : headers;
+			return this.signing ? signed(body, headers) : headers;
 		}
 
 		private Map<String, List<String>> signed(byte[] body,

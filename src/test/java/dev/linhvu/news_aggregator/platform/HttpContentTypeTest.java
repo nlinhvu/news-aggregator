@@ -37,25 +37,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class HttpContentTypeTest {
 
 	/** `Accept` mà Chrome/Firefox/Safari gửi khi người dùng mở thẳng một URL. */
-	private static final String ACCEPT_CUA_TRINH_DUYET =
+	private static final String BROWSER_ACCEPT =
 			"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
 	@Autowired
 	MockMvc mvc;
 
 	@Test
-	void trinh_duyet_mo_api_van_nhan_json_khong_phai_xml() throws Exception {
-		mvc.perform(get("/api/articles?limit=1").header("Accept", ACCEPT_CUA_TRINH_DUYET))
+	void a_browser_opening_the_api_still_gets_json_not_xml() throws Exception {
+		mvc.perform(get("/api/articles?limit=1").header("Accept", BROWSER_ACCEPT))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
 
-		mvc.perform(get("/api/health").header("Accept", ACCEPT_CUA_TRINH_DUYET))
+		mvc.perform(get("/api/health").header("Accept", BROWSER_ACCEPT))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
 	}
 
 	@Test
-	void doi_dich_danh_xml_thi_bi_tu_choi_chu_khong_duoc_phuc_vu() throws Exception {
+	void asking_for_xml_explicitly_is_rejected_not_served() throws Exception {
 		// 406 là câu trả lời TRUNG THỰC: ta không phục vụ XML. Trả XML cho người
 		// đòi XML mới là thứ làm hợp đồng API thành lời nói suông.
 		mvc.perform(get("/api/articles?limit=1").header("Accept", MediaType.APPLICATION_XML_VALUE))

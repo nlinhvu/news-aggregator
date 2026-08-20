@@ -37,7 +37,7 @@ class TracingSmokeTest {
 	ApplicationContext context;
 
 	@Test
-	void trace_id_nam_trong_mdc_khi_co_span() {
+	void the_trace_id_sits_in_the_mdc_whenever_a_span_exists() {
 		var span = tracer.nextSpan().name("test");
 		try (var ignored = tracer.withSpan(span.start())) {
 			assertThat(MDC.get("traceId"))
@@ -51,7 +51,7 @@ class TracingSmokeTest {
 	}
 
 	@Test
-	void propagator_ton_tai_de_task_19_va_20_dung_duoc() {
+	void the_propagator_exists_so_tasks_19_and_20_can_use_it() {
 		assertThat(propagator).isNotNull();
 	}
 
@@ -64,8 +64,8 @@ class TracingSmokeTest {
 	 * chết trong bộ nhớ và Tempo/X-Ray rỗng.
 	 */
 	@Test
-	void exporter_ton_tai_nen_span_thuc_su_roi_khoi_tien_trinh() {
-		assertThat(kieuCuaMoiBean())
+	void the_exporter_exists_so_spans_really_leave_the_process() {
+		assertThat(typesOfEveryBean())
 				.as("sai tên key endpoint thì không có exporter nào, mà cũng không có lỗi nào")
 				.contains("io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter");
 	}
@@ -79,12 +79,12 @@ class TracingSmokeTest {
 	 * giữ chúng tắt.
 	 */
 	@Test
-	void chi_export_trace_khong_export_metric_va_log() {
-		assertThat(kieuCuaMoiBean())
+	void exports_traces_only_not_metrics_or_logs() {
+		assertThat(typesOfEveryBean())
 				.as("metric đi bằng metric filter trên log (Task 11), không bằng OTLP")
-				.noneMatch(kieu -> kieu.endsWith("OtlpMeterRegistry"))
+				.noneMatch(type -> type.endsWith("OtlpMeterRegistry"))
 				.as("log đi bằng stdout ECS JSON → CloudWatch")
-				.noneMatch(kieu -> kieu.contains("OtlpHttpLogRecordExporter"));
+				.noneMatch(type -> type.contains("OtlpHttpLogRecordExporter"));
 	}
 
 	/**
@@ -92,10 +92,10 @@ class TracingSmokeTest {
 	 * OTLP ở trên đều là runtime-scope của starter, không có trên test compile
 	 * classpath — `import` chúng là lỗi biên dịch.
 	 */
-	private List<String> kieuCuaMoiBean() {
+	private List<String> typesOfEveryBean() {
 		return Arrays.stream(context.getBeanDefinitionNames())
 				.map(context::getType)
-				.filter(kieu -> kieu != null)
+				.filter(type -> type != null)
 				.map(Class::getName)
 				.toList();
 	}

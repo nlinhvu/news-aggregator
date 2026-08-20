@@ -35,7 +35,7 @@ class JacksonFeedParserTest {
 	 * `FeedDates`, không phải của parser.
 	 */
 	@Test
-	void parse_dung_gia_tri_cua_tung_item() throws IOException {
+	void parses_the_values_of_every_item_correctly() throws IOException {
 		List<ParsedItem> items = parser.parse(fixture("feeds/spring-blog.xml"));
 
 		assertThat(items).hasSize(3);
@@ -52,7 +52,7 @@ class JacksonFeedParserTest {
 	 * tự bài trên trang trông hơi lạ", đúng loại triệu chứng không ai truy.
 	 */
 	@Test
-	void giu_nguyen_thu_tu_cua_feed() throws IOException {
+	void keeps_the_order_of_the_feed() throws IOException {
 		assertThat(parser.parse(fixture("feeds/spring-blog.xml")))
 				.extracting(ParsedItem::title)
 				.containsExactly(
@@ -67,7 +67,7 @@ class JacksonFeedParserTest {
 	 * BÁO và mang excerpt, nên nó không còn là element lạ nữa.)
 	 */
 	@Test
-	void bo_qua_element_khong_khai_bao() throws IOException {
+	void ignores_undeclared_elements() throws IOException {
 		assertThat(parser.parse(fixture("feeds/spring-blog.xml"))).hasSize(3);
 	}
 
@@ -77,7 +77,7 @@ class JacksonFeedParserTest {
 	 * để quyết định (và để đếm vào `failed`).
 	 */
 	@Test
-	void ngay_hong_van_ra_du_item_va_giu_nguyen_van() throws IOException {
+	void a_broken_date_still_yields_every_item_and_keeps_the_raw_text() throws IOException {
 		List<ParsedItem> items = parser.parse(fixture("feeds/broken-date.xml"));
 
 		assertThat(items).hasSize(3);
@@ -91,7 +91,7 @@ class JacksonFeedParserTest {
 	 * đi qua, nên nếu không viết ra ở đây thì nó hoàn toàn không được kiểm.
 	 */
 	@Test
-	void dung_guid_khi_thieu_link() {
+	void uses_the_guid_when_the_link_is_missing() {
 		byte[] xml = """
 				<?xml version="1.0"?>
 				<rss version="2.0"><channel>
@@ -113,7 +113,7 @@ class JacksonFeedParserTest {
 	 * cái nào cũng qua.
 	 */
 	@Test
-	void parse_dung_gia_tri_cua_tung_entry_atom() throws IOException {
+	void parses_the_values_of_every_atom_entry_correctly() throws IOException {
 		List<ParsedItem> items = parser.parse(fixture("feeds/inside-java.xml"));
 
 		assertThat(items).containsExactly(
@@ -143,7 +143,7 @@ class JacksonFeedParserTest {
 	 * là "mọi item của nguồn Atom bị bỏ", không phải một exception rõ ràng.
 	 */
 	@Test
-	void atom_lay_link_tu_thuoc_tinh_href() throws IOException {
+	void atom_takes_the_link_from_the_href_attribute() throws IOException {
 		assertThat(parser.parse(fixture("feeds/inside-java.xml")))
 				.extracting(ParsedItem::link)
 				.allSatisfy(l -> assertThat(l).startsWith("http"));
@@ -156,20 +156,20 @@ class JacksonFeedParserTest {
 	 * bài viết: URL vẫn hợp lệ, vẫn `http`, nên không có gì đỏ cả.
 	 */
 	@Test
-	void atom_chi_lay_link_alternate() {
+	void atom_takes_only_the_alternate_link() {
 		byte[] atom = """
 				<?xml version="1.0"?>
 				<feed xmlns="http://www.w3.org/2005/Atom">
 				  <entry><title>Nhiều link</title>
 				    <link rel="replies" href="https://example.test/binh-luan"/>
-				    <link rel="alternate" href="https://example.test/bai-viet"/>
+				    <link rel="alternate" href="https://example.test/article"/>
 				    <updated>2026-08-04T00:00:00Z</updated></entry>
 				</feed>
 				""".getBytes(StandardCharsets.UTF_8);
 
 		assertThat(parser.parse(atom)).singleElement()
 				.extracting(ParsedItem::link)
-				.isEqualTo("https://example.test/bai-viet");
+				.isEqualTo("https://example.test/article");
 	}
 
 	/**
@@ -182,12 +182,12 @@ class JacksonFeedParserTest {
 	 * `updated`, không được ra `null` (`FeedDates` sẽ NPE ở tầng trên).
 	 */
 	@Test
-	void atom_uu_tien_published_hon_updated() {
+	void atom_prefers_published_over_updated() {
 		byte[] atom = """
 				<?xml version="1.0"?>
 				<feed xmlns="http://www.w3.org/2005/Atom">
 				  <entry><title>Sửa chính tả hôm nay</title>
-				    <link rel="alternate" href="https://example.test/bai-cu"/>
+				    <link rel="alternate" href="https://example.test/old-article"/>
 				    <updated>2026-08-06T00:00:00Z</updated>
 				    <published>2026-01-01T00:00:00Z</published></entry>
 				  <entry><title>Không có published</title>
@@ -205,7 +205,7 @@ class JacksonFeedParserTest {
 	 * RSS 2.0 mang nội dung trong `<description>`.
 	 */
 	@Test
-	void rss_lay_excerpt_tu_description() {
+	void rss_takes_the_excerpt_from_description() {
 		byte[] body = """
 				<?xml version="1.0"?>
 				<rss version="2.0"><channel>
@@ -230,7 +230,7 @@ class JacksonFeedParserTest {
 	 * để làm việc hơn.
 	 */
 	@Test
-	void rss_uu_tien_content_encoded_hon_description() {
+	void rss_prefers_content_encoded_over_description() {
 		byte[] body = """
 				<?xml version="1.0"?>
 				<rss version="2.0"
@@ -258,7 +258,7 @@ class JacksonFeedParserTest {
 	 * lặng, không exception, nhìn y hệt "Spring không đăng bài mới".
 	 */
 	@Test
-	void spring_blog_lay_excerpt_tu_content_encoded() throws IOException {
+	void spring_blog_takes_the_excerpt_from_content_encoded() throws IOException {
 		assertThat(parser.parse(fixture("feeds/spring-blog.xml")))
 				.extracting(ParsedItem::excerpt)
 				.allSatisfy(e -> assertThat(e).isNotNull())
@@ -276,7 +276,7 @@ class JacksonFeedParserTest {
 	 * "nguồn đó không đăng bài mới".
 	 */
 	@Test
-	void atom_uu_tien_content_hon_summary() {
+	void atom_prefers_content_over_summary() {
 		byte[] body = """
 				<?xml version="1.0"?>
 				<feed xmlns="http://www.w3.org/2005/Atom">
@@ -296,7 +296,7 @@ class JacksonFeedParserTest {
 	}
 
 	@Test
-	void atom_lui_ve_summary_khi_khong_co_content() {
+	void atom_falls_back_to_summary_when_there_is_no_content() {
 		byte[] body = """
 				<?xml version="1.0"?>
 				<feed xmlns="http://www.w3.org/2005/Atom">
@@ -321,7 +321,7 @@ class JacksonFeedParserTest {
 	 * với việc thiếu một đoạn tóm tắt.
 	 */
 	@Test
-	void item_khong_co_noi_dung_van_duoc_giu_voi_excerpt_null() {
+	void an_item_with_no_content_is_still_kept_with_a_null_excerpt() {
 		byte[] body = """
 				<?xml version="1.0"?>
 				<rss version="2.0"><channel>
@@ -343,8 +343,8 @@ class JacksonFeedParserTest {
 	 * ra là hoá đơn Bedrock chứ không phải một dòng đỏ.
 	 */
 	@Test
-	void ap_dung_tran_do_dai_khi_parse() {
-		FeedParser hepHoi = new JacksonFeedParser(new XmlConfig().feedXmlMapper(), 12);
+	void applies_the_length_cap_while_parsing() {
+		FeedParser strict = new JacksonFeedParser(new XmlConfig().feedXmlMapper(), 12);
 		byte[] body = """
 				<?xml version="1.0"?>
 				<rss version="2.0"><channel>
@@ -356,7 +356,7 @@ class JacksonFeedParserTest {
 				</channel></rss>
 				""".getBytes(StandardCharsets.UTF_8);
 
-		assertThat(hepHoi.parse(body))
+		assertThat(strict.parse(body))
 				.extracting(ParsedItem::excerpt)
 				.containsExactly("một hai ba");
 	}
@@ -374,7 +374,7 @@ class JacksonFeedParserTest {
 	 * chính chuỗi 197 ký tự đó hiện ra ở đây.
 	 */
 	@Test
-	void parse_dung_gia_tri_cua_rss_aws() throws IOException {
+	void parses_the_aws_rss_values_correctly() throws IOException {
 		List<ParsedItem> items = parser.parse(fixture("feeds/aws-news.xml"));
 
 		assertThat(items).hasSize(3);
@@ -389,7 +389,7 @@ class JacksonFeedParserTest {
 	}
 
 	@Test
-	void nem_loi_khi_root_element_khong_ho_tro() {
+	void throws_when_the_root_element_is_unsupported() {
 		byte[] html = "<html><body>403 Forbidden</body></html>"
 				.getBytes(StandardCharsets.UTF_8);
 
@@ -405,7 +405,7 @@ class JacksonFeedParserTest {
 	 * feed khai bằng tiền tố PHẢI đi qua nhánh Atom và ra item.
 	 */
 	@Test
-	void bo_tien_to_namespace_o_root_element() {
+	void strips_the_namespace_prefix_on_the_root_element() {
 		byte[] atom = """
 				<?xml version="1.0"?>
 				<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">

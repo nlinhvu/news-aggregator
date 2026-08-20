@@ -27,7 +27,7 @@ class ModuleBoundaryTest {
 	 *
 	 * CÁI MẤT, nói đúng kích thước: `verify()` không còn bắt được một event
 	 * record lén mang theo type nội bộ của publisher. Khoảng trống đó có biên rõ
-	 * và được bịt bằng `event_record_chi_chua_string` — test đó từ nay là thứ
+	 * và được bịt bằng `event_record_contains_only_strings` — test đó từ nay là thứ
 	 * DUY NHẤT canh chỗ này, nên không được nới nó.
 	 */
 	static final ApplicationModules MODULES = ApplicationModules.of(
@@ -52,7 +52,7 @@ class ModuleBoundaryTest {
 	 * bộ của publisher. Test này phải có TRƯỚC cái predicate kia.
 	 */
 	@Test
-	void event_record_chi_chua_string() {
+	void event_record_contains_only_strings() {
 		List<Class<?>> eventTypes = List.of(
 				dev.linhvu.news_aggregator.ingestion.events.ArticleDiscovered.class,
 				dev.linhvu.news_aggregator.catalog.events.ArticleAdded.class,
@@ -84,16 +84,16 @@ class ModuleBoundaryTest {
 	 * "sửa" khai báo.
 	 */
 	@Test
-	void personalization_phu_thuoc_catalog_chu_khong_nguoc_lai() {
+	void personalization_depends_on_catalog_not_the_reverse() {
 		MODULES.verify();
 
 		assertThat(dependenciesOf("personalization"))
 				.as("`personalization` đọc feed qua `ArticleCatalog`")
 				.contains("catalog");
 
-		for (String cu : List.of("catalog", "sources", "ingestion", "summarization")) {
-			assertThat(dependenciesOf(cu))
-					.as("`%s` không được biết `personalization` tồn tại", cu)
+		for (String module : List.of("catalog", "sources", "ingestion", "summarization")) {
+			assertThat(dependenciesOf(module))
+					.as("`%s` không được biết `personalization` tồn tại", module)
 					.doesNotContain("personalization");
 		}
 	}
@@ -124,7 +124,7 @@ class ModuleBoundaryTest {
 	 * đơn lẻ xanh, mà "cùng sai" thì lệch id là vĩnh viễn — dedupe chặn ghi lại.
 	 */
 	@Test
-	void hai_module_suy_ra_cung_mot_id() throws Exception {
+	void both_modules_derive_the_same_id() throws Exception {
 		var ingestion = Class.forName(
 						"dev.linhvu.news_aggregator.ingestion.CanonicalUrl")
 				.getDeclaredMethod("articleId", String.class);

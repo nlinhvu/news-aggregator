@@ -107,15 +107,15 @@ class Summarizer {
 			// hành đi hạ max-per-run trong khi thứ hỏng nằm ở chỗ khác.
 			//
 			// Chuỗi phải là CẢ chain, không phải `e.toString()`: xem
-			// `chuoiNguyenNhan`.
-			String detail = chuoiNguyenNhan(e);
+			// `causeChain`.
+			String detail = causeChain(e);
 			if (detail.contains("429") || detail.contains("RESOURCE_EXHAUSTED")) {
 				log.warn("model từ chối vì quota cho article {}: {}",
-						article.articleId(), rutGon(detail));
+						article.articleId(), shorten(detail));
 			}
 			else {
 				log.warn("model hỏng cho article {}: {}",
-						article.articleId(), rutGon(detail));
+						article.articleId(), shorten(detail));
 			}
 			return Optional.empty();
 		}
@@ -150,29 +150,29 @@ class Summarizer {
 	 * ghi đúng một dòng không có thông tin nào, và nhánh 429 ở trên là CODE CHẾT
 	 * vì chuỗi nó khớp không bao giờ xuất hiện.
 	 *
-	 * `MAX_LOP` chặn cả chuỗi cause quá dài lẫn cause tạo vòng. `MAX_KY_TU` chặn
+	 * `MAX_DEPTH` chặn cả chuỗi cause quá dài lẫn cause tạo vòng. `MAX_CHARS` chặn
 	 * một message khổng lồ (response JSON của provider chẳng hạn) đổ vào log —
 	 * cắt SAU khi phân loại xong, để một mã lỗi nằm sâu không bị cắt mất trước
 	 * khi kịp đọc.
 	 */
-	private static String chuoiNguyenNhan(Throwable e) {
-		StringBuilder chuoi = new StringBuilder();
+	private static String causeChain(Throwable e) {
+		StringBuilder chain = new StringBuilder();
 		Throwable t = e;
-		for (int lop = 0; t != null && lop < MAX_LOP; lop++, t = t.getCause()) {
-			if (lop > 0) {
-				chuoi.append(" ← ");
+		for (int depth = 0; t != null && depth < MAX_DEPTH; depth++, t = t.getCause()) {
+			if (depth > 0) {
+				chain.append(" ← ");
 			}
-			chuoi.append(t);
+			chain.append(t);
 		}
-		return chuoi.toString();
+		return chain.toString();
 	}
 
-	private static String rutGon(String detail) {
-		return detail.length() <= MAX_KY_TU ? detail
-				: detail.substring(0, MAX_KY_TU) + "…";
+	private static String shorten(String detail) {
+		return detail.length() <= MAX_CHARS ? detail
+				: detail.substring(0, MAX_CHARS) + "…";
 	}
 
-	private static final int MAX_LOP = 5;
+	private static final int MAX_DEPTH = 5;
 
-	private static final int MAX_KY_TU = 600;
+	private static final int MAX_CHARS = 600;
 }

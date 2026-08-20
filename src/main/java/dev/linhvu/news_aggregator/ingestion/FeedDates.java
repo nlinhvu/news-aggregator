@@ -12,7 +12,7 @@ import java.util.Optional;
  *
  * `publishedAt` là sort key của `gsi-recent`, và chuỗi ISO-8601 UTC có thứ tự
  * chuỗi trùng thứ tự thời gian — đó là lý do phải chuẩn hoá về UTC ở đây chứ
- * không lưu nguyên văn. Xem `FeedDatesTest#thu_tu_chuoi_trung_thu_tu_thoi_gian`.
+ * không lưu nguyên văn. Xem `FeedDatesTest#string_order_matches_chronological_order`.
  *
  * Cắt về giây: mili giây không thêm thông tin nào cho một trang tin và chỉ làm
  * hai bài cùng giây trông như khác nhau.

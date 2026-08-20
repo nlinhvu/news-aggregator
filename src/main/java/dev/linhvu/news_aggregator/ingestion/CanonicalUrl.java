@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
  *
  * Hợp đồng dùng: LUÔN `articleId(normalise(raw))`, không bao giờ
  * `articleId(raw)`. Băm thẳng URL thô làm mọi việc chuẩn hoá thành vô nghĩa và
- * dedupe thôi hoạt động — xem `CanonicalUrlTest#url_tuong_duong_cho_cung_mot_article_id`.
+ * dedupe thôi hoạt động — xem `CanonicalUrlTest#equivalent_urls_give_the_same_article_id`.
  */
 final class CanonicalUrl {
 

@@ -21,7 +21,7 @@ public class HealthController {
 	 * `no-store` là bắt buộc, không phải phòng xa. Cache behavior `/api/*` gắn
 	 * `CachingDisabled` chỉ chặn cache của CloudFront; trình duyệt vẫn được phép
 	 * heuristic-cache một 200 không validator. Hai cache khác nhau, cần hai thứ
-	 * chặn khác nhau — xem `cam_trinh_duyet_cache_health` trong HealthControllerTest.
+	 * chặn khác nhau — xem `forbids_browsers_from_caching_health` trong HealthControllerTest.
 	 */
 	@GetMapping("/api/health")
 	ResponseEntity<Map<String, String>> health() {

@@ -69,7 +69,7 @@ class CookieSecurityIT {
 	private TestRestTemplate rest;
 
 	@BeforeEach
-	void khongDiTheoRedirect() {
+	void doNotFollowRedirects() {
 		this.rest = autowired.withRedirects(HttpRedirects.DONT_FOLLOW);
 	}
 
@@ -81,7 +81,7 @@ class CookieSecurityIT {
 	 * /api/articles` không tạo phiên nào, nên kiểm ở đó là kiểm vào chỗ trống.
 	 */
 	@Test
-	void cookie_phien_co_Secure_du_request_di_bang_http() {
+	void the_session_cookie_has_Secure_even_when_the_request_uses_http() {
 		// Chặng 1 chỉ là cầu nối (`AuthController.login`), chưa có phiên nào.
 		ResponseEntity<Void> toEntryPoint = get(at("/api/auth/login"));
 
@@ -111,7 +111,7 @@ class CookieSecurityIT {
 	 * request, còn phiên thì đường này không tạo.
 	 */
 	@Test
-	void cookie_csrf_co_Secure_du_request_di_bang_http() {
+	void the_csrf_cookie_has_Secure_even_when_the_request_uses_http() {
 		ResponseEntity<Void> feed = get(at("/api/articles?limit=1"));
 
 		List<String> setCookies = feed.getHeaders().get(HttpHeaders.SET_COOKIE);

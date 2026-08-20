@@ -40,12 +40,12 @@ public final class BackfillSourceIdApplication {
 				.getOrDefault("NEWS_SOURCES_TABLE", "sources");
 
 		try (DynamoDbClient client = DynamoDbClient.create()) {
-			Map<String, String> idTheoTen = readSourceIdsByName(client, sourcesTable);
-			System.out.printf("bảng %s có %d nguồn%n", sourcesTable, idTheoTen.size());
+			Map<String, String> idsByName = readSourceIdsByName(client, sourcesTable);
+			System.out.printf("bảng %s có %d nguồn%n", sourcesTable, idsByName.size());
 
-			int daGan = 0;
-			int moCoi = 0;
-			int daCoSan = 0;
+			int attached = 0;
+			int orphan = 0;
+			int alreadyPresent = 0;
 
 			// `scanPaginator` chứ không `scan` một phát: Scan trả về nhiều nhất 1 MB
 			// mỗi trang, nên bản không phân trang sẽ backfill đúng trang đầu rồi báo
@@ -53,43 +53,43 @@ public final class BackfillSourceIdApplication {
 			//
 			// FilterExpression áp SAU khi đọc, nên nó không giảm tiền; nó ở đây để
 			// giảm số UpdateItem vô ích, và để dòng tổng kết nói đúng con số.
-			var trang = client.scanPaginator(ScanRequest.builder()
+			var pages = client.scanPaginator(ScanRequest.builder()
 					.tableName(articlesTable)
 					.filterExpression("attribute_not_exists(sourceId)")
 					.projectionExpression("articleId, sourceName")
 					.build());
 
-			for (var page : trang) {
+			for (var page : pages) {
 				for (Map<String, AttributeValue> item : page.items()) {
 					String articleId = item.get("articleId").s();
-					AttributeValue ten = item.get("sourceName");
-					String sourceId = ten == null ? null : idTheoTen.get(ten.s());
+					AttributeValue name = item.get("sourceName");
+					String sourceId = name == null ? null : idsByName.get(name.s());
 
 					// Bài MỒ CÔI: nguồn đã bị xoá khỏi bảng `sources`, hoặc đổi tên.
 					// Đoán một `sourceId` cho nó là bịa dữ liệu — bỏ qua, và con số
 					// dưới là lời giải thích cho một lượt kiểm §16 không ra 0.
 					if (sourceId == null) {
 						System.out.printf("WARN bài mồ côi %s — sourceName=%s%n",
-								articleId, ten == null ? "<thiếu>" : ten.s());
-						moCoi++;
+								articleId, name == null ? "<thiếu>" : name.s());
+						orphan++;
 						continue;
 					}
 
-					if (gan(client, articlesTable, articleId, sourceId)) {
-						daGan++;
+					if (attach(client, articlesTable, articleId, sourceId)) {
+						attached++;
 					}
 					else {
-						daCoSan++;
+						alreadyPresent++;
 					}
 				}
 			}
 
 			System.out.printf("backfill xong: đã gắn=%d mồ côi=%d đã có sẵn=%d%n",
-					daGan, moCoi, daCoSan);
-			if (moCoi > 0) {
+					attached, orphan, alreadyPresent);
+			if (orphan > 0) {
 				System.out.printf("⚠️ %d bài KHÔNG tra được nguồn — chúng sẽ vắng mặt "
 						+ "khỏi feed đã lọc, và lệnh kiểm sẽ đếm ra đúng %d%n",
-						moCoi, moCoi);
+						orphan, orphan);
 			}
 		}
 	}
@@ -101,8 +101,8 @@ public final class BackfillSourceIdApplication {
 	 */
 	private static Map<String, String> readSourceIdsByName(DynamoDbClient client,
 			String sourcesTable) {
-		Map<String, String> idTheoTen = new HashMap<>();
-		var trang = client.scanPaginator(ScanRequest.builder()
+		Map<String, String> idsByName = new HashMap<>();
+		var pages = client.scanPaginator(ScanRequest.builder()
 				.tableName(sourcesTable)
 				// `name` là reserved word của DynamoDB — dùng thẳng trong
 				// ProjectionExpression sẽ ném ValidationException.
@@ -110,16 +110,16 @@ public final class BackfillSourceIdApplication {
 				.expressionAttributeNames(Map.of("#n", "name"))
 				.build());
 
-		for (var page : trang) {
+		for (var page : pages) {
 			for (Map<String, AttributeValue> item : page.items()) {
-				idTheoTen.put(item.get("name").s(), item.get("sourceId").s());
+				idsByName.put(item.get("name").s(), item.get("sourceId").s());
 			}
 		}
-		if (idTheoTen.isEmpty()) {
+		if (idsByName.isEmpty()) {
 			throw new IllegalStateException("bảng " + sourcesTable
 					+ " rỗng — đã chạy ./gradlew sourcesSync chưa?");
 		}
-		return idTheoTen;
+		return idsByName;
 	}
 
 	/**
@@ -129,7 +129,7 @@ public final class BackfillSourceIdApplication {
 	 *
 	 * @return true nếu lượt này thật sự gắn; false nếu item đã có `sourceId`
 	 */
-	private static boolean gan(DynamoDbClient client, String articlesTable,
+	private static boolean attach(DynamoDbClient client, String articlesTable,
 			String articleId, String sourceId) {
 		try {
 			client.updateItem(UpdateItemRequest.builder()

@@ -48,7 +48,7 @@ class SourceCatalogTest {
 	}
 
 	@Test
-	void chi_tra_ve_nguon_dang_bat() {
+	void returns_only_the_enabled_sources() {
 		table.putItem(source("a", true));
 		table.putItem(source("b", false));
 		table.putItem(source("c", true));
@@ -65,7 +65,7 @@ class SourceCatalogTest {
 	 * sở hữu) sẽ bị xoá, và triệu chứng là một nguồn đã tắt bỗng chạy lại.
 	 */
 	@Test
-	void record_fetch_khong_dung_toi_cau_hinh() {
+	void record_fetch_does_not_touch_the_configuration() {
 		table.putItem(source("a", true));
 
 		catalog.recordFetch("a", "etag-123", "Mon, 04 Aug 2026 00:00:00 GMT",
@@ -83,7 +83,7 @@ class SourceCatalogTest {
 	 * vì DynamoDB không cho set attribute bằng null trong UpdateExpression.
 	 */
 	@Test
-	void record_fetch_chiu_duoc_etag_null() {
+	void record_fetch_tolerates_a_null_etag() {
 		table.putItem(source("a", true));
 
 		catalog.recordFetch("a", null, null, "2026-08-05T10:00:00Z");
@@ -101,14 +101,14 @@ class SourceCatalogTest {
 	 * đang so với validator sai — hoặc tệ hơn, server trả 304 vĩnh viễn và
 	 * nguồn đó ĐỨNG YÊN mà mọi log vẫn xanh.
 	 *
-	 * Test `record_fetch_chiu_duoc_etag_null` ở trên KHÔNG bắt được: nó chỉ
+	 * Test `record_fetch_tolerates_a_null_etag` ở trên KHÔNG bắt được: nó chỉ
 	 * khẳng định `lastFetchedAt`, nên một bản cài đặt bỏ hẳn mệnh đề REMOVE
 	 * vẫn làm nó xanh.
 	 */
 	@Test
-	void record_fetch_xoa_validator_cu_khi_luot_moi_khong_co() {
+	void record_fetch_clears_the_stale_validators_when_the_new_pass_has_none() {
 		table.putItem(source("a", true));
-		catalog.recordFetch("a", "etag-cu", "Mon, 04 Aug 2026 00:00:00 GMT",
+		catalog.recordFetch("a", "etag-old", "Mon, 04 Aug 2026 00:00:00 GMT",
 				"2026-08-05T10:00:00Z");
 
 		catalog.recordFetch("a", null, null, "2026-08-06T10:00:00Z");
@@ -129,15 +129,15 @@ class SourceCatalogTest {
 	 * không phải lỗi compile.
 	 */
 	@Test
-	void record_fetch_set_va_remove_trong_cung_mot_luot() {
+	void record_fetch_sets_and_removes_within_the_same_pass() {
 		table.putItem(source("a", true));
-		catalog.recordFetch("a", "etag-cu", "Mon, 04 Aug 2026 00:00:00 GMT",
+		catalog.recordFetch("a", "etag-old", "Mon, 04 Aug 2026 00:00:00 GMT",
 				"2026-08-05T10:00:00Z");
 
-		catalog.recordFetch("a", "etag-moi", null, "2026-08-06T10:00:00Z");
+		catalog.recordFetch("a", "etag-new", null, "2026-08-06T10:00:00Z");
 
 		Source after = table.getItem(r -> r.key(k -> k.partitionValue("a")));
-		assertThat(after.getEtag()).isEqualTo("etag-moi");
+		assertThat(after.getEtag()).isEqualTo("etag-new");
 		assertThat(after.getLastModified()).isNull();
 	}
 

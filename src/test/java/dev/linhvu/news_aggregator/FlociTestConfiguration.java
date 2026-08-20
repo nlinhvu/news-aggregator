@@ -204,7 +204,7 @@ public class FlociTestConfiguration {
 	 * `DynamoDbSessionRepository` kiểm hạn Ở TẦNG ỨNG DỤNG bằng
 	 * `session.isExpired()`, vì TTL của DynamoDB là cơ chế DỌN DẸP chạy trễ tới
 	 * 48 giờ. Fixture có TTL sẽ làm
-	 * `phien_qua_han_khong_doc_duoc_du_item_van_con_trong_bang` xanh vì lý do
+	 * `an_expired_session_is_unreadable_even_though_the_item_is_still_in_the_table` xanh vì lý do
 	 * SAI — nó phải chứng minh việc kiểm hạn của ứng dụng, không phải việc dọn
 	 * dẹp của hạ tầng.
 	 */

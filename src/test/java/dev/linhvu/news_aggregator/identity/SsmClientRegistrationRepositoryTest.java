@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 class SsmClientRegistrationRepositoryTest {
 
 	@Test
-	void khong_goi_ssm_cho_toi_khi_co_nguoi_dang_nhap() {
+	void does_not_call_ssm_until_someone_logs_in() {
 		// Đây là toàn bộ lý do class này tồn tại. `ClientRegistrationRepository`
 		// là bean EAGER — nó được dựng lúc tạo security filter chain, tức là ở
 		// MỌI cold start, kể cả invoke của người đọc ẩn danh. Nếu nó đọc SSM
@@ -35,7 +35,7 @@ class SsmClientRegistrationRepositoryTest {
 	}
 
 	@Test
-	void goi_ssm_dung_mot_lan_du_tim_nhieu_lan() {
+	void calls_ssm_exactly_once_across_many_lookups() {
 		SsmClient ssm = mock(SsmClient.class);
 		when(ssm.getParameter(any(GetParameterRequest.class)))
 				.thenReturn(GetParameterResponse.builder()
@@ -55,7 +55,7 @@ class SsmClientRegistrationRepositoryTest {
 	}
 
 	@Test
-	void giai_ma_secure_string_chu_khong_doc_tho() {
+	void decrypts_the_secure_string_instead_of_reading_it_raw() {
 		// Thiếu `withDecryption(true)` thì SSM trả về BẢN MÃ, và client secret
 		// sai thì Cognito từ chối ở bước đổi code lấy token — một lỗi OAuth
 		// tối nghĩa, xa chỗ gây ra nó.
@@ -72,7 +72,7 @@ class SsmClientRegistrationRepositoryTest {
 	}
 
 	@Test
-	void registration_id_la_cognito_va_redirect_uri_nam_trong_api() {
+	void the_registration_id_is_cognito_and_the_redirect_uri_lives_under_api() {
 		// Đường callback PHẢI nằm trong /api/* — CloudFront route `/*` sang S3,
 		// nên đường mặc định `/login/oauth2/code/*` của Spring Security sẽ rơi
 		// vào bucket SPA và trả 404 (TDD §7).
@@ -89,11 +89,11 @@ class SsmClientRegistrationRepositoryTest {
 		assertThat(reg.getRedirectUri())
 				.isEqualTo("https://news.example/api/auth/callback/cognito");
 		assertThat(reg.getScopes()).containsExactlyInAnyOrder("openid", "email");
-		assertThat(repo.findByRegistrationId("khong-ton-tai")).isNull();
+		assertThat(repo.findByRegistrationId("does-not-exist")).isNull();
 	}
 
 	@Test
-	void redirect_uri_la_tuyet_doi_khong_dung_placeholder_baseUrl() {
+	void the_redirect_uri_is_absolute_and_uses_no_baseUrl_placeholder() {
 		// Ghim chính cái bug đã ĐO trên dev 2026-08-13. `{baseUrl}` được Spring
 		// Security giãn ra từ HOST CỦA REQUEST, mà sau CloudFront →
 		// Lambda Function URL host đó là `*.lambda-url.us-east-1.on.aws`:
@@ -121,7 +121,7 @@ class SsmClientRegistrationRepositoryTest {
 	}
 
 	@Test
-	void bon_endpoint_den_TU_DISCOVERY_khong_tu_noi_chuoi() {
+	void all_four_endpoints_come_FROM_DISCOVERY_not_from_string_concatenation() {
 		// Chốt chặn cho lỗi nặng nhất của Phase 7, tìm ra ở Task 12.
 		//
 		// Bản Task 10 tự dựng `issuer + "/oauth2/authorize"` với lý do "quy tắc
@@ -154,7 +154,7 @@ class SsmClientRegistrationRepositoryTest {
 	}
 
 	@Test
-	void khong_nho_lan_that_bai() {
+	void does_not_cache_a_failed_attempt() {
 		// Cùng khuôn với `FailClosedDynamoDbStateRepository` của Phase 1: nhớ
 		// thành công, QUÊN thất bại. Cache lần hỏng nghĩa là một lượt SSM lỗi
 		// làm đăng nhập chết vĩnh viễn cho tới lần deploy sau.

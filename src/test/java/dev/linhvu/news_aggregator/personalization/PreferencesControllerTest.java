@@ -65,23 +65,23 @@ class PreferencesControllerTest {
 	String preferencesTable;
 
 	@BeforeEach
-	void napNguon() {
-		donBang(sourcesTable, "sourceId");
-		donBang(preferencesTable, "userId");
+	void loadSources() {
+		cleanTable(sourcesTable, "sourceId");
+		cleanTable(preferencesTable, "userId");
 		putSource("spring-blog", "Spring Blog", true);
 		putSource("aws-news", "AWS News Blog", true);
-		putSource("da-tat", "Nguồn Đã Tắt", false);
+		putSource("disabled", "Nguồn Đã Tắt", false);
 	}
 
 	@AfterEach
-	void traLaiFeatureManager() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void an_danh_thi_401_chu_khong_200_rong() throws Exception {
+	void anonymous_gets_401_not_an_empty_200() throws Exception {
 		mvc.perform(get("/api/preferences/sources")).andExpect(status().isUnauthorized());
 	}
 
@@ -91,7 +91,7 @@ class PreferencesControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void chua_chon_gi_thi_tra_danh_sach_rong() throws Exception {
+	void with_nothing_selected_it_returns_an_empty_list() throws Exception {
 		mvc.perform(get("/api/preferences/sources").with(oidcLogin()))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.sourceIds").isArray())
@@ -100,7 +100,7 @@ class PreferencesControllerTest {
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void ghi_roi_doc_lai_dung_thu_da_chon() throws Exception {
+	void write_then_read_back_exactly_what_was_selected() throws Exception {
 		mvc.perform(put("/api/preferences/sources")
 						.with(oidcLogin()).with(csrf())
 						.contentType(MediaType.APPLICATION_JSON)
@@ -124,14 +124,14 @@ class PreferencesControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void sourceId_khong_ton_tai_thi_400_va_khong_ghi_gi() throws Exception {
+	void an_unknown_sourceId_returns_400_and_writes_nothing() throws Exception {
 		mvc.perform(put("/api/preferences/sources")
 						.with(oidcLogin()).with(csrf())
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"sourceIds\":[\"spring-blog\",\"nguon-bia\"]}"))
+						.content("{\"sourceIds\":[\"spring-blog\",\"fake-source\"]}"))
 				.andExpect(status().isBadRequest());
 
-		assertThat(demItem(preferencesTable))
+		assertThat(countItems(preferencesTable))
 				.as("request hỏng không được để lại dấu vết nào trong bảng")
 				.isZero();
 	}
@@ -143,11 +143,11 @@ class PreferencesControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void nguon_da_tat_cung_bi_tu_choi() throws Exception {
+	void a_disabled_source_is_rejected_too() throws Exception {
 		mvc.perform(put("/api/preferences/sources")
 						.with(oidcLogin()).with(csrf())
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"sourceIds\":[\"da-tat\"]}"))
+						.content("{\"sourceIds\":[\"disabled\"]}"))
 				.andExpect(status().isBadRequest());
 	}
 
@@ -158,7 +158,7 @@ class PreferencesControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void thieu_csrf_thi_403() throws Exception {
+	void a_missing_csrf_token_returns_403() throws Exception {
 		mvc.perform(put("/api/preferences/sources")
 						.with(oidcLogin())
 						.contentType(MediaType.APPLICATION_JSON)
@@ -174,16 +174,16 @@ class PreferencesControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void lua_chon_cua_nguoi_nay_khong_lan_sang_nguoi_khac() throws Exception {
+	void one_users_selection_does_not_leak_into_another_users() throws Exception {
 		mvc.perform(put("/api/preferences/sources")
-						.with(oidcLogin().idToken(t -> t.subject("nguoi-a")))
+						.with(oidcLogin().idToken(t -> t.subject("user-a")))
 						.with(csrf())
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"sourceIds\":[\"spring-blog\"]}"))
 				.andExpect(status().isNoContent());
 
 		mvc.perform(get("/api/preferences/sources")
-						.with(oidcLogin().idToken(t -> t.subject("nguoi-b"))))
+						.with(oidcLogin().idToken(t -> t.subject("user-b"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.sourceIds.length()").value(0));
 	}
@@ -197,14 +197,14 @@ class PreferencesControllerTest {
 				.build());
 	}
 
-	private void donBang(String table, String key) {
+	private void cleanTable(String table, String key) {
 		List<Map<String, AttributeValue>> items = dynamo.scanPaginator(
 				ScanRequest.builder().tableName(table).build()).items().stream().toList();
 		items.forEach(item -> dynamo.deleteItem(b -> b.tableName(table)
 				.key(Map.of(key, item.get(key)))));
 	}
 
-	private int demItem(String table) {
+	private int countItems(String table) {
 		return dynamo.scan(ScanRequest.builder().tableName(table)
 				.select(software.amazon.awssdk.services.dynamodb.model.Select.COUNT)
 				.build()).count();

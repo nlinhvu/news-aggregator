@@ -60,7 +60,7 @@ class MyFeedControllerTest {
 	String articlesTable;
 
 	@BeforeEach
-	void napBai() {
+	void loadArticles() {
 		DynamoDbTable<dev.linhvu.news_aggregator.catalog.Article> table =
 				enhancedClient.table(articlesTable, TableSchema.fromBean(
 						dev.linhvu.news_aggregator.catalog.Article.class));
@@ -69,14 +69,14 @@ class MyFeedControllerTest {
 	}
 
 	@AfterEach
-	void traLaiFeatureManager() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void an_danh_thi_401() throws Exception {
+	void anonymous_gets_401() throws Exception {
 		mvc.perform(get("/api/my/feed")).andExpect(status().isUnauthorized());
 	}
 
@@ -90,7 +90,7 @@ class MyFeedControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void chua_chon_gi_thi_thay_tat_ca_ke_ca_bai_chua_backfill() throws Exception {
+	void with_nothing_selected_you_see_everything_including_unbackfilled_articles() throws Exception {
 		mvc.perform(get("/api/my/feed").with(oidcLogin()))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(5));
@@ -102,11 +102,11 @@ class MyFeedControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void chon_mot_nguon_thi_chi_con_nguon_do() throws Exception {
-		preferences.save("nguoi-loc", List.of("aws-news"));
+	void selecting_one_source_leaves_only_that_source() throws Exception {
+		preferences.save("filterer", List.of("aws-news"));
 
 		mvc.perform(get("/api/my/feed")
-						.with(oidcLogin().idToken(t -> t.subject("nguoi-loc"))))
+						.with(oidcLogin().idToken(t -> t.subject("filterer"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(2))
 				.andExpect(jsonPath("$[*].sourceName")
@@ -123,7 +123,7 @@ class MyFeedControllerTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void ton_trong_limit() throws Exception {
+	void respects_limit() throws Exception {
 		mvc.perform(get("/api/my/feed?limit=2").with(oidcLogin()))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(2));
@@ -142,7 +142,7 @@ class MyFeedControllerTest {
 	@AutoConfigureMockMvc
 	@ActiveProfiles(RoleProfiles.WEB)
 	@Import(FlociTestConfiguration.class)
-	class KhiCatalogHong {
+	class WhenCatalogFails {
 
 		@Autowired
 		MockMvc mvc;
@@ -152,7 +152,7 @@ class MyFeedControllerTest {
 
 		@Test
 		@AllEnabled(NewsFeature.class)
-		void fan_out_hong_thi_503_chu_khong_tra_ket_qua_mot_phan() throws Exception {
+		void a_broken_fan_out_returns_503_instead_of_partial_results() throws Exception {
 			given(catalog.recentBySources(any(), anyInt()))
 					.willThrow(new CatalogUnavailableException("hỏng",
 							new IllegalStateException("một query theo nguồn hỏng")));

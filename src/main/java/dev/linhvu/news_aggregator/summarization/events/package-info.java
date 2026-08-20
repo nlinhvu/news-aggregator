@@ -4,7 +4,7 @@
  *
  * Từ Phase 3, `ApplicationModules.verify()` KHÔNG còn phân tích event type —
  * đó là cái giá đã chấp nhận để giữ cycle `catalog ↔ summarization`. Test
- * `ModuleBoundaryTest#event_record_chi_chua_string` là thứ DUY NHẤT còn canh
+ * `ModuleBoundaryTest#event_record_contains_only_strings` là thứ DUY NHẤT còn canh
  * quy tắc này. Không nới nó.
  */
 @NamedInterface("events")

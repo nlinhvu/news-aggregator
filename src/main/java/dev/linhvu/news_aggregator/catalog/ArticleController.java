@@ -37,9 +37,9 @@ class ArticleController {
 		// Quyết định "có kèm summary không" nằm ở `ArticleSummaries` chứ không ở
 		// đây: `/api/my/feed` phải trả CÙNG hình dạng, và hai bản sao của phép
 		// ánh xạ sẽ trôi khỏi nhau đúng vào ngày ai đó tắt AI_SUMMARIZATION.
-		final boolean hienSummary = ArticleSummaries.hienSummary();
+		final boolean showSummary = ArticleSummaries.showSummary();
 		return repository.findRecent(effective).stream()
-				.map(a -> ArticleSummaries.toDto(a, hienSummary))
+				.map(a -> ArticleSummaries.toDto(a, showSummary))
 				.toList();
 	}
 }

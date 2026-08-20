@@ -140,18 +140,18 @@ public class TogglzConfig {
 		 */
 		@Override
 		public void setFeatureState(FeatureState featureState) {
-			String truoc = trangThaiHienTai(featureState.getFeature());
+			String before = currentState(featureState.getFeature());
 			delegate().setFeatureState(featureState);
 			log.info("đổi feature flag sub={} flag={} truoc={} sau={}",
-					nguoiGoi(), featureState.getFeature().name(), truoc,
+					caller(), featureState.getFeature().name(), before,
 					featureState.isEnabled() ? "ON" : "OFF");
 		}
 
 		/** `"?"` khi chưa có item hoặc đọc hỏng — log không được cản đường ghi. */
-		private String trangThaiHienTai(Feature feature) {
+		private String currentState(Feature feature) {
 			try {
-				FeatureState hienTai = delegate().getFeatureState(feature);
-				return hienTai == null ? "chua-co" : (hienTai.isEnabled() ? "ON" : "OFF");
+				FeatureState current = delegate().getFeatureState(feature);
+				return current == null ? "missing" : (current.isEnabled() ? "ON" : "OFF");
 			}
 			catch (RuntimeException e) {
 				return "?";
@@ -161,13 +161,13 @@ public class TogglzConfig {
 		/**
 		 * `SecurityContextHolder` chứ không tham số: Togglz gọi
 		 * `setFeatureState` thẳng từ servlet của nó, không có chỗ nào để truyền
-		 * người gọi vào. Trả `"khong-ro"` khi không có phiên — đường CLI và test
+		 * người gọi vào. Trả `"unknown"` khi không có phiên — đường CLI và test
 		 * đi lối đó, và một `NullPointerException` ở đây sẽ làm hỏng đúng lệnh
 		 * ghi mà nó chỉ định mô tả.
 		 */
-		private static String nguoiGoi() {
+		private static String caller() {
 			Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-			return auth == null ? "khong-ro" : auth.getName();
+			return auth == null ? "unknown" : auth.getName();
 		}
 
 		private StateRepository delegate() {

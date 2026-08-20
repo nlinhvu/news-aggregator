@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * property với `ChatClientConfigTest` — dùng đúng chuỗi property đó để hai lớp
  * chia sẻ một Spring context thay vì dựng thêm một cái nữa.
  */
-@SpringBootTest(properties = "news.summarization.api-key=key-gia-cho-test")
+@SpringBootTest(properties = "news.summarization.api-key=fake-key-for-test")
 // `Summarizer` phụ thuộc `ChatClient`, nay `@Profile(SUMMARIZE)`.
 @ActiveProfiles(RoleProfiles.SUMMARIZE)
 class SummarizerWiringTest {
@@ -34,7 +34,7 @@ class SummarizerWiringTest {
 	Environment env;
 
 	@Test
-	void dung_duoc_summarizer_tu_context() {
+	void builds_the_summarizer_from_the_context() {
 		assertThat(context.getBean(Summarizer.class)).isNotNull();
 	}
 
@@ -58,7 +58,7 @@ class SummarizerWiringTest {
 	 * lý do trên, không phải một con số ai đó vặn nhẹ.
 	 */
 	@Test
-	void tran_do_dai_cau_hinh_la_500() {
+	void the_configured_length_cap_is_500() {
 		assertThat(env.getProperty("news.summarization.max-summary-chars", Integer.class))
 				.as("nợ Phase 3 §20B #6 — 400 vứt mất bản tóm tắt 410 ký tự hợp lệ")
 				.isEqualTo(500);

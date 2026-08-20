@@ -28,7 +28,7 @@ class DynamoDbSessionRepositoryTest {
 	DynamoDbSessionRepository repository;
 
 	@Test
-	void luu_roi_doc_lai_duoc_nguyen_ven() {
+	void save_then_read_back_intact() {
 		MapSession session = repository.createSession();
 		session.setAttribute("sub", "u-123");
 		repository.save(session);
@@ -40,7 +40,7 @@ class DynamoDbSessionRepositoryTest {
 	}
 
 	@Test
-	void xoa_la_bien_mat_ngay_khong_doi_ttl() {
+	void delete_removes_it_at_once_without_waiting_for_the_ttl() {
 		// Đăng xuất phải có hiệu lực TỨC THÌ. TTL của DynamoDB xoá item trong
 		// vòng tối đa 48 giờ sau `expiresAt` — nếu đăng xuất chỉ hạ `expiresAt`
 		// thì phiên vẫn dùng được cho tới lúc dọn dẹp, và nút đăng xuất nói dối.
@@ -53,7 +53,7 @@ class DynamoDbSessionRepositoryTest {
 	}
 
 	@Test
-	void phien_qua_han_khong_doc_duoc_du_item_van_con_trong_bang() {
+	void an_expired_session_is_unreadable_even_though_the_item_is_still_in_the_table() {
 		// TTL của DynamoDB là DỌN DẸP, không phải cơ chế kiểm hạn. Nó chạy trễ
 		// tới 48 giờ. Nếu repository tin vào TTL thì có một cửa sổ 48 giờ mà
 		// phiên đã hết hạn vẫn đăng nhập được — chính xác là chế độ hỏng mà

@@ -32,12 +32,12 @@ class SweepHandlerTest {
 	}
 
 	@Test
-	void nhan_dung_job_cua_minh() {
+	void accepts_only_its_own_job() {
 		assertThat(handler.supports(Map.of("job", "summarize-sweep"))).isTrue();
 	}
 
 	@Test
-	void khong_nhan_payload_cua_nguon_khac() {
+	void does_not_accept_a_payload_from_another_producer() {
 		assertThat(handler.supports(Map.of("job", "ingest-feeds"))).isFalse();
 		assertThat(handler.supports(Map.of("Records", List.of(
 				Map.of("eventSource", "aws:sqs"))))).isFalse();
@@ -45,7 +45,7 @@ class SweepHandlerTest {
 	}
 
 	@Test
-	void day_bai_tim_duoc_qua_cong_queue() {
+	void pushes_the_articles_it_finds_through_the_queue_gate() {
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))
 				.willReturn(List.of(article("a1"), article("a2")));
 		given(queue.enqueueAll(List.of("a1", "a2"))).willReturn(2);
@@ -60,7 +60,7 @@ class SweepHandlerTest {
 	 * chặn lại — tức ta đã trả tiền đọc cho những item không bao giờ dùng.
 	 */
 	@Test
-	void hoi_catalog_dung_han_muc_moi_luot() {
+	void asks_the_catalog_for_exactly_the_per_run_quota() {
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))
 				.willReturn(List.of());
 
@@ -75,7 +75,7 @@ class SweepHandlerTest {
 	 * log: nó là cách người vận hành biết còn tồn đọng mà không phải đọc log.
 	 */
 	@Test
-	void dem_phan_bi_han_muc_chan() {
+	void counts_what_the_quota_blocked() {
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))
 				.willReturn(List.of(article("a1"), article("a2"), article("a3")));
 		given(queue.enqueueAll(any())).willReturn(1);
@@ -90,7 +90,7 @@ class SweepHandlerTest {
 	 * nó phải chạy được bằng một lần `aws lambda invoke`, không phải deploy.
 	 */
 	@Test
-	void sinceHours_ghi_de_cua_so_mac_dinh() {
+	void sinceHours_overrides_the_default_window() {
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))
 				.willReturn(List.of());
 
@@ -108,7 +108,7 @@ class SweepHandlerTest {
 	 * người ta chỉ đụng tới `sinceHours` khi cần cửa sổ RỘNG.
 	 */
 	@Test
-	void sinceHours_nhan_ca_Long_lan_Integer() {
+	void sinceHours_accepts_both_Long_and_Integer() {
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))
 				.willReturn(List.of());
 
@@ -124,7 +124,7 @@ class SweepHandlerTest {
 	 * nghĩa là lượt thứ hai trở đi enqueue được ÍT dần rồi về 0.
 	 */
 	@Test
-	void reset_so_dem_dau_moi_luot() {
+	void resets_the_counters_at_the_start_of_every_run() {
 		metrics.countEnqueued();
 		metrics.countEnqueued();
 		given(catalog.findSummarizable(any(Duration.class), anyInt()))

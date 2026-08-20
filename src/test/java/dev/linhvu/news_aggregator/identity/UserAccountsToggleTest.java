@@ -61,14 +61,14 @@ class UserAccountsToggleTest {
 	 * rò sang class khác — kèm cả Spring context đã đóng.
 	 */
 	@AfterEach
-	void traLaiFeatureManagerVeNguyenTrang() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
 
 	@Test
-	void flag_tat_thi_moi_endpoint_auth_tra_404_va_feed_van_200() throws Exception {
-		tatFlag();
+	void flag_off_makes_every_auth_endpoint_404_while_the_feed_stays_200() throws Exception {
+		disableFlag();
 
 		mvc.perform(get("/api/auth/login")).andExpect(status().isNotFound());
 		mvc.perform(get("/api/me")).andExpect(status().isNotFound());
@@ -90,8 +90,8 @@ class UserAccountsToggleTest {
 	 * người ẩn danh, nên danh sách nguồn phải sống kể cả khi đăng nhập tắt.
 	 */
 	@Test
-	void flag_tat_thi_ca_feed_rieng_lan_lua_chon_nguon_deu_404() throws Exception {
-		tatFlag();
+	void flag_off_makes_both_the_private_feed_and_source_selection_404() throws Exception {
+		disableFlag();
 
 		mvc.perform(get("/api/my/feed")).andExpect(status().isNotFound());
 		mvc.perform(get("/api/preferences/sources")).andExpect(status().isNotFound());
@@ -99,19 +99,19 @@ class UserAccountsToggleTest {
 	}
 
 	@Test
-	void flag_tat_thi_dang_xuat_cung_404_chu_khong_403() throws Exception {
+	void flag_off_makes_logout_404_too_not_403() throws Exception {
 		// Vị trí của cổng chặn viết thành khẳng định: nó phải đứng TRƯỚC
 		// `CsrfFilter`. Đứng sau thì lời gọi này trả 403 vì thiếu CSRF token —
 		// tức "có tồn tại nhưng anh làm sai", đúng thứ mà một tính năng KHÔNG TỒN
 		// TẠI không được phép nói.
-		tatFlag();
+		disableFlag();
 
 		mvc.perform(post("/api/auth/logout")).andExpect(status().isNotFound());
 	}
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void flag_bat_thi_be_mat_dang_nhap_tro_lai_nguyen_ven() throws Exception {
+	void flag_on_brings_the_whole_login_surface_back() throws Exception {
 		// Đích đến của redirect được ghim ở `SecurityConfigTest`; ở đây chỉ cần
 		// nó KHÔNG phải 404 — tức cổng chặn có đọc flag thật.
 		mvc.perform(get("/api/auth/login")).andExpect(status().is3xxRedirection());
@@ -140,7 +140,7 @@ class UserAccountsToggleTest {
 	 * `@AllEnabled` chạy TRƯỚC `@BeforeEach`, nên đặt ở đó sẽ đè mất
 	 * TestFeatureManager và giết luôn test vế BẬT.
 	 */
-	private void tatFlag() {
+	private void disableFlag() {
 		TestFeatureManagerProvider.setFeatureManager(featureManager);
 		FeatureContext.clearCache();
 	}

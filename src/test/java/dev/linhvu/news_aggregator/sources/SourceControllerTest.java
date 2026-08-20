@@ -58,7 +58,7 @@ class SourceControllerTest {
 		table.scan().items().stream().toList().forEach(table::deleteItem);
 		table.putItem(source("a-id", "Zulu Blog", true));
 		table.putItem(source("z-id", "Alpha Blog", true));
-		table.putItem(source("tat-id", "Nguồn Đã Tắt", false));
+		table.putItem(source("off-id", "Nguồn Đã Tắt", false));
 	}
 
 	/**
@@ -70,7 +70,7 @@ class SourceControllerTest {
 	 * query vĩnh viễn không có bài mới, và không có gì báo cho họ biết lý do.
 	 */
 	@Test
-	void danh_sach_nguon_la_cong_khai_va_chi_gom_nguon_dang_bat() throws Exception {
+	void the_source_list_is_public_and_holds_only_enabled_sources() throws Exception {
 		mvc.perform(get("/api/sources"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(2))
@@ -90,7 +90,7 @@ class SourceControllerTest {
 	 * nghĩa của ta; `etag`/`lastFetchedAt` thì lộ lịch chạy của chương trình.
 	 */
 	@Test
-	void khong_lo_trang_thai_van_hanh_cua_nguon() throws Exception {
+	void does_not_leak_the_operational_state_of_a_source() throws Exception {
 		String body = mvc.perform(get("/api/sources"))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith("application/json"))
@@ -113,7 +113,7 @@ class SourceControllerTest {
 	 * theo sourceId" sẽ đỏ ở đây thay vì xanh nhờ trùng hợp.
 	 */
 	@Test
-	void thu_tu_on_dinh_theo_ten() throws Exception {
+	void stable_order_by_name() throws Exception {
 		mvc.perform(get("/api/sources"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].name").value("Alpha Blog"))

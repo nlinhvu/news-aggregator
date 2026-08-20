@@ -12,7 +12,7 @@ public interface EventJobHandler {
 
 	// Phải kiểm ĐỦ điều kiện của mình, không chỉ điều kiện phân biệt với handler
 	// hiện có. Hai supports() cùng trả true thì cái đầu tiên thắng IM LẶNG —
-	// xem test `moi_payload_chi_mot_handler_nhan`.
+	// xem test `every_payload_is_taken_by_exactly_one_handler`.
 	boolean supports(Map<String, Object> payload);
 
 	Object handle(Map<String, Object> payload);

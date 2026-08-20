@@ -24,12 +24,12 @@ class SourcePreferenceRepositoryTest {
 	 * cả nguồn", nên một `null` lọt ra từ đây là một trang trắng.
 	 */
 	@Test
-	void chua_tung_chon_thi_khong_co_item() {
-		assertThat(repository.findByUserId("chua-bao-gio-ghi")).isEmpty();
+	void never_having_selected_means_there_is_no_item() {
+		assertThat(repository.findByUserId("never-written")).isEmpty();
 	}
 
 	@Test
-	void ghi_roi_doc_lai_dung_danh_sach() {
+	void write_then_read_back_exactly_the_same_list() {
 		repository.save("sub-1", List.of("spring-blog", "aws-news"));
 
 		assertThat(repository.findByUserId("sub-1"))
@@ -47,7 +47,7 @@ class SourcePreferenceRepositoryTest {
 	 * người vừa bỏ chọn hết sẽ thấy feed đầy đủ trở lại và tưởng nút hỏng.
 	 */
 	@Test
-	void bo_chon_het_la_danh_sach_rong_chu_khong_phai_xoa_item() {
+	void deselecting_everything_is_an_empty_list_not_a_deleted_item() {
 		repository.save("sub-2", List.of("spring-blog"));
 
 		repository.save("sub-2", List.of());
@@ -60,7 +60,7 @@ class SourcePreferenceRepositoryTest {
 
 	/** `updatedAt` để người vận hành biết lựa chọn có còn được dùng không. */
 	@Test
-	void ghi_kem_moc_thoi_gian() {
+	void writes_a_timestamp_alongside() {
 		repository.save("sub-3", List.of("aws-news"));
 
 		assertThat(repository.findByUserId("sub-3"))

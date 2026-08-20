@@ -33,14 +33,14 @@ class LoginAuditListenerTest {
 	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
 	@BeforeEach
-	void batLog() {
+	void captureLog() {
 		logs.start();
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(LoginAuditListener.class))
 				.addAppender(logs);
 	}
 
 	@AfterEach
-	void thaLog() {
+	void releaseLog() {
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(LoginAuditListener.class))
 				.detachAppender(logs);
 		logs.stop();
@@ -67,13 +67,13 @@ class LoginAuditListenerTest {
 	}
 
 	@Test
-	void tai_khoan_chua_noi_idp_nao_thi_danh_sach_rong() {
+	void an_account_with_no_linked_idp_yields_an_empty_list() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(
 				token(Map.of("sub", "848814a8-4041-7031-3fff-9de5cdcb5e6c"))));
 
 		assertThat(auditLine())
 				.contains("848814a8-4041-7031-3fff-9de5cdcb5e6c")
-				.contains("idpDaLienKet=[]");
+				.contains("linkedIdps=[]");
 	}
 
 	/**
@@ -82,7 +82,7 @@ class LoginAuditListenerTest {
 	 * IdP nào", không phải "lần này vào bằng đường nào".
 	 */
 	@Test
-	void tai_khoan_noi_mot_idp_thi_ghi_ten_idp_do() {
+	void an_account_linked_to_one_idp_logs_that_idp_name() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
 				"sub", "c4d8f4a8-1234-70e5-afc4-0beffd64149d",
 				"identities", List.of(Map.of(
@@ -91,7 +91,7 @@ class LoginAuditListenerTest {
 						"providerType", "Google",
 						"primary", "true"))))));
 
-		assertThat(auditLine()).contains("idpDaLienKet=[Google]");
+		assertThat(auditLine()).contains("linkedIdps=[Google]");
 	}
 
 	/**
@@ -100,10 +100,10 @@ class LoginAuditListenerTest {
 	 * một dòng log là đường rò duy nhất còn lại.
 	 */
 	@Test
-	void khong_bao_gio_log_email() {
+	void never_logs_the_email() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
 				"sub", "848814a8-4041-7031-3fff-9de5cdcb5e6c",
-				"email", "nguoi-doc@example.com"))));
+				"email", "reader@example.com"))));
 
 		// MỌI dòng, không chỉ dòng audit: listener ghi bao nhiêu dòng cũng được,
 		// nhưng không dòng nào được mang email. Bản trước dùng `singleElement()`
@@ -111,7 +111,7 @@ class LoginAuditListenerTest {
 		// hiệu lực mà không có gì đỏ.
 		assertThat(logEvents()).isNotEmpty()
 				.allSatisfy(line -> assertThat(line)
-						.doesNotContain("nguoi-doc@example.com").doesNotContain("@"));
+						.doesNotContain("reader@example.com").doesNotContain("@"));
 	}
 
 	/**
@@ -120,7 +120,7 @@ class LoginAuditListenerTest {
 	 * log.
 	 */
 	@Test
-	void xac_thuc_khong_phai_oidc_thi_im_lang_chu_khong_no() {
+	void a_non_oidc_authentication_stays_quiet_instead_of_blowing_up() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(
 				new AnonymousAuthenticationToken("key", "anonymous",
 						AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"))));
@@ -139,7 +139,7 @@ class LoginAuditListenerTest {
 	 * duy nhất, vì ID token không biết lượt này đi đường nào.
 	 */
 	@Test
-	void tai_khoan_noi_hai_idp_thi_ghi_ca_hai_va_khong_khang_dinh_duong_nao() {
+	void an_account_linked_to_two_idps_logs_both_and_asserts_neither_order() {
 		listener.onLoginSuccess(new AuthenticationSuccessEvent(token(Map.of(
 				"sub", "44f894c8-90a1-70d4-db21-e4b74f44aff3",
 				"identities", List.of(
@@ -153,7 +153,7 @@ class LoginAuditListenerTest {
 								"primary", "false"))))));
 
 		assertThat(auditLine())
-				.contains("idpDaLienKet=[Google, Facebook]")
+				.contains("linkedIdps=[Google, Facebook]")
 				.doesNotContain("provider=");
 	}
 

@@ -113,7 +113,7 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 				new BufferingResponse(response, request, publicBaseUrl);
 		chain.doFilter(request, buffered);
 
-		if (buffered.daChuyenHuong()) {
+		if (buffered.redirected()) {
 			// Không có thân để chèn script, và response đã commit — chạm vào nữa
 			// chỉ tạo một `IllegalStateException` ở chỗ không ai đọc.
 			return;
@@ -163,7 +163,7 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 		private final String publicBaseUrl;
 		private ServletOutputStream stream;
 		private PrintWriter writer;
-		private boolean daChuyenHuong;
+		private boolean redirected;
 
 		private BufferingResponse(HttpServletResponse response,
 				HttpServletRequest request, String publicBaseUrl) {
@@ -172,8 +172,8 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 			this.publicBaseUrl = publicBaseUrl;
 		}
 
-		boolean daChuyenHuong() {
-			return daChuyenHuong;
+		boolean redirected() {
+			return redirected;
 		}
 
 		/**
@@ -208,18 +208,18 @@ class ConsoleFormRewriteFilter extends OncePerRequestFilter {
 		 */
 		@Override
 		public void sendRedirect(String location) throws IOException {
-			this.daChuyenHuong = true;
-			super.sendRedirect(tuyetDoi(location));
+			this.redirected = true;
+			super.sendRedirect(absolute(location));
 		}
 
 		@Override
 		public void sendRedirect(String location, int sc, boolean clearBuffer)
 				throws IOException {
-			this.daChuyenHuong = true;
-			super.sendRedirect(tuyetDoi(location), sc, clearBuffer);
+			this.redirected = true;
+			super.sendRedirect(absolute(location), sc, clearBuffer);
 		}
 
-		private String tuyetDoi(String location) {
+		private String absolute(String location) {
 			if (location.startsWith("http://") || location.startsWith("https://")) {
 				return location;
 			}

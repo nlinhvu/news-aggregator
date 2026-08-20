@@ -36,7 +36,7 @@ public class Rss2Feed {
 		 * số nguồn là nơi DUY NHẤT có nội dung: Spring Blog không phát
 		 * `<description>` ở cấp item. Bỏ element này thì mọi bài của nguồn đó ra
 		 * `excerpt == null` mà không có gì đỏ — xem
-		 * `spring_blog_lay_excerpt_tu_content_encoded`.
+		 * `spring_blog_takes_the_excerpt_from_content_encoded`.
 		 */
 		@JacksonXmlProperty(localName = "encoded")
 		public String contentEncoded;

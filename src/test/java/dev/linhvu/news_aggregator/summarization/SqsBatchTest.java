@@ -14,7 +14,7 @@ class SqsBatchTest {
 	}
 
 	@Test
-	void doc_duoc_articleid_tu_body_json() {
+	void reads_the_articleId_out_of_the_json_body() {
 		Map<String, Object> payload = Map.of("Records", List.of(
 				record("m1", "{\"articleId\":\"a1\"}"),
 				record("m2", "{\"articleId\":\"a2\"}")));
@@ -34,7 +34,7 @@ class SqsBatchTest {
 	 * lưới an toàn cho article tương ứng, vì article đó vẫn thiếu `summary`.
 	 */
 	@Test
-	void bo_qua_message_khong_doc_duoc() {
+	void skips_messages_it_cannot_read() {
 		Map<String, Object> payload = Map.of("Records", List.of(
 				record("m1", "không phải json"),
 				record("m2", "{\"khac\":\"field\"}"),
@@ -53,7 +53,7 @@ class SqsBatchTest {
 	 * quan sát là một hệ thống mà observability tự nó thành nguồn sự cố.
 	 */
 	@Test
-	void message_khong_co_traceparent_van_parse_duoc() {
+	void a_message_without_a_traceparent_still_parses() {
 		Map<String, Object> payload = Map.of("Records", List.of(
 				record("m1", "{\"articleId\":\"abc\"}")));
 
@@ -70,7 +70,7 @@ class SqsBatchTest {
 	 * thuộc nghiệp vụ.
 	 */
 	@Test
-	void doc_duoc_traceparent_tu_message_attribute() {
+	void reads_the_traceparent_out_of_the_message_attribute() {
 		Map<String, Object> payload = Map.of("Records", List.of(Map.of(
 				"messageId", "m1",
 				"eventSource", "aws:sqs",
@@ -92,7 +92,7 @@ class SqsBatchTest {
 	 * là thành công — message hỏng biến mất không dấu vết.
 	 */
 	@Test
-	void dung_hinh_dang_batch_item_failures() {
+	void uses_the_batch_item_failures_shape() {
 		assertThat(SqsBatch.failures(List.of("m1", "m3")))
 				.isEqualTo(Map.of("batchItemFailures", List.of(
 						Map.of("itemIdentifier", "m1"),
@@ -100,7 +100,7 @@ class SqsBatchTest {
 	}
 
 	@Test
-	void khong_hong_thi_danh_sach_rong() {
+	void nothing_broken_means_an_empty_list() {
 		assertThat(SqsBatch.failures(List.of()))
 				.isEqualTo(Map.of("batchItemFailures", List.of()));
 	}

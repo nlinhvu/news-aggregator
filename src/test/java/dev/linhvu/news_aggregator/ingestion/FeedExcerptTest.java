@@ -7,14 +7,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FeedExcerptTest {
 
 	@Test
-	void bo_tag_html_va_giu_chu() {
+	void strips_html_tags_and_keeps_the_text() {
 		assertThat(FeedExcerpt.clean(
 				"<p>Spring Boot 4.1 introduces <code>@ImportHttpServices</code>.</p>", 2000))
 				.isEqualTo("Spring Boot 4.1 introduces @ImportHttpServices.");
 	}
 
 	@Test
-	void gop_khoang_trang_va_bo_xuong_dong() {
+	void collapses_whitespace_and_drops_line_breaks() {
 		assertThat(FeedExcerpt.clean("Dòng một.\n\n   Dòng hai.\t\tDòng ba.", 2000))
 				.isEqualTo("Dòng một. Dòng hai. Dòng ba.");
 	}
@@ -25,7 +25,7 @@ class FeedExcerptTest {
 	 * như code chứ không như văn xuôi.
 	 */
 	@Test
-	void giai_ma_entity_co_ban() {
+	void decodes_the_basic_entities() {
 		assertThat(FeedExcerpt.clean(
 				"A &amp; B &lt;tag&gt; &quot;q&quot; &#39;s&#39; &nbsp;end", 2000))
 				.isEqualTo("A & B <tag> \"q\" 's' end");
@@ -37,7 +37,7 @@ class FeedExcerptTest {
 	 * `&lt;` chứ không phải mở một tag.
 	 */
 	@Test
-	void khong_giai_ma_entity_hai_lan() {
+	void does_not_decode_entities_twice() {
 		assertThat(FeedExcerpt.clean("A &amp;lt;b&amp;gt; B", 2000))
 				.isEqualTo("A &lt;b&gt; B");
 	}
@@ -47,7 +47,7 @@ class FeedExcerptTest {
 	 * input — đúng nơi model chú ý nhất.
 	 */
 	@Test
-	void cat_tai_ranh_gioi_tu() {
+	void truncates_at_a_word_boundary() {
 		String raw = "một hai ba bốn năm sáu bảy tám chín mười";
 
 		assertThat(FeedExcerpt.clean(raw, 12)).isEqualTo("một hai ba");
@@ -60,14 +60,14 @@ class FeedExcerptTest {
 	 * chuỗi rỗng" mà `attribute_exists(excerpt)` của Task 13 dựa vào.
 	 */
 	@Test
-	void cat_cung_khi_khong_co_khoang_trang_nao() {
+	void truncates_even_when_there_is_no_whitespace_at_all() {
 		assertThat(FeedExcerpt.clean(
-				"https://example.test/mot-duong-dan-rat-dai-khong-he-co-khoang-trang", 20))
+				"https://example.test/a-very-long-path-with-no-whitespace-at-all", 20))
 				.isEqualTo("https://example.test");
 	}
 
 	@Test
-	void khong_cat_khi_van_con_ngan_hon_tran() {
+	void does_not_truncate_while_still_under_the_cap() {
 		assertThat(FeedExcerpt.clean("ngắn thôi", 2000)).isEqualTo("ngắn thôi");
 	}
 
@@ -78,7 +78,7 @@ class FeedExcerptTest {
 	 * sẽ nhặt về những bài không bao giờ tóm tắt được, mỗi lượt, mãi mãi.
 	 */
 	@Test
-	void tra_null_khi_khong_dung_duoc() {
+	void returns_null_when_nothing_is_usable() {
 		assertThat(FeedExcerpt.clean(null, 2000)).isNull();
 		assertThat(FeedExcerpt.clean("", 2000)).isNull();
 		assertThat(FeedExcerpt.clean("   \n\t  ", 2000)).isNull();
@@ -90,7 +90,7 @@ class FeedExcerptTest {
 	 * tag thì JavaScript nằm lại trong excerpt và model tóm tắt một đoạn code.
 	 */
 	@Test
-	void bo_ca_noi_dung_cua_script_va_style() {
+	void drops_the_content_of_script_and_style_as_well() {
 		assertThat(FeedExcerpt.clean(
 				"Trước<script>var x = 1;</script>Sau<style>.a{color:red}</style>Cuối", 2000))
 				.isEqualTo("TrướcSauCuối");

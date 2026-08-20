@@ -58,7 +58,7 @@ class EventsController {
 	 * `Errors`. Dải đó cố ý không lấy 4xx (bot quét sinh 404 sẽ đầu độc alarm),
 	 * nên nếu đổi dòng này về `BAD_REQUEST` thì toàn bộ lưới an toàn của Phase 4
 	 * câm với chính chế độ hỏng nó sinh ra để bắt — và không test nào ở tầng infra
-	 * đỏ. `payload_khong_ai_nhan_tra_500` là chốt chặn duy nhất.
+	 * đỏ. `a_payload_nobody_accepts_returns_500` là chốt chặn duy nhất.
 	 */
 	@ExceptionHandler(UnknownEventException.class)
 	ProblemDetail handleUnknown(UnknownEventException e) {

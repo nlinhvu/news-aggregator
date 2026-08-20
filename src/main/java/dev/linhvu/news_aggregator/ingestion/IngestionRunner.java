@@ -26,7 +26,7 @@ class IngestionRunner {
 	private static final Logger log = LoggerFactory.getLogger(IngestionRunner.class);
 
 	/** Nguồn thất bại. `ingestOne` chỉ trả về số đếm ≥ 0 nên không đụng nhau. */
-	private static final int THAT_BAI = -1;
+	private static final int FAILED = -1;
 
 	private final SourceCatalog sources;
 	private final FeedFetcher fetcher;
@@ -63,10 +63,10 @@ class IngestionRunner {
 		List<Integer> perSource = fetchAll(enabled);
 
 		int discovered = perSource.stream()
-				.filter(n -> n != THAT_BAI)
+				.filter(n -> n != FAILED)
 				.mapToInt(Integer::intValue)
 				.sum();
-		int failed = (int) perSource.stream().filter(n -> n == THAT_BAI).count();
+		int failed = (int) perSource.stream().filter(n -> n == FAILED).count();
 
 		// Ranh giới phải rõ, nếu không DLQ hoặc không bao giờ nhận gì, hoặc nhận
 		// mọi thứ: một nguồn hỏng là chuyện bình thường; KHÔNG nguồn nào chạy
@@ -97,7 +97,7 @@ class IngestionRunner {
 		// `wrap` là thứ giữ `trace_id` sống qua ranh giới thread. Bỏ nó ra thì
 		// mọi dòng log trong khối này mất trace id — kể cả `"nguồn … thất bại"`,
 		// dòng quan trọng nhất của lớp này. Không có gì đỏ ở tầng compile, và
-		// `log_trong_vong_fetch_song_song_mang_cung_trace_id` là chốt chặn duy nhất.
+		// `logs_inside_the_parallel_fetch_carry_the_same_trace_id` là chốt chặn duy nhất.
 		try (ExecutorService executor = tracePropagation.wrap(
 				Executors.newVirtualThreadPerTaskExecutor())) {
 			List<Future<Integer>> futures = enabled.stream()
@@ -120,7 +120,7 @@ class IngestionRunner {
 		}
 		catch (Exception e) {
 			log.warn("nguồn {} thất bại: {}", source.sourceId(), e.toString());
-			return THAT_BAI;
+			return FAILED;
 		}
 		finally {
 			// TRONG finally: một permit không trả sẽ treo lượt chạy tới khi
@@ -142,7 +142,7 @@ class IngestionRunner {
 			// nghĩa là chính task hỏng (acquire bị ngắt). Vẫn đếm là một nguồn
 			// thất bại chứ không để nó biến mất khỏi `failed`.
 			log.warn("task của một nguồn hỏng bất thường: {}", e.getCause().toString());
-			return THAT_BAI;
+			return FAILED;
 		}
 	}
 

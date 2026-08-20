@@ -28,14 +28,14 @@ class OpsAuthoritiesMapperTest {
 	private final OpsAuthoritiesMapper mapper = new OpsAuthoritiesMapper();
 
 	@Test
-	void nhom_ops_thanh_authority_co_tien_to_ROLE() {
-		assertThat(mapNhom(List.of("ops")))
+	void the_ops_group_becomes_an_authority_with_the_ROLE_prefix() {
+		assertThat(mapGroups(List.of("ops")))
 				.extracting(GrantedAuthority::getAuthority)
 				.contains("ROLE_ops");
 	}
 
 	@Test
-	void giu_nguyen_authority_san_co() {
+	void keeps_the_authorities_that_are_already_there() {
 		// Vứt `SCOPE_*`/`OIDC_USER` đi không có triệu chứng hôm nay, rồi sai một
 		// cách không giải thích được vào ngày ai đó viết `hasAuthority("SCOPE_email")`.
 		assertThat(mapper.mapAuthorities(List.of(new SimpleGrantedAuthority("SCOPE_email"))))
@@ -44,13 +44,13 @@ class OpsAuthoritiesMapperTest {
 	}
 
 	@Test
-	void khong_co_claim_thi_khong_sinh_role_nao() {
+	void no_claim_produces_no_role_at_all() {
 		// Người dùng thường KHÔNG thuộc nhóm nào, và Cognito bỏ hẳn claim thay vì
 		// phát mảng rỗng. Ném NPE ở đây nghĩa là mọi lượt đăng nhập bình thường
 		// đều chết.
 		OidcIdToken token = OidcIdToken.withTokenValue("t")
 				.issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60))
-				.subject("nguoi-doc").build();
+				.subject("reader").build();
 
 		assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(token))))
 				.extracting(GrantedAuthority::getAuthority)
@@ -58,19 +58,19 @@ class OpsAuthoritiesMapperTest {
 	}
 
 	@Test
-	void nhom_khac_khong_bien_thanh_ops() {
+	void other_groups_do_not_turn_into_ops() {
 		// Vế phủ định đáng giá nhất: một ánh xạ "có nhóm nào cũng thành ops" sẽ
 		// xanh ở test đầu tiên và mở cửa cho mọi người có nhóm bất kỳ.
-		assertThat(mapNhom(List.of("readers", "beta")))
+		assertThat(mapGroups(List.of("readers", "beta")))
 				.extracting(GrantedAuthority::getAuthority)
 				.contains("ROLE_readers", "ROLE_beta")
 				.doesNotContain("ROLE_ops");
 	}
 
-	private java.util.Collection<? extends GrantedAuthority> mapNhom(List<String> groups) {
+	private java.util.Collection<? extends GrantedAuthority> mapGroups(List<String> groups) {
 		OidcIdToken token = OidcIdToken.withTokenValue("t")
 				.issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60))
-				.subject("nguoi-van-hanh")
+				.subject("operator")
 				.claim(OpsAuthoritiesMapper.GROUPS_CLAIM, groups)
 				.build();
 		return mapper.mapAuthorities(List.of(new OidcUserAuthority(token)));
@@ -78,15 +78,15 @@ class OpsAuthoritiesMapperTest {
 
 	/** Cognito phát claim này trong ID TOKEN; userinfo của nó không có. */
 	@Test
-	void doc_tu_id_token_chu_khong_tu_userinfo() {
+	void reads_from_the_id_token_not_from_userinfo() {
 		OidcIdToken idToken = OidcIdToken.withTokenValue("t")
 				.issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60))
-				.subject("nguoi-van-hanh")
+				.subject("operator")
 				.claim(OpsAuthoritiesMapper.GROUPS_CLAIM, List.of("ops"))
 				.build();
 		// userinfo CÓ mặt nhưng KHÔNG mang claim nhóm — đúng hình dạng của Cognito.
 		var userInfo = new org.springframework.security.oauth2.core.oidc.OidcUserInfo(
-				Map.of("sub", "nguoi-van-hanh"));
+				Map.of("sub", "operator"));
 
 		assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(idToken, userInfo))))
 				.extracting(GrantedAuthority::getAuthority)

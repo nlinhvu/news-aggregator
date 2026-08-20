@@ -35,7 +35,7 @@ class JacksonFeedParser implements FeedParser {
 	 * làm đoạn cắt tiền tố bên dưới thành code chết. Không nguồn nào trong
 	 * `sources.yaml` khai bằng tiền tố (Inside Java dùng xmlns mặc định), nên
 	 * nhánh này chỉ được giữ sống bằng test — xem
-	 * `bo_tien_to_namespace_o_root_element`.
+	 * `strips_the_namespace_prefix_on_the_root_element`.
 	 */
 	private static final Pattern ROOT_ELEMENT =
 			Pattern.compile("<([A-Za-z_][\\w.:-]*)(?:\\s|>|/)");

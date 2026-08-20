@@ -46,7 +46,7 @@ class EventPathSecurityTest {
 	MockMvc mvc;
 
 	@Test
-	void events_khong_bao_gio_tra_401_hay_403() throws Exception {
+	void events_never_returns_401_or_403() throws Exception {
 		// Payload rỗng nên KHÔNG handler nào nhận — `EventsController` ném
 		// `UnknownEventException` và trả 500. Đó là kết quả MONG ĐỢI ở đây: nó
 		// chứng minh request đã ĐI QUA được filter chain và tới tận controller.
@@ -64,7 +64,7 @@ class EventPathSecurityTest {
 	}
 
 	@Test
-	void health_van_song_tren_function_event_driven() throws Exception {
+	void health_stays_alive_on_the_event_driven_function() throws Exception {
 		// `HealthController` không mang `@Profile` nào nên nó có mặt ở cả bốn
 		// vai. Chain của hai vai event-driven không được vô tình khoá nó — đây
 		// là đường một người vận hành dùng để hỏi "function này còn sống không".

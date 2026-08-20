@@ -77,7 +77,7 @@ class SecurityBoundaryTest {
 	 * bước thứ hai. Xem ADR-0003 §7.
 	 */
 	@Test
-	void co_dung_bon_role_huong_github() {
+	void there_are_exactly_four_github_facing_roles() {
 		oidcHub().resourceCountIs("AWS::IAM::Role", 4);
 	}
 
@@ -93,7 +93,7 @@ class SecurityBoundaryTest {
 	 * tại. Assert chặt ở đây là thứ duy nhất bắt được lỗi đó.
 	 */
 	@Test
-	void trust_policy_cua_prod_ghim_theo_environment_prod() {
+	void the_prod_trust_policy_pins_the_prod_environment() {
 		oidcHub().hasResourceProperties("AWS::IAM::Role", Match.objectLike(Map.of(
 				"AssumeRolePolicyDocument", Match.objectLike(Map.of(
 						"Statement", Match.arrayWith(List.of(
@@ -122,7 +122,7 @@ class SecurityBoundaryTest {
 	 * `InitiateLayerUpload` — lỗi hiện ra cách xa nguyên nhân.
 	 */
 	@Test
-	void build_role_tu_no_push_duoc_vao_ecr() {
+	void the_build_role_can_push_to_ecr_on_its_own() {
 		oidcHub().hasResourceProperties("AWS::IAM::Policy", Match.objectLike(Map.of(
 				"PolicyDocument", Match.objectLike(Map.of(
 						"Statement", Match.arrayWith(List.of(
@@ -155,7 +155,7 @@ class SecurityBoundaryTest {
 	 * toàn KHÁC che mất nguyên nhân thật. Đã trả giá thật ở Task 19.
 	 */
 	@Test
-	void build_role_doc_duoc_digest_cua_image() {
+	void the_build_role_can_read_the_image_digest() {
 		assertTrue(resourceForAction(oidcHub(), "GhaBuildRole", "ecr:DescribeImages")
 						.contains(":repository/news-aggregator"),
 				"GhaBuildRole phải được ecr:DescribeImages trên chính repo app");
@@ -179,7 +179,7 @@ class SecurityBoundaryTest {
 	 * do image bootstrap deploy trót lọt mà `app-deploy.yml` thì chết (Task 19).
 	 */
 	@Test
-	void app_deploy_role_keo_duoc_image_tu_tooling() {
+	void the_app_deploy_role_can_pull_the_image_from_tooling() {
 		for (String action : List.of("ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer")) {
 			assertEquals("arn:aws:ecr:us-east-1:" + EnvConfig.TOOLING_ACCOUNT
 							+ ":repository/news-aggregator",
@@ -271,7 +271,7 @@ class SecurityBoundaryTest {
 	 * không tạo ra triệu chứng nào, nên test là thứ duy nhất giữ được ranh giới.
 	 */
 	@Test
-	void smoke_role_invoke_duoc_dung_hai_function_scheduled() {
+	void the_smoke_role_can_invoke_exactly_the_two_scheduled_functions() {
 		Template t = cicdStack();
 
 		// `resourcesForAction` (số NHIỀU) chứ không `resourceForAction`: bản trước
@@ -308,7 +308,7 @@ class SecurityBoundaryTest {
 	 * một hop nữa để quên.
 	 */
 	@Test
-	void registry_khong_tao_role_nao() {
+	void the_registry_creates_no_role() {
 		registry().resourceCountIs("AWS::IAM::Role", 0);
 	}
 
@@ -325,7 +325,7 @@ class SecurityBoundaryTest {
 	 * chậm và rất khó truy — nên nó phải bị bắt ở đây.
 	 */
 	@Test
-	void ecr_repo_policy_co_du_hai_statement() {
+	void the_ecr_repo_policy_has_both_statements() {
 		registry().hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
 				"RepositoryPolicyText", Match.objectLike(Map.of(
 						"Statement", Match.arrayWith(List.of(
@@ -339,7 +339,7 @@ class SecurityBoundaryTest {
 
 	/** Tag IMMUTABLE toàn bộ — master §8.1. Deploy tham chiếu bằng digest. */
 	@Test
-	void ecr_tag_immutable() {
+	void ecr_tags_are_immutable() {
 		registry().hasResourceProperties("AWS::ECR::Repository", Match.objectLike(Map.of(
 				"ImageTagMutability", "IMMUTABLE"
 		)));
@@ -369,7 +369,7 @@ class SecurityBoundaryTest {
 	 * và khi đó phải sửa test này một cách có ý thức, kèm đọc lại ADR-0004.
 	 */
 	@Test
-	void mot_rule_duy_nhat_cho_image_co_tag() {
+	void a_single_rule_for_tagged_images() {
 		String policy = lifecyclePolicyText();
 		assertFalse(policy.contains("\"prod-\""), "không tách rule theo prod-: " + policy);
 		assertFalse(policy.contains("\"qa-\""), "không tách rule theo qa-: " + policy);
@@ -388,7 +388,7 @@ class SecurityBoundaryTest {
 	 * §8.1 bị vi phạm mà không có triệu chứng nào nhìn thấy được.
 	 */
 	@Test
-	void function_url_dung_auth_type_aws_iam() {
+	void the_function_url_uses_auth_type_aws_iam() {
 		appStack().hasResourceProperties("AWS::Lambda::Url", Match.objectLike(Map.of(
 				"AuthType", "AWS_IAM"
 		)));
@@ -396,7 +396,7 @@ class SecurityBoundaryTest {
 
 	/** Lambda phải arm64 và ngoài VPC (ADR-0001). */
 	@Test
-	void lambda_arm64_va_ngoai_vpc() {
+	void lambda_is_arm64_and_outside_the_vpc() {
 		Template t = appStack();
 		t.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
 				"Architectures", List.of("arm64"),
@@ -417,7 +417,7 @@ class SecurityBoundaryTest {
 	 * và alarm `Errors` mất hết giá trị. Xem ADR-0015 §6.
 	 */
 	@Test
-	void lwa_coi_5xx_la_loi_invoke() {
+	void lwa_treats_5xx_as_an_invoke_error() {
 		appStack().hasResourceProperties("AWS::Lambda::Function",
 				Match.objectLike(Map.of("Environment", Map.of("Variables",
 						Match.objectLike(Map.of(
@@ -430,7 +430,7 @@ class SecurityBoundaryTest {
 	 * lúc nó cần được tin nhất.
 	 */
 	@Test
-	void lwa_khong_coi_4xx_la_loi_invoke() {
+	void lwa_does_not_treat_4xx_as_an_invoke_error() {
 		String env = appStack().findResources("AWS::Lambda::Function").toString();
 		assertFalse(env.contains("400-"),
 				"4xx phải nằm NGOÀI AWS_LWA_ERROR_STATUS_CODES — xem ADR-0015 §6");
@@ -451,7 +451,7 @@ class SecurityBoundaryTest {
 	 * trước khi tốn một vòng deploy.
 	 */
 	@Test
-	void image_tham_chieu_bang_digest_khong_phai_tag() {
+	void the_image_is_referenced_by_digest_not_by_tag() {
 		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
 				"Code", Match.objectLike(Map.of(
 						"ImageUri", Match.objectLike(Map.of(
@@ -476,12 +476,12 @@ class SecurityBoundaryTest {
 	 *
 	 * `Timeout` KHÔNG còn khẳng định ở đây: từ Phase 2 nó là 120s và lý do
 	 * thuộc về đường ingestion, không phải cold start — xem
-	 * {@link #timeout_du_cho_mot_luot_ingestion()}. Hai con số cùng nằm trong
+	 * {@link #the_timeout_is_enough_for_one_ingestion_run()}. Hai con số cùng nằm trong
 	 * một `Map.of` sẽ khiến bất kỳ ai chỉnh timeout cũng phải đọc lý do của
 	 * memory, và ngược lại.
 	 */
 	@Test
-	void lambda_du_cpu_cho_cold_start() {
+	void lambda_has_enough_cpu_for_cold_start() {
 		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
 				"MemorySize", 2048
 		)));
@@ -494,10 +494,10 @@ class SecurityBoundaryTest {
 	 * triệu chứng nào ngoài hoá đơn.
 	 */
 	@Test
-	void schedule_gioi_han_retry_va_co_dlq() {
+	void the_schedule_caps_retries_and_has_a_dlq() {
 		appStack().hasResourceProperties("AWS::Scheduler::Schedule", Match.objectLike(Map.of(
 				"Target", Match.objectLike(Map.of(
-						// Ghim đúng schedule ingest — xem `prod_chay_moi_gio_dev_moi_sau_gio`
+						// Ghim đúng schedule ingest — xem `prod_runs_hourly_and_dev_every_six_hours`
 						// về lý do payload phải đi kèm từ khi có schedule thứ hai.
 						"Input", "{\"job\":\"ingest-feeds\"}",
 						"RetryPolicy", Match.objectLike(Map.of(
@@ -511,7 +511,7 @@ class SecurityBoundaryTest {
 	 * chỉ là không có lượt ingestion nào chạy.
 	 */
 	@Test
-	void qa_khong_co_schedule() {
+	void qa_has_no_schedule() {
 		appStack(EnvConfig.QA).resourceCountIs("AWS::Scheduler::Schedule", 0);
 	}
 
@@ -523,7 +523,7 @@ class SecurityBoundaryTest {
 	 * lại đúng schedule đang nói tới.
 	 */
 	@Test
-	void prod_chay_moi_gio_dev_moi_sau_gio() {
+	void prod_runs_hourly_and_dev_every_six_hours() {
 		appStack(EnvConfig.PROD).hasResourceProperties(
 				"AWS::Scheduler::Schedule",
 				Match.objectLike(Map.of("ScheduleExpression", "rate(1 hour)",
@@ -545,7 +545,7 @@ class SecurityBoundaryTest {
 	 * bỏ (master §8.4 coi lịch sự với nguồn là ràng buộc).
 	 */
 	@Test
-	void so_luong_schedule_dung_theo_moi_truong() {
+	void the_number_of_schedules_matches_the_environment() {
 		appStack(EnvConfig.PROD).resourceCountIs("AWS::Scheduler::Schedule", 2);
 		appStack(EnvConfig.DEV).resourceCountIs("AWS::Scheduler::Schedule", 2);
 		appStack(EnvConfig.QA).resourceCountIs("AWS::Scheduler::Schedule", 0);
@@ -560,7 +560,7 @@ class SecurityBoundaryTest {
 	 * thật, không phải thứ đọc xuôi tai từ `EnvConfig`.
 	 */
 	@Test
-	void sweep_thua_hon_ingest() {
+	void sweep_is_more_generous_than_ingest() {
 		appStack(EnvConfig.PROD).hasResourceProperties("AWS::Scheduler::Schedule",
 				Match.objectLike(Map.of("ScheduleExpression", "rate(6 hours)",
 						"Target", Match.objectLike(Map.of(
@@ -584,7 +584,7 @@ class SecurityBoundaryTest {
 	 * trường vốn dĩ không sinh ra được message nào cho nó.
 	 */
 	@Test
-	void hai_schedule_dung_chung_mot_dlq() {
+	void the_two_schedules_share_one_dlq() {
 		appStack(EnvConfig.PROD).resourceCountIs("AWS::SQS::Queue", 3);
 		appStack(EnvConfig.DEV).resourceCountIs("AWS::SQS::Queue", 3);
 		appStack(EnvConfig.QA).resourceCountIs("AWS::SQS::Queue", 2);
@@ -596,7 +596,7 @@ class SecurityBoundaryTest {
 	 * cộng tối đa 25 message. Bài học Phase 2, áp lại cho schedule thứ hai.
 	 */
 	@Test
-	void sweep_schedule_co_retry_va_dlq() {
+	void the_sweep_schedule_has_retries_and_a_dlq() {
 		appStack(EnvConfig.PROD).hasResourceProperties("AWS::Scheduler::Schedule",
 				Match.objectLike(Map.of("Target", Match.objectLike(Map.of(
 						"Input", "{\"job\":\"summarize-sweep\"}",
@@ -617,7 +617,7 @@ class SecurityBoundaryTest {
 	 * public — hỏng mà vẫn chạy được, đúng loại lỗi không có triệu chứng.
 	 */
 	@Test
-	void lwa_pass_through_path_khai_tuong_minh_va_khong_duoi_api() {
+	void the_lwa_pass_through_path_is_declared_explicitly_and_does_not_sit_under_api() {
 		appStack().hasResourceProperties("AWS::Lambda::Function", Match.objectLike(Map.of(
 				"Environment", Match.objectLike(Map.of(
 						"Variables", Match.objectLike(Map.of(
@@ -630,7 +630,7 @@ class SecurityBoundaryTest {
 	 * theo duration THẬT.
 	 */
 	@Test
-	void timeout_du_cho_mot_luot_ingestion() {
+	void the_timeout_is_enough_for_one_ingestion_run() {
 		appStack().hasResourceProperties(
 				"AWS::Lambda::Function", Match.objectLike(Map.of("Timeout", 120)));
 	}
@@ -649,7 +649,7 @@ class SecurityBoundaryTest {
 	 * Vế `Scan` KHÔNG còn ở đây. Tới Phase 2 thì `Scan` là quyền HỢP LỆ trên bảng
 	 * `sources`, nên khẳng định "Lambda không bao giờ có Scan" trở thành sai; nó
 	 * chuyển thành "không bao giờ trên `articles`" và có nhà riêng ở
-	 * {@link #khong_bao_gio_scan_bang_articles()}. Để lại một bản sao ở đây thì
+	 * {@link #never_scans_the_articles_table()}. Để lại một bản sao ở đây thì
 	 * lần sửa quy tắc tiếp theo sẽ chỉ sửa một trong hai chỗ.
 	 *
 	 * ĐÚNG HAI ARN, mỗi index MỘT dòng. Con số này là lịch sử của chương trình chứ
@@ -669,7 +669,7 @@ class SecurityBoundaryTest {
 	 * trần cấp luôn quyền query mọi thứ trong bảng, và nó synth xanh y hệt.
 	 */
 	@Test
-	void web_chi_query_dung_hai_index_cua_articles() {
+	void web_queries_only_the_two_article_indexes() {
 		List<String> queryOn = resourcesForAction(appStack(),
 				"FunctionRoleDefaultPolicy", "dynamodb:Query");
 
@@ -711,7 +711,7 @@ class SecurityBoundaryTest {
 	 * câu test này vẫn muốn nói từ đầu, là "không có trên bảng NÀY".
 	 */
 	@Test
-	void lambda_chi_doc_bang_feature_toggles() {
+	void lambda_only_reads_the_feature_toggles_table() {
 		Template t = appStack();
 
 		// `resourcesForAction` chứ KHÔNG phải `resourceForAction`: từ Phase 3,
@@ -747,7 +747,7 @@ class SecurityBoundaryTest {
 	 *   phụ của việc ai đó sửa dòng `resources(...)`.
 	 */
 	@Test
-	void ingest_ghi_duoc_vao_articles() {
+	void ingest_can_write_into_articles() {
 		List<String> putOn = resourcesForAction(appStack(),
 				"IngestFunctionRoleDefaultPolicy", "dynamodb:PutItem");
 
@@ -772,7 +772,7 @@ class SecurityBoundaryTest {
 	 * và `lambda_ghi_duoc_vao_articles` đã canh đúng nó cho `PutItem`.
 	 */
 	@Test
-	void summarize_doc_ghi_summary_tren_arn_bang_articles() {
+	void summarize_reads_and_writes_summary_on_the_articles_table_arn() {
 		Template t = appStack();
 
 		for (String action : List.of("dynamodb:GetItem", "dynamodb:UpdateItem")) {
@@ -802,7 +802,7 @@ class SecurityBoundaryTest {
 	 * (TDD §17 #10).
 	 */
 	@Test
-	void summarize_chi_doc_dung_mot_ssm_parameter() {
+	void summarize_reads_exactly_one_ssm_parameter() {
 		Template t = appStack();
 
 		List<String> readOn = resourcesForAction(t,
@@ -837,7 +837,7 @@ class SecurityBoundaryTest {
 	 * gì — một assertion cho nó sẽ chỉ chép lại code chứ không canh gì.
 	 */
 	@Test
-	void ten_parameter_trong_env_khop_arn_duoc_cap_quyen() {
+	void the_parameter_name_in_env_matches_the_granted_arn() {
 		Template t = appStack();
 		String keyParameter = "/news/dev/gemini-api-key";
 
@@ -862,7 +862,7 @@ class SecurityBoundaryTest {
 	 * đó là đủ hẹp mà vẫn chạy.
 	 */
 	@Test
-	void kms_decrypt_ghim_ve_khoa_cua_ssm() {
+	void kms_decrypt_is_pinned_to_the_ssm_key() {
 		List<String> decryptOn = resourcesForAction(appStack(),
 				"SummarizeFunctionRoleDefaultPolicy", "kms:Decrypt");
 
@@ -890,7 +890,7 @@ class SecurityBoundaryTest {
 	 * cái cửa mà test này tồn tại để đóng.
 	 */
 	@Test
-	void khong_bao_gio_scan_bang_articles() {
+	void never_scans_the_articles_table() {
 		List<String> scanOn = resourcesForAction(appStack(),
 				"IngestFunctionRoleDefaultPolicy", "dynamodb:Scan");
 
@@ -929,12 +929,12 @@ class SecurityBoundaryTest {
 	 * ingestion tắt sạch cấu hình nguồn. Đó là lý do vế phủ định phải được canh.
 	 */
 	@Test
-	void lambda_chi_cap_nhat_trang_thai_bang_sources() {
+	void lambda_only_updates_the_state_in_the_sources_table() {
 		Template t = appStack();
 
 		// `resourcesForAction` chứ KHÔNG phải `resourceForAction`: từ Phase 3,
 		// `UpdateItem` được cấp trên HAI bảng (sources và articles) — xem lý do ở
-		// `lambda_chi_doc_bang_feature_toggles`.
+		// `lambda_only_reads_the_feature_toggles_table`.
 		for (String action : List.of("dynamodb:Scan", "dynamodb:UpdateItem")) {
 			assertTrue(resourcesForAction(t, "IngestFunctionRoleDefaultPolicy", action)
 							.stream()
@@ -966,7 +966,7 @@ class SecurityBoundaryTest {
 	 * truyền — đó mới là thứ thật sự bảo vệ được gì ở đây.
 	 */
 	@Test
-	void sns_khong_bat_sse_nhung_bat_ssl() {
+	void sns_leaves_sse_off_but_enforces_ssl() {
 		Template t = observabilityStack(EnvConfig.DEV);
 		t.hasResourceProperties("AWS::SNS::Topic",
 				Match.objectLike(Map.of("KmsMasterKeyId", Match.absent())));
@@ -990,7 +990,7 @@ class SecurityBoundaryTest {
 	 * mặc định của SNS — mà chính policy mặc định đó là nơi CloudWatch lấy quyền
 	 * publish. Sau khi thay, topic không cho phép ai publish cả.
 	 *
-	 * Test cũ `sns_khong_bat_sse_nhung_bat_ssl` không bắt được: nó khẳng định
+	 * Test cũ `sns_leaves_sse_off_but_enforces_ssl` không bắt được: nó khẳng định
 	 * policy TỒN TẠI (`resourceCountIs(…TopicPolicy, 1)`), không khẳng định nó CHO
 	 * PHÉP gì. Một policy toàn Deny thoả nó hoàn hảo.
 	 *
@@ -1053,7 +1053,7 @@ class SecurityBoundaryTest {
 	 * cảnh báo của prod.
 	 */
 	@Test
-	void moi_moi_truong_mot_topic_va_mot_subscription() {
+	void every_environment_has_one_topic_and_one_subscription() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			Template t = observabilityStack(cfg);
 			t.resourceCountIs("AWS::SNS::Topic", 1);
@@ -1070,7 +1070,7 @@ class SecurityBoundaryTest {
 	 * (`missing`) thì alarm treo ở `INSUFFICIENT_DATA` và không bao giờ nổ.
 	 */
 	@Test
-	void alarm_errors_o_prod_va_dev_khong_o_qa() {
+	void errors_alarm_in_prod_and_dev_but_not_in_qa() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
 				Match.objectLike(Map.of(
 						"MetricName", "Errors",
@@ -1087,7 +1087,7 @@ class SecurityBoundaryTest {
 	 * tiền tố thì người vận hành không biết mail đến từ đâu.
 	 */
 	@Test
-	void ten_alarm_mang_tien_to_moi_truong() {
+	void alarm_names_carry_the_environment_prefix() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
 				Match.objectLike(Map.of("AlarmName", "na-prod-function-errors")));
 		observabilityStack(EnvConfig.DEV).hasResourceProperties("AWS::CloudWatch::Alarm",
@@ -1105,7 +1105,7 @@ class SecurityBoundaryTest {
 	 * tiên là tin đáng đọc.
 	 */
 	@Test
-	void alarm_do_sau_dlq_o_prod_va_dev() {
+	void dlq_depth_alarm_in_prod_and_dev() {
 		Template prod = observabilityStack(EnvConfig.PROD);
 		prod.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike(Map.of(
 				"AlarmName", "na-prod-ingest-dlq-depth",
@@ -1128,7 +1128,7 @@ class SecurityBoundaryTest {
 	 * là lời hứa của prod.
 	 */
 	@Test
-	void heartbeat_chi_o_prod_va_no_vi_vang_mat() {
+	void heartbeat_exists_only_in_prod_and_fires_on_absence() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::CloudWatch::Alarm",
 				Match.objectLike(Map.of(
 						"AlarmName", "na-prod-ingest-heartbeat",
@@ -1178,7 +1178,7 @@ class SecurityBoundaryTest {
 	 * chứng đủ mạnh: đổi sang log group khác thì chuỗi đổi theo.
 	 */
 	@Test
-	void heartbeat_soi_log_group_cua_INGEST_chu_khong_phai_cua_web() {
+	void heartbeat_watches_the_INGEST_log_group_not_the_web_one() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::Logs::MetricFilter",
 				Match.objectLike(Map.of("LogGroupName", Match.objectLike(Map.of(
 						"Fn::ImportValue",
@@ -1186,7 +1186,7 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void metric_filter_soi_dung_truong_message_cua_ecs_json() {
+	void the_metric_filter_watches_the_message_field_of_the_ecs_json() {
 		observabilityStack(EnvConfig.PROD).hasResourceProperties("AWS::Logs::MetricFilter",
 				Match.objectLike(Map.of(
 						"FilterPattern", "{ $.message = \"ingestion run xong:*\" }",
@@ -1216,7 +1216,7 @@ class SecurityBoundaryTest {
 	 * "cái gì bị bỏ đi" trước khi tiêu tiếp.
 	 */
 	@Test
-	void tong_so_alarm_dung_ngan_sach_free_tier() {
+	void the_total_alarm_count_fits_the_free_tier_budget() {
 		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Alarm", 5);
 		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Alarm", 3);
 		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Alarm", 0);
@@ -1229,7 +1229,7 @@ class SecurityBoundaryTest {
 	 * phải may mắn.
 	 */
 	@Test
-	void dung_dung_mot_metric_filter_trong_ca_phase() {
+	void exactly_one_metric_filter_is_used_across_the_whole_phase() {
 		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::Logs::MetricFilter", 1);
 		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::Logs::MetricFilter", 0);
 		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::Logs::MetricFilter", 0);
@@ -1244,7 +1244,7 @@ class SecurityBoundaryTest {
 	 * thì không. Bớt được một mắt xích, tức bớt một chỗ có thể im lặng.
 	 */
 	@Test
-	void moi_moi_truong_mot_budget_chi_thong_bao() {
+	void every_environment_has_one_notify_only_budget() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			Template t = observabilityStack(cfg);
 			t.resourceCountIs("AWS::Budgets::Budget", 1);
@@ -1262,7 +1262,7 @@ class SecurityBoundaryTest {
 	 * trúc"* — thay đổi HÌNH DẠNG đáng lo hơn thay đổi TỔNG. Miễn phí.
 	 */
 	@Test
-	void moi_moi_truong_co_cost_anomaly_monitor() {
+	void every_environment_has_a_cost_anomaly_monitor() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			Template t = observabilityStack(cfg);
 			t.resourceCountIs("AWS::CE::AnomalyMonitor", 1);
@@ -1279,7 +1279,7 @@ class SecurityBoundaryTest {
 	 * LIẾC NHÌN.
 	 */
 	@Test
-	void dung_mot_dashboard_va_chi_o_prod() {
+	void exactly_one_dashboard_and_only_in_prod() {
 		observabilityStack(EnvConfig.PROD).resourceCountIs("AWS::CloudWatch::Dashboard", 1);
 		observabilityStack(EnvConfig.DEV).resourceCountIs("AWS::CloudWatch::Dashboard", 0);
 		observabilityStack(EnvConfig.QA).resourceCountIs("AWS::CloudWatch::Dashboard", 0);
@@ -1287,7 +1287,7 @@ class SecurityBoundaryTest {
 
 	/** Log retention tối đa 14 ngày ở MỌI môi trường (master §8.2). */
 	@Test
-	void log_retention_toi_da_14_ngay() {
+	void log_retention_is_at_most_14_days() {
 		appStack().hasResourceProperties("AWS::Logs::LogGroup", Match.objectLike(Map.of(
 				"RetentionInDays", 14
 		)));
@@ -1295,7 +1295,7 @@ class SecurityBoundaryTest {
 
 	/** S3 bucket phải chặn TOÀN BỘ public access (master §8.1). */
 	@Test
-	void s3_bucket_chan_toan_bo_public_access() {
+	void the_s3_bucket_blocks_all_public_access() {
 		edgeStack().hasResourceProperties("AWS::S3::Bucket", Match.objectLike(Map.of(
 				"PublicAccessBlockConfiguration", Map.of(
 						"BlockPublicAcls", true,
@@ -1314,7 +1314,7 @@ class SecurityBoundaryTest {
 	 * CachePolicy CACHING_DISABLED có id cố định do AWS quản.
 	 */
 	@Test
-	void api_khong_duoc_cache() {
+	void api_must_not_be_cached() {
 		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
 				Match.objectLike(Map.of(
 						"DistributionConfig", Match.objectLike(Map.of(
@@ -1342,7 +1342,7 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	@SuppressWarnings("unchecked")
-	void oac_co_du_hai_permission_goi_lambda() {
+	void oac_has_both_permissions_to_invoke_lambda() {
 		Template t = edgeStack();
 		// HAI origin Function URL × HAI permission mỗi origin.
 		t.resourceCountIs("AWS::Lambda::Permission", 4);
@@ -1392,7 +1392,7 @@ class SecurityBoundaryTest {
 	 * vi miễn phí của pricing plan, trái master §4 nguyên tắc 3.
 	 */
 	@Test
-	void distribution_giu_web_acl_cua_pricing_plan() {
+	void the_distribution_keeps_the_pricing_plan_web_acl() {
 		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
 				Match.objectLike(Map.of(
 						"DistributionConfig", Match.objectLike(Map.of(
@@ -1418,7 +1418,7 @@ class SecurityBoundaryTest {
 	 * không làm được.
 	 */
 	@Test
-	void loi_cua_api_khong_bi_nguy_trang_thanh_200() {
+	void api_errors_are_not_disguised_as_200() {
 		edgeStack().hasResourceProperties("AWS::CloudFront::Distribution",
 				Match.objectLike(Map.of(
 						"DistributionConfig", Match.objectLike(Map.of(
@@ -1432,7 +1432,7 @@ class SecurityBoundaryTest {
 	 * Ranh giới giữa hai pipeline do IAM cưỡng chế, không do quy ước.
 	 */
 	@Test
-	void deploy_role_khong_co_quyen_cloudformation() {
+	void the_deploy_role_has_no_cloudformation_permission() {
 		String json = cicdStack().toJSON().toString();
 		org.junit.jupiter.api.Assertions.assertFalse(
 				json.contains("cloudformation:"),
@@ -1449,7 +1449,7 @@ class SecurityBoundaryTest {
 	 * hai lần. Triệu chứng duy nhất là hoá đơn.
 	 */
 	@Test
-	void queue_summarize_co_visibility_timeout_du_lon() {
+	void the_summarize_queue_has_a_large_enough_visibility_timeout() {
 		appStack().hasResourceProperties("AWS::SQS::Queue", Match.objectLike(Map.of(
 				"VisibilityTimeout", 780)));
 	}
@@ -1460,7 +1460,7 @@ class SecurityBoundaryTest {
 	 * có điểm dừng nào ngoài cửa sổ 48h.
 	 */
 	@Test
-	void queue_summarize_co_dlq_voi_max_receive_count_3() {
+	void the_summarize_queue_has_a_dlq_with_max_receive_count_3() {
 		appStack().hasResourceProperties("AWS::SQS::Queue", Match.objectLike(Map.of(
 				"RedrivePolicy", Match.objectLike(Map.of("maxReceiveCount", 3)))));
 	}
@@ -1474,7 +1474,7 @@ class SecurityBoundaryTest {
 	 * queue, DLQ không bao giờ nhận gì, và một article hỏng biến mất im lặng.
 	 */
 	@Test
-	void esm_bat_report_batch_item_failures() {
+	void esm_enables_report_batch_item_failures() {
 		appStack().hasResourceProperties("AWS::Lambda::EventSourceMapping",
 				Match.objectLike(Map.of(
 						"BatchSize", 10,
@@ -1492,7 +1492,7 @@ class SecurityBoundaryTest {
 	 * mức ở `SummarizationQueue.enqueue()`.
 	 */
 	@Test
-	void esm_khong_dat_max_concurrency() {
+	void esm_does_not_set_max_concurrency() {
 		appStack().hasResourceProperties("AWS::Lambda::EventSourceMapping",
 				Match.objectLike(Map.of("ScalingConfig", Match.absent())));
 	}
@@ -1508,7 +1508,7 @@ class SecurityBoundaryTest {
 	 * không hoàn thành".
 	 */
 	@Test
-	void function_co_on_failure_destination_tro_ve_ingest_dlq() {
+	void the_function_has_an_on_failure_destination_pointing_at_the_ingest_dlq() {
 		// HAI EventInvokeConfig từ Task 3: `ingest` và `summarize` chạy bất đồng bộ
 		// độc lập nhau, nên mỗi cái phải tự khai tầng ② của mình. Đếm thay vì
 		// `hasResourceProperties`: cái sau xanh khi chỉ MỘT trong hai có destination.
@@ -1534,7 +1534,7 @@ class SecurityBoundaryTest {
 	 * được có `EventInvokeConfig` trỏ vào hư vô.
 	 */
 	@Test
-	void qa_khong_co_on_failure_destination() {
+	void qa_has_no_on_failure_destination() {
 		appStack(EnvConfig.QA).resourceCountIs("AWS::Lambda::EventInvokeConfig", 0);
 	}
 
@@ -1554,7 +1554,7 @@ class SecurityBoundaryTest {
 	 * gì cả.
 	 */
 	@Test
-	void lambda_khong_co_quyen_nao_tren_dlq() {
+	void lambda_has_no_permission_at_all_on_the_dlq() {
 		Template template = appStack();
 		String iam = template.findResources("AWS::IAM::Policy")
 				+ template.findResources("AWS::IAM::Role").toString();
@@ -1584,7 +1584,7 @@ class SecurityBoundaryTest {
 	 * cdk-nag phải CÓ THAM SỐ, không được để trống.
 	 */
 	@Test
-	void execution_role_ghi_duoc_trace_len_xray() {
+	void the_execution_role_can_write_traces_to_xray() {
 		List<String> on = resourcesForAction(appStack(), "FunctionRoleDefaultPolicy",
 				"xray:PutTraceSegments");
 		assertEquals(List.of("*"), on,
@@ -1624,7 +1624,7 @@ class SecurityBoundaryTest {
 	 * hoá đơn hoặc tới lúc ai đó gỡ `enabled: false` bên app.
 	 */
 	@Test
-	void khong_dung_bien_otlp_dang_chung() {
+	void does_not_use_the_shared_otlp_variables() {
 		String env = appStack().findResources("AWS::Lambda::Function").toString();
 		assertFalse(env.contains("OTEL_EXPORTER_OTLP_ENDPOINT"),
 				"dùng OTEL_EXPORTER_OTLP_TRACES_ENDPOINT — bản có signal");
@@ -1664,11 +1664,11 @@ class SecurityBoundaryTest {
 			// Togglz đọc flag (feature-toggles), phân giải cookie → phiên (sessions,
 			// AP12), và từ Task 19 đọc lựa chọn nguồn (user-preferences, AP13). Cùng
 			// một action trên ba bảng: phạm vi theo BẢNG được canh ở
-			// `web_khong_ghi_duoc_articles_khong_goi_duoc_gemini`.
+			// `web_cannot_write_articles_and_cannot_call_gemini`.
 			"dynamodb:GetItem",
 			// PutItem trên `sessions` (phiên mới, VÀ trượt TTL — `save()` ghi đè cả
 			// item) và trên `user-preferences` (lưu lựa chọn nguồn — xem
-			// `web_doc_ghi_user_preferences_nhung_khong_xoa`).
+			// `web_reads_and_writes_user_preferences_but_never_deletes`).
 			"dynamodb:PutItem",
 			"dynamodb:DeleteItem",    // đăng xuất — xoá phiên, không chỉ xoá cookie
 			// KHÔNG có `dynamodb:UpdateItem`, và sự vắng mặt đó là CÓ Ý. Bản trước
@@ -1680,7 +1680,7 @@ class SecurityBoundaryTest {
 			// `Scan` CHỈ trên bảng `sources` (Task 19): `GET /api/sources` dựng hàng
 			// chip cho slice 4. Lần đầu function phục vụ Internet đọc bảng đó —
 			// chấp nhận được vì bảng bị chặn trên ~30 dòng bởi master §2 và endpoint
-			// là công khai. Phạm vi được canh ở `web_scan_duoc_sources_va_chi_sources`.
+			// là công khai. Phạm vi được canh ở `web_can_scan_sources_and_only_sources`.
 			"dynamodb:Scan",
 			// Hai action dưới là secret THỨ HAI của chương trình (Task 8): client
 			// secret của Cognito, đọc LƯỜI ở Task 10 — chỉ khi có người đăng nhập.
@@ -1750,7 +1750,7 @@ class SecurityBoundaryTest {
 			"dynamodb:DescribeTable", // togglz-dynamodb dựng repository
 			// togglz đọc flag (feature-toggles) VÀ phân giải cookie → phiên
 			// (sessions). Phạm vi theo BẢNG được canh ở
-			// `admin_chi_cham_feature_toggles_va_sessions`.
+			// `admin_only_touches_feature_toggles_and_sessions`.
 			"dynamodb:GetItem",
 			// LÝ DO TỒN TẠI của function này: `DynamoDBStateRepository
 			// .setFeatureState` lật flag bằng `UpdateItem`. Đây là đường ghi
@@ -1762,22 +1762,22 @@ class SecurityBoundaryTest {
 			"kms:Decrypt");           // giải mã SecureString bằng alias/aws/ssm
 
 	@Test
-	void tap_dong_quyen_cua_web() {
+	void the_closed_permission_set_of_web() {
 		assertClosedActionSet("Function", WEB_ACTIONS);
 	}
 
 	@Test
-	void tap_dong_quyen_cua_ingest() {
+	void the_closed_permission_set_of_ingest() {
 		assertClosedActionSet("IngestFunction", INGEST_ACTIONS);
 	}
 
 	@Test
-	void tap_dong_quyen_cua_summarize() {
+	void the_closed_permission_set_of_summarize() {
 		assertClosedActionSet("SummarizeFunction", SUMMARIZE_ACTIONS);
 	}
 
 	@Test
-	void tap_dong_quyen_cua_admin() {
+	void the_closed_permission_set_of_admin() {
 		assertClosedActionSet("AdminFunction", ADMIN_ACTIONS);
 	}
 
@@ -1791,7 +1791,7 @@ class SecurityBoundaryTest {
 	 * vẫn xanh.
 	 */
 	@Test
-	void chi_admin_ghi_duoc_feature_toggles() {
+	void only_admin_can_write_feature_toggles() {
 		Template template = appStack(EnvConfig.DEV);
 
 		for (String role : List.of("Function", "IngestFunction", "SummarizeFunction")) {
@@ -1819,7 +1819,7 @@ class SecurityBoundaryTest {
 	 * khối `web` ngay bên trên sẽ không tạo ra triệu chứng nào.
 	 */
 	@Test
-	void admin_chi_cham_feature_toggles_va_sessions() {
+	void admin_only_touches_feature_toggles_and_sessions() {
 		List<Map<String, Object>> statements =
 				statementsOfRole(appStack(EnvConfig.DEV), "AdminFunction");
 		assertFalse(statements.isEmpty(),
@@ -1861,7 +1861,7 @@ class SecurityBoundaryTest {
 	 * hai để NONE — đúng cái nửa mà test này tồn tại để canh.
 	 */
 	@Test
-	void function_url_cua_admin_cung_la_AWS_IAM() {
+	void the_admin_function_url_is_AWS_IAM_too() {
 		Template template = appStack(EnvConfig.DEV);
 		template.resourceCountIs("AWS::Lambda::Url", 2);
 		template.allResourcesProperties("AWS::Lambda::Url",
@@ -1880,38 +1880,38 @@ class SecurityBoundaryTest {
 	 * Ép bằng nhau ở đó sẽ buộc phải khai một danh sách thứ tư chỉ để mô tả một
 	 * môi trường không chạy gì.
 	 */
-	private void assertClosedActionSet(String functionId, Set<String> khaiBao) {
+	private void assertClosedActionSet(String functionId, Set<String> declared) {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
-			Set<String> thucTe = statementsOfRole(appStack(cfg), functionId).stream()
+			Set<String> actual = statementsOfRole(appStack(cfg), functionId).stream()
 					.flatMap(s -> actionsOf(s).stream())
 					.collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
 
 			// Không có dòng này thì mọi vế dưới xanh rỗng khi prefix tra sai —
 			// và một tập đóng rỗng trông y hệt một tập đóng sạch.
-			assertFalse(thucTe.isEmpty(),
+			assertFalse(actual.isEmpty(),
 					"[" + cfg.name() + "] không đọc được action nào của role `"
 							+ functionId + "` — prefix tra sai?");
 
-			Set<String> thua = new java.util.TreeSet<>(thucTe);
-			thua.removeAll(khaiBao);
-			assertTrue(thua.isEmpty(),
+			Set<String> extra = new java.util.TreeSet<>(actual);
+			extra.removeAll(declared);
+			assertTrue(extra.isEmpty(),
 					"[" + cfg.name() + "] role `" + functionId + "` có quyền KHÔNG khai "
-							+ "báo: " + thua + " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
+							+ "báo: " + extra + " — thêm vào danh sách KÈM LÝ DO, đừng nới test.");
 
 			if (cfg == EnvConfig.QA) {
 				continue;
 			}
-			Set<String> thieu = new java.util.TreeSet<>(khaiBao);
-			thieu.removeAll(thucTe);
-			assertTrue(thieu.isEmpty(),
+			Set<String> missing = new java.util.TreeSet<>(declared);
+			missing.removeAll(actual);
+			assertTrue(missing.isEmpty(),
 					"[" + cfg.name() + "] danh sách khai `" + functionId + "` có quyền mà "
-							+ "role KHÔNG có: " + thieu + " — quyền đã bị gỡ khỏi AppStack "
+							+ "role KHÔNG có: " + missing + " — quyền đã bị gỡ khỏi AppStack "
 							+ "thì gỡ luôn khỏi đây, đừng để danh sách mô tả quá khứ.");
 		}
 	}
 
 	@Test
-	void bon_function_bon_role_bon_bo_trigger() {
+	void four_functions_four_roles_four_trigger_sets() {
 		Template template = appStack(EnvConfig.DEV);
 
 		template.resourceCountIs("AWS::Lambda::Function", 4);
@@ -1934,7 +1934,7 @@ class SecurityBoundaryTest {
 		// ĐÚNG HAI Function URL — `web` và `admin`. `ingest` và `summarize` không
 		// có đường HTTP nào từ Internet, đó là nửa còn lại của việc thu hẹp blast
 		// radius. Cả hai URL đều `AWS_IAM`, canh ở
-		// `function_url_cua_admin_cung_la_AWS_IAM`.
+		// `the_admin_function_url_is_AWS_IAM_too`.
 		template.resourceCountIs("AWS::Lambda::Url", 2);
 		// Một ESM (SQS → summarize), hai Schedule (ingest-feeds → ingest,
 		// summarize-sweep → summarize). `admin` KHÔNG có trigger nào ngoài HTTP.
@@ -1943,7 +1943,7 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void web_khong_ghi_duoc_articles_khong_goi_duoc_gemini() {
+	void web_cannot_write_articles_and_cannot_call_gemini() {
 		// Đây là LÝ DO TỒN TẠI của cả slice 1. Nếu chỉ giữ được một test của
 		// task này thì giữ test này.
 		Template template = appStack(EnvConfig.DEV);
@@ -1963,10 +1963,10 @@ class SecurityBoundaryTest {
 		// DANH SÁCH ARN, nên một statement cấp `PutItem` trên cả `sessions` lẫn
 		// `articles` phải đỏ — cặp action/resource chỉ có nghĩa trong phạm vi một
 		// statement (xem `statementsOf`).
-		Set<String> ghiDynamo = Set.of("dynamodb:PutItem", "dynamodb:UpdateItem",
+		Set<String> dynamoWrites = Set.of("dynamodb:PutItem", "dynamodb:UpdateItem",
 				"dynamodb:DeleteItem", "dynamodb:BatchWriteItem");
 		for (Map<String, Object> statement : statements) {
-			if (actionsOf(statement).stream().noneMatch(ghiDynamo::contains)) {
+			if (actionsOf(statement).stream().noneMatch(dynamoWrites::contains)) {
 				continue;
 			}
 			for (String resource : resourcesOf(statement)) {
@@ -2009,7 +2009,7 @@ class SecurityBoundaryTest {
 	 * sai — và sống tới 2026-08-19 vì thừa quyền không tạo triệu chứng nào.
 	 */
 	@Test
-	void web_doc_ghi_xoa_sessions_nhung_khong_update() {
+	void web_reads_writes_and_deletes_sessions_but_never_updates() {
 		Template t = appStack();
 
 		for (String action : List.of("dynamodb:GetItem", "dynamodb:PutItem",
@@ -2017,7 +2017,7 @@ class SecurityBoundaryTest {
 			assertTrue(resourcesForAction(t, "FunctionRoleDefaultPolicy", action).stream()
 							.anyMatch(resource -> resource.contains("SessionsTable")),
 					"`web` phải được " + action + " trên bảng sessions — thiếu "
-							+ action + " thì " + moTa(action));
+							+ action + " thì " + explain(action));
 		}
 
 		for (String resource
@@ -2028,7 +2028,7 @@ class SecurityBoundaryTest {
 		}
 	}
 
-	private static String moTa(String action) {
+	private static String explain(String action) {
 		return switch (action) {
 			case "dynamodb:GetItem" -> "không phân giải được cookie thành phiên";
 			case "dynamodb:PutItem" -> "không tạo được phiên VÀ không trượt được TTL";
@@ -2056,7 +2056,7 @@ class SecurityBoundaryTest {
 	 * tập đóng `WEB_ACTIONS`, không phải dòng này.
 	 */
 	@Test
-	void web_doc_ghi_user_preferences_nhung_khong_xoa() {
+	void web_reads_and_writes_user_preferences_but_never_deletes() {
 		Template t = appStack();
 
 		for (String action : List.of("dynamodb:GetItem", "dynamodb:PutItem")) {
@@ -2088,7 +2088,7 @@ class SecurityBoundaryTest {
 	 * đúng vào ngày ai đó gỡ mất quyền và `GET /api/sources` chết bằng AccessDenied.
 	 */
 	@Test
-	void web_scan_duoc_sources_va_chi_sources() {
+	void web_can_scan_sources_and_only_sources() {
 		List<String> scanOn = resourcesForAction(appStack(),
 				"FunctionRoleDefaultPolicy", "dynamodb:Scan");
 
@@ -2102,7 +2102,7 @@ class SecurityBoundaryTest {
 
 	/**
 	 * Secret THỨ HAI của chương trình, và ranh giới quanh nó phải hẹp y như
-	 * secret thứ nhất — `summarize_chi_doc_dung_mot_ssm_parameter` là bản gốc
+	 * secret thứ nhất — `summarize_reads_exactly_one_ssm_parameter` là bản gốc
 	 * của khẳng định này, đây là bản cho `web`.
 	 *
 	 * Vế đáng giá nhất là "ĐÚNG MỘT": `web` nay là function phục vụ Internet CÓ
@@ -2111,7 +2111,7 @@ class SecurityBoundaryTest {
 	 * đường từ Internet tới gemini key — và nó không tạo ra triệu chứng nào.
 	 */
 	@Test
-	void web_chi_doc_dung_client_secret_cua_cognito() {
+	void web_reads_only_the_cognito_client_secret() {
 		Template t = appStack();
 
 		List<String> readOn = resourcesForAction(t, "FunctionRoleDefaultPolicy",
@@ -2141,10 +2141,10 @@ class SecurityBoundaryTest {
 	/**
 	 * Env var trỏ tới ĐÚNG parameter mà statement IAM mở khoá — khẳng định chúng
 	 * khớp NHAU chứ không chép literal vào hai chỗ, đúng lý do đã ghi ở
-	 * `ten_parameter_trong_env_khop_arn_duoc_cap_quyen` cho gemini key.
+	 * `the_parameter_name_in_env_matches_the_granted_arn` cho gemini key.
 	 */
 	@Test
-	void ten_client_secret_trong_env_khop_arn_duoc_cap_quyen() {
+	void the_client_secret_name_in_env_matches_the_granted_arn() {
 		Template t = appStack();
 		String secretParameter = "/news/dev/cognito-client-secret";
 
@@ -2175,18 +2175,18 @@ class SecurityBoundaryTest {
 	 * sau khi đăng nhập, không lỗi nào nổ ra.
 	 */
 	@Test
-	void chi_web_va_admin_mang_cau_hinh_cognito() {
+	void only_web_and_admin_carry_the_cognito_configuration() {
 		Map<String, Map<String, Object>> functions = appStack()
 				.findResources("AWS::Lambda::Function");
 
-		int mangCauHinh = 0;
+		int carryingConfiguration = 0;
 		for (Map.Entry<String, Map<String, Object>> e : functions.entrySet()) {
 			// `web` giữ logical id `Function` từ bản Lambdalith, nên `admin` phải
 			// được loại TRƯỚC — `AdminFunction…` không bắt đầu bằng `Function`.
-			boolean phucVuHttp = e.getKey().startsWith("Function")
+			boolean servesHttp = e.getKey().startsWith("Function")
 					|| e.getKey().startsWith("AdminFunction");
 			for (String prefix : List.of("NEWS_COGNITO_", "NEWS_PUBLIC_BASE_URL")) {
-				if (phucVuHttp) {
+				if (servesHttp) {
 					assertTrue(String.valueOf(e.getValue()).contains(prefix),
 							"`" + e.getKey() + "` phục vụ HTTP nên PHẢI mang " + prefix
 									+ ": " + e.getValue());
@@ -2197,13 +2197,13 @@ class SecurityBoundaryTest {
 									+ prefix + "): " + e.getValue());
 				}
 			}
-			if (phucVuHttp) {
-				mangCauHinh++;
+			if (servesHttp) {
+				carryingConfiguration++;
 			}
 		}
-		assertEquals(2, mangCauHinh,
+		assertEquals(2, carryingConfiguration,
 				"đúng HAI function phục vụ HTTP mang cấu hình danh tính, thực tế: "
-						+ mangCauHinh);
+						+ carryingConfiguration);
 	}
 
 	/**
@@ -2219,7 +2219,7 @@ class SecurityBoundaryTest {
 	 * biến mất: `web` sẽ phải có `dynamodb:UpdateItem` trên bảng flag.
 	 */
 	@Test
-	void admin_co_behavior_rieng_khong_cache_va_khong_dung_chung_origin_voi_api() {
+	void admin_has_its_own_behavior_without_cache_and_shares_no_origin_with_api() {
 		Map<String, Map<String, Object>> distributions =
 				edgeStack().findResources("AWS::CloudFront::Distribution");
 		assertEquals(1, distributions.size(),
@@ -2335,7 +2335,7 @@ class SecurityBoundaryTest {
 	 * không log nào của ta nói ra.
 	 */
 	@Test
-	void public_base_url_khop_domain_dung_cho_callback_cua_cognito() {
+	void the_public_base_url_matches_the_domain_used_for_the_cognito_callback() {
 		EnvConfig cfg = EnvConfig.DEV;
 
 		appStack(cfg).hasResourceProperties("AWS::Lambda::Function",
@@ -2377,7 +2377,7 @@ class SecurityBoundaryTest {
 	 * <p><b>ĐỪNG gỡ PASSWORD ra lần nữa.</b> Nó sẽ xanh ở đây và đỏ ở prod.
 	 */
 	@Test
-	void user_pool_dung_tier_essentials_va_du_ba_first_factor() {
+	void the_user_pool_uses_the_essentials_tier_and_all_three_first_factors() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		// Essentials: điều kiện để `SignInPolicy` có hiệu lực. Ở Lite, khai
@@ -2431,7 +2431,7 @@ class SecurityBoundaryTest {
 	 * passwordless) từ một endpoint của ta.
 	 */
 	@Test
-	void pool_tat_tu_dang_ky_vi_form_sign_up_cua_cognito_luon_doi_mat_khau() {
+	void the_pool_disables_self_signup_because_the_cognito_form_always_asks_for_a_password() {
 		identityStack(EnvConfig.DEV).hasResourceProperties("AWS::Cognito::UserPool",
 				Match.objectLike(Map.of("AdminCreateUserConfig", Match.objectLike(
 						Map.of("AllowAdminCreateUserOnly", true)))));
@@ -2450,7 +2450,7 @@ class SecurityBoundaryTest {
 	 * khẩu", và lý do đó nay sai.
 	 */
 	@Test
-	void chinh_sach_mat_khau_du_manh_cho_canh_cua_khong_dong_duoc() {
+	void the_password_policy_is_strong_enough_for_a_door_that_cannot_be_closed() {
 		identityStack(EnvConfig.DEV).hasResourceProperties("AWS::Cognito::UserPool",
 				Match.objectLike(Map.of("Policies", Match.objectLike(Map.of(
 						"PasswordPolicy", Match.objectLike(Map.of(
@@ -2507,7 +2507,7 @@ class SecurityBoundaryTest {
 	 * đăng nhập. Đổi version mà quên branding còn tệ hơn không đổi.
 	 */
 	@Test
-	void managed_login_la_v2_va_co_style_cho_app_client() {
+	void managed_login_is_v2_and_has_a_style_for_the_app_client() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		template.hasResourceProperties("AWS::Cognito::UserPoolDomain",
@@ -2552,7 +2552,7 @@ class SecurityBoundaryTest {
 	 * được truyền từ infra sang env var rồi đi tiếp.
 	 */
 	@Test
-	void url_dang_xuat_mang_du_tham_so_cognito_doi() {
+	void the_logout_url_carries_every_parameter_cognito_requires() {
 		Map<String, Map<String, Object>> functions = appStack()
 				.findResources("AWS::Lambda::Function");
 		String web = functions.entrySet().stream()
@@ -2568,14 +2568,14 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void khong_lo_email_nao_co_tai_khoan() {
+	void does_not_leak_which_email_has_an_account() {
 		identityStack(EnvConfig.DEV).hasResourceProperties(
 				"AWS::Cognito::UserPoolClient",
 				Match.objectLike(Map.of("PreventUserExistenceErrors", "ENABLED")));
 	}
 
 	@Test
-	void app_client_bat_choice_based_auth_va_giu_srp() {
+	void the_app_client_enables_choice_based_auth_and_keeps_srp() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		// MỘT phần tử mỗi lần: `arrayWith` khớp một dãy con LIỀN KỀ và ĐÚNG THỨ
@@ -2590,7 +2590,7 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc() {
+	void the_pool_declares_no_relying_party_id_because_it_would_not_deploy() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		// Domain prefix vẫn được ghim: nó là URL của managed login và là thứ
@@ -2605,7 +2605,7 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void app_client_la_confidential_va_chi_nhan_authorization_code() {
+	void the_app_client_is_confidential_and_accepts_only_the_authorization_code() {
 		identityStack(EnvConfig.DEV).hasResourceProperties(
 				"AWS::Cognito::UserPoolClient", Match.objectLike(Map.of(
 						"GenerateSecret", true,
@@ -2626,7 +2626,7 @@ class SecurityBoundaryTest {
 	 * - `http`: Cognito từ chối lúc deploy, nhưng chỉ khi ai đó sửa tay.
 	 */
 	@Test
-	void callback_url_nam_trong_api_va_dung_domain_moi_truong() {
+	void the_callback_url_lives_under_api_and_uses_the_environment_domain() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			identityStack(cfg).hasResourceProperties("AWS::Cognito::UserPoolClient",
 					Match.objectLike(Map.of("CallbackURLs", Match.arrayEquals(List.of(
@@ -2645,7 +2645,7 @@ class SecurityBoundaryTest {
 	 * chỗ ai đó quên tham số hoá; test này là thứ nói rằng nó cố ý.
 	 */
 	@Test
-	void user_pool_giu_lai_o_moi_moi_truong() {
+	void the_user_pool_is_retained_in_every_environment() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			identityStack(cfg).hasResource("AWS::Cognito::UserPool",
 					Match.objectLike(Map.of("DeletionPolicy", "Retain")));
@@ -2664,7 +2664,7 @@ class SecurityBoundaryTest {
 	 * thiếu là nửa hỏng được.
 	 */
 	@Test
-	void hai_social_idp_deu_anh_xa_email() {
+	void both_social_idps_map_the_email() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		template.resourceCountIs("AWS::Cognito::UserPoolIdentityProvider", 2);
@@ -2684,12 +2684,12 @@ class SecurityBoundaryTest {
 	 * hỏng im lặng, không lỗi ở đâu cả.
 	 *
 	 * Một phần tử mỗi lượt, cùng lý do đã ghi ở
-	 * `app_client_bat_choice_based_auth_va_giu_srp`: `arrayWith` khớp dãy con
+	 * `the_app_client_enables_choice_based_auth_and_keeps_srp`: `arrayWith` khớp dãy con
 	 * LIỀN KỀ và ĐÚNG THỨ TỰ, nên khẳng định cả ba cùng lúc là ghim luôn thứ tự
 	 * render — một chi tiết ta không kiểm soát.
 	 */
 	@Test
-	void app_client_liet_ke_ca_ba_provider() {
+	void the_app_client_lists_all_three_providers() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		for (String provider : List.of("COGNITO", "Facebook", "Google")) {
@@ -2716,7 +2716,7 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	@SuppressWarnings("unchecked")
-	void secret_cua_idp_la_dynamic_reference_ssm_khong_phai_gia_tri_that() {
+	void the_idp_secret_is_an_ssm_dynamic_reference_not_the_real_value() {
 		for (EnvConfig cfg : List.of(EnvConfig.DEV, EnvConfig.QA, EnvConfig.PROD)) {
 			Map<String, Map<String, Object>> idps = identityStack(cfg)
 					.findResources("AWS::Cognito::UserPoolIdentityProvider");
@@ -2756,7 +2756,7 @@ class SecurityBoundaryTest {
 	 */
 	@Test
 	@SuppressWarnings("unchecked")
-	void inbound_federation_trigger_noi_vao_user_pool() {
+	void the_inbound_federation_trigger_is_wired_into_the_user_pool() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		template.hasResourceProperties("AWS::Cognito::UserPool", Match.objectLike(
@@ -2789,7 +2789,7 @@ class SecurityBoundaryTest {
 	 * tính ngoài đăng nhập thành một user có sẵn.
 	 */
 	@Test
-	void cognito_duoc_phep_goi_ham_va_chi_tu_pool_nay() {
+	void cognito_may_invoke_the_function_and_only_from_this_pool() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		template.resourceCountIs("AWS::Lambda::Permission", 1);
@@ -2812,7 +2812,7 @@ class SecurityBoundaryTest {
 	 * đỏ, kèm tên action đó trong thông báo, chứ không im lặng đi qua.
 	 */
 	@Test
-	void ham_lien_ket_chi_duoc_ba_quyen_va_chi_tren_pool_nay() {
+	void the_linking_function_gets_three_permissions_and_only_on_this_pool() {
 		Template template = identityStack(EnvConfig.DEV);
 
 		Set<String> cognitoActions = new java.util.TreeSet<>();
@@ -2856,7 +2856,7 @@ class SecurityBoundaryTest {
 	}
 
 	@Test
-	void role_chi_ghi_duoc_vao_log_group_cua_chinh_no() {
+	void a_role_can_only_write_into_its_own_log_group() {
 		// Chốt chặn cho việc role KHÔNG bao giờ được cấp `logs:` trên `*`: managed
 		// policy AWSLambdaBasicExecutionRole làm đúng thế, và `LambdaRole` cố ý
 		// không dùng nó — nó tự dựng log group rồi `grantWrite` vào đúng cái đó.
@@ -2866,7 +2866,7 @@ class SecurityBoundaryTest {
 		// quyền không bị nới ra trong lúc dời code", không phải một hành vi mới.
 		//
 		// Vế "MỖI function một log group riêng" cần ba function mới kiểm được, nên
-		// nó nằm ở `bon_function_bon_role_bon_bo_trigger` chứ không phải ở đây.
+		// nó nằm ở `four_functions_four_roles_four_trigger_sets` chứ không phải ở đây.
 		Template template = appStack(EnvConfig.DEV);
 
 		for (Map<String, Object> policy

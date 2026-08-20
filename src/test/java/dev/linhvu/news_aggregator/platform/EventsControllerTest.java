@@ -37,7 +37,7 @@ class EventsControllerTest {
 		final AtomicInteger alphaCalls = new AtomicInteger();
 
 		// Dùng chung cho `gamma` và `delta`: hai handler CỐ Ý chồng nhau, phục vụ
-		// riêng test `moi_payload_chi_mot_handler_nhan`. Đếm chung vì thứ ai thắng
+		// riêng test `every_payload_is_taken_by_exactly_one_handler`. Đếm chung vì thứ ai thắng
 		// không phải thứ được kiểm — xem Javadoc của test đó.
 		final AtomicInteger overlapCalls = new AtomicInteger();
 
@@ -99,7 +99,7 @@ class EventsControllerTest {
 	}
 
 	@Test
-	void chon_dung_handler_theo_job() throws Exception {
+	void picks_the_right_handler_by_job() throws Exception {
 		mockMvc.perform(post("/events")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"job\":\"alpha\"}"))
@@ -110,7 +110,7 @@ class EventsControllerTest {
 	}
 
 	@Test
-	void chon_dung_handler_theo_hinh_dang_payload() throws Exception {
+	void picks_the_right_handler_by_payload_shape() throws Exception {
 		mockMvc.perform(post("/events")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"Records\":[{\"messageId\":\"m1\"}]}"))
@@ -141,15 +141,15 @@ class EventsControllerTest {
 	 * tự nói đúng mức nghiêm trọng của nó.
 	 */
 	@Test
-	void payload_khong_ai_nhan_tra_500() throws Exception {
+	void a_payload_nobody_accepts_returns_500() throws Exception {
 		mockMvc.perform(post("/events")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"job\":\"khong-ton-tai\"}"))
+						.content("{\"job\":\"does-not-exist\"}"))
 				.andExpect(status().isInternalServerError());
 	}
 
 	@Test
-	void body_rong_tra_500() throws Exception {
+	void an_empty_body_returns_500() throws Exception {
 		mockMvc.perform(post("/events")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{}"))
@@ -170,7 +170,7 @@ class EventsControllerTest {
 	 * quá rộng sẽ nuốt sự kiện của nguồn khác mà không có gì đỏ ở bất kỳ đâu.
 	 */
 	@Test
-	void moi_payload_chi_mot_handler_nhan() throws Exception {
+	void every_payload_is_taken_by_exactly_one_handler() throws Exception {
 		mockMvc.perform(post("/events")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"overlap\":true}"))

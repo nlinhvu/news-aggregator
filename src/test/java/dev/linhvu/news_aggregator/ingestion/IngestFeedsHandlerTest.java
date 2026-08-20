@@ -16,7 +16,7 @@ class IngestFeedsHandlerTest {
 	private final IngestFeedsHandler handler = new IngestFeedsHandler(runner);
 
 	@Test
-	void nhan_dung_job_cua_minh() {
+	void accepts_only_its_own_job() {
 		assertThat(handler.supports(Map.of("job", "ingest-feeds"))).isTrue();
 	}
 
@@ -27,7 +27,7 @@ class IngestFeedsHandlerTest {
 	 * (handler đầu tiên trả true) và nguồn kia im lặng không bao giờ chạy.
 	 */
 	@Test
-	void khong_nhan_payload_cua_nguon_khac() {
+	void does_not_accept_a_payload_from_another_producer() {
 		assertThat(handler.supports(Map.of("job", "summarize-sweep"))).isFalse();
 		assertThat(handler.supports(Map.of("Records",
 				List.of(Map.of("messageId", "m1"))))).isFalse();
@@ -35,7 +35,7 @@ class IngestFeedsHandlerTest {
 	}
 
 	@Test
-	void tra_ve_ket_qua_cua_luot_chay() {
+	void returns_the_result_of_the_run() {
 		given(runner.run()).willReturn(new IngestResult(42, 7, 0));
 
 		assertThat(handler.handle(Map.of("job", "ingest-feeds")))

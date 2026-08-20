@@ -28,7 +28,7 @@ final class ArticleSummaries {
 	 * khi không tìm ra manager nào, và đó là lỗi nằm ngoài tầm với của state
 	 * repository.
 	 */
-	static boolean hienSummary() {
+	static boolean showSummary() {
 		try {
 			return NewsFeature.AI_SUMMARIZATION.isActive();
 		}
@@ -42,10 +42,10 @@ final class ArticleSummaries {
 	 * `@JsonInclude(NON_NULL)` nên nó VẮNG MẶT hoàn toàn khỏi JSON — tín hiệu rõ
 	 * ràng hơn cho frontend so với một giá trị rỗng.
 	 */
-	static ArticleSummaryDto toDto(Article article, boolean hienSummary) {
+	static ArticleSummaryDto toDto(Article article, boolean showSummary) {
 		return new ArticleSummaryDto(
 				article.getArticleId(), article.getTitle(), article.getPublishedAt(),
 				article.getCanonicalUrl(), article.getSourceName(),
-				hienSummary ? article.getSummary() : null);
+				showSummary ? article.getSummary() : null);
 	}
 }

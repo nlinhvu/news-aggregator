@@ -69,7 +69,7 @@ class LoginFlowIT {
 
 	/**
 	 * FeatureManager THẬT, dùng ở đúng một test: xem
-	 * {@link #tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang()}.
+	 * {@link #turning_the_flag_off_loses_the_feature_not_the_page()}.
 	 */
 	@Autowired
 	FeatureManager featureManager;
@@ -84,24 +84,24 @@ class LoginFlowIT {
 	private TestRestTemplate rest;
 
 	@BeforeEach
-	void khongDiTheoRedirect() {
+	void doNotFollowRedirects() {
 		this.rest = autowired.withRedirects(HttpRedirects.DONT_FOLLOW);
 	}
 
 	/**
 	 * `FeatureContext` cache FeatureManager trong một field static và Gradle chạy
 	 * mọi test class trong cùng một JVM, nên không dọn thì manager mà
-	 * {@link #tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang()} lắp vào sẽ rò
+	 * {@link #turning_the_flag_off_loses_the_feature_not_the_page()} lắp vào sẽ rò
 	 * sang class khác.
 	 */
 	@AfterEach
-	void traLaiFeatureManagerVeNguyenTrang() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
 
 	@Test
-	void login_dan_toi_idp_chu_khong_dan_ve_trang_cua_chinh_ta() {
+	void login_leads_to_the_idp_not_back_to_our_own_page() {
 		ResponseEntity<Void> toEntryPoint = get(at("/api/auth/login"), null);
 		assertThat(toEntryPoint.getStatusCode()).isEqualTo(HttpStatus.FOUND);
 
@@ -116,7 +116,7 @@ class LoginFlowIT {
 	}
 
 	@Test
-	void sau_khi_dang_nhap_me_tra_sub_va_khong_tra_token() {
+	void after_login_me_returns_the_sub_and_no_token() {
 		String cookie = loginThroughMockIdp();
 
 		ResponseEntity<String> me = exchange(at("/api/me"), HttpMethod.GET, cookie,
@@ -133,7 +133,7 @@ class LoginFlowIT {
 	}
 
 	@Test
-	void cookie_phien_la_httponly_con_xsrf_thi_khong() {
+	void the_session_cookie_is_httponly_but_the_xsrf_one_is_not() {
 		// Đọc `Set-Cookie` THÔ, không đọc cái jar đã cắt attribute: `HttpOnly`
 		// nằm trong phần attribute, nên kiểm trên jar là kiểm một chuỗi không
 		// bao giờ chứa thứ ta hỏi.
@@ -152,7 +152,7 @@ class LoginFlowIT {
 	}
 
 	@Test
-	void dang_xuat_xoa_phien_that_khong_chi_xoa_cookie() {
+	void logout_deletes_the_real_session_not_just_the_cookie() {
 		String cookie = loginThroughMockIdp();
 
 		// Khẳng định phiên ĐANG SỐNG trước đã. Thiếu dòng này thì test xanh y hệt
@@ -202,10 +202,10 @@ class LoginFlowIT {
 	 * là "ẩn danh" và hiện lại nút "Đăng nhập" trỏ tới một endpoint đã tắt.
 	 */
 	@Test
-	void tat_flag_thi_mat_tinh_nang_chu_khong_mat_trang() {
+	void turning_the_flag_off_loses_the_feature_not_the_page() {
 		String cookie = loginThroughMockIdp();
 
-		tatUserAccounts();
+		disableUserAccounts();
 
 		assertThat(exchange(at("/api/me"), HttpMethod.GET, cookie, Void.class)
 				.getStatusCode())
@@ -226,7 +226,7 @@ class LoginFlowIT {
 	 * không làm gì thì flag đang BẬT HẾT. Bản đầy đủ của lời giải thích nằm ở
 	 * `TogglzGateTest`.
 	 */
-	private void tatUserAccounts() {
+	private void disableUserAccounts() {
 		TestFeatureManagerProvider.setFeatureManager(featureManager);
 		FeatureContext.clearCache();
 	}
@@ -238,7 +238,7 @@ class LoginFlowIT {
 	 * hỏng đó chỉ lộ ra ở một luồng đăng nhập thật.
 	 */
 	@Test
-	void moi_luot_dang_nhap_de_lai_dung_mot_dong_log_co_ten_provider() {
+	void every_login_leaves_exactly_one_log_line_carrying_the_provider_name() {
 		ListAppender<ILoggingEvent> logs = new ListAppender<>();
 		ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
 				LoggerFactory.getLogger(LoginAuditListener.class);
@@ -252,23 +252,23 @@ class LoginFlowIT {
 			logs.stop();
 		}
 
-		List<String> dong = logs.list.stream()
+		List<String> lines = logs.list.stream()
 				.map(ILoggingEvent::getFormattedMessage).toList();
 
 		// Lọc dòng audit theo NỘI DUNG, không theo vị trí: listener ghi thêm dòng
 		// nào cũng được, nhưng phải có đúng một dòng audit.
-		assertThat(dong).filteredOn(line -> line.startsWith("đăng nhập thành công"))
+		assertThat(lines).filteredOn(line -> line.startsWith("đăng nhập thành công"))
 				.singleElement().asString()
 				.contains("sub=3f0a2c58-6b1e-4d7a-9f21-0c9a1b2d3e4f")
 				// User của mock server chưa nối IdP nào. Provider của LƯỢT NÀY
 				// không đọc được từ token — nó nằm ở log của hàm account-linking,
 				// và hàm đó không chạy cho đăng nhập native.
-				.contains("idpDaLienKet=[]");
+				.contains("linkedIdps=[]");
 
 		// MỌI dòng, không chỉ dòng audit. ID token của mock server mang
 		// `email: dev@local`, nên vế này đo trên dữ liệu thật chứ không trên một
 		// map tự dựng — và nó phải đúng với cả dòng listener thêm về sau.
-		assertThat(dong).isNotEmpty().allSatisfy(line ->
+		assertThat(lines).isNotEmpty().allSatisfy(line ->
 				assertThat(line).doesNotContain("dev@local"));
 	}
 

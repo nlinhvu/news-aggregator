@@ -95,7 +95,7 @@ public class DataStack extends Stack {
 				.build());
 
 		// AP10 (bài mới nhất của MỘT nguồn) + AP11 (fan-out qua tập nguồn đã chọn).
-		// `ProjectionType.ALL` — xem `DataStackTest#gsi_by_source_dung_projection_ALL`
+		// `ProjectionType.ALL` — xem `DataStackTest#gsi_by_source_uses_projection_ALL`
 		// và TDD §6 về vì sao KHÔNG dùng INCLUDE ở đây.
 		//
 		// SPARSE INDEX: item KHÔNG có attribute `sourceId` thì không nằm trong index
@@ -173,7 +173,7 @@ public class DataStack extends Stack {
 		// trong quá khứ nghĩa là hồi sinh những phiên đã đăng xuất — một tính
 		// năng chống bảo mật. Mất bảng này là mọi người phải đăng nhập lại, hết.
 		// Khác biệt không có triệu chứng nên nó có chốt chặn riêng:
-		// `DataStackTest#sessions_khong_bao_gio_bat_pitr_ke_ca_o_prod`.
+		// `DataStackTest#sessions_never_enables_pitr_not_even_in_prod`.
 		this.sessionsTable = Table.Builder.create(this, "SessionsTable")
 				.partitionKey(Attribute.builder()
 						.name("sessionId").type(AttributeType.STRING).build())

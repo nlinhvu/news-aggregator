@@ -50,7 +50,7 @@ class TogglzGateTest {
 	 * FeatureManager THẬT do `TogglzAutoConfiguration` dựng — cái đọc DynamoDB qua
 	 * {@code FailClosedDynamoDbStateRepository}. Phải giữ tham chiếu ở đây vì
 	 * trong test nó KHÔNG tự đến tay `FeatureContext`; xem
-	 * {@link #dungFeatureManagerThat()}.
+	 * {@link #useRealFeatureManager()}.
 	 */
 	@Autowired
 	FeatureManager featureManager;
@@ -74,7 +74,7 @@ class TogglzGateTest {
 	 * mà hai test dưới cần.
 	 */
 	@BeforeEach
-	void napDuLieu() {
+	void loadFixtures() {
 		DynamoDbTable<Article> table =
 				enhancedClient.table(tableName, TableSchema.fromBean(Article.class));
 		ArticleFixtures.load().forEach(table::putItem);
@@ -87,14 +87,14 @@ class TogglzGateTest {
 	 * đóng. `@AllEnabled` cũng tự dọn y hệt ở `afterEach` của nó.
 	 */
 	@AfterEach
-	void traLaiFeatureManagerVeNguyenTrang() {
+	void restoreFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(null);
 		FeatureContext.clearCache();
 	}
 
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void flag_bat_thi_co_summary() throws Exception {
+	void flag_on_yields_a_summary() throws Exception {
 		mockMvc.perform(get("/api/articles?limit=1"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].summary").exists());
@@ -102,11 +102,11 @@ class TogglzGateTest {
 
 	/**
 	 * Mặc định của enum là OFF nên không cần TẮT gì thêm — nhưng phải chỉ đích
-	 * danh FeatureManager thật, xem {@link #dungFeatureManagerThat()}.
+	 * danh FeatureManager thật, xem {@link #useRealFeatureManager()}.
 	 */
 	@Test
-	void flag_tat_thi_summary_VANG_MAT_khong_phai_null() throws Exception {
-		dungFeatureManagerThat();
+	void flag_off_makes_summary_ABSENT_rather_than_null() throws Exception {
+		useRealFeatureManager();
 
 		mockMvc.perform(get("/api/articles?limit=1"))
 				.andExpect(status().isOk())
@@ -130,15 +130,15 @@ class TogglzGateTest {
 	 */
 	@Test
 	@AllEnabled(NewsFeature.class)
-	void flag_bat_thi_feed_theo_nguon_cung_co_summary() {
+	void flag_on_gives_the_source_filtered_feed_a_summary_too() {
 		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
 				.isNotEmpty()
 				.allSatisfy(dto -> assertThat(dto.summary()).isNotNull());
 	}
 
 	@Test
-	void flag_tat_thi_feed_theo_nguon_cung_KHONG_co_summary() {
-		dungFeatureManagerThat();
+	void flag_off_leaves_the_source_filtered_feed_WITHOUT_a_summary_too() {
+		useRealFeatureManager();
 
 		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
 				// Chốt chống test rỗng: danh sách rỗng cũng làm `allSatisfy` xanh.
@@ -171,7 +171,7 @@ class TogglzGateTest {
 	 * chạy TRƯỚC `@BeforeEach`, nên đặt ở đó sẽ đè mất TestFeatureManager và giết
 	 * luôn test kia.
 	 */
-	private void dungFeatureManagerThat() {
+	private void useRealFeatureManager() {
 		TestFeatureManagerProvider.setFeatureManager(featureManager);
 		FeatureContext.clearCache();
 	}

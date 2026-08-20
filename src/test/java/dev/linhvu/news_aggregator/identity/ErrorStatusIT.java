@@ -42,7 +42,7 @@ class ErrorStatusIT {
 	TestRestTemplate rest;
 
 	@Test
-	void loi_cua_duong_permitAll_giu_nguyen_status_khong_thanh_401() {
+	void errors_on_permitAll_paths_keep_their_status_and_do_not_turn_into_401() {
 		// `/api/articles` đã permitAll; `limit=abc` không parse được ⇒ 400.
 		assertThat(rest.getForEntity("/api/articles?limit=abc", String.class).getStatusCode())
 				.as("400 bị nuốt thành 401 nghĩa là ERROR dispatch đang bị chặn")
@@ -50,12 +50,12 @@ class ErrorStatusIT {
 	}
 
 	@Test
-	void duong_khong_ton_tai_van_401_va_do_la_co_y() {
-		// KHÔNG phải lỗi: `/api/khong-ton-tai` rơi vào `anyRequest().authenticated()`,
+	void an_unknown_path_still_returns_401_and_that_is_deliberate() {
+		// KHÔNG phải lỗi: `/api/does-not-exist` rơi vào `anyRequest().authenticated()`,
 		// tức default-deny. Khẳng định nó ra đây để lần sau không ai "sửa" 401
 		// này thành 404 và vô tình nới ranh giới — 404 cho người ẩn danh là nói
 		// cho họ biết đường nào TỒN TẠI.
-		assertThat(rest.getForEntity("/api/khong-ton-tai", String.class).getStatusCode())
+		assertThat(rest.getForEntity("/api/does-not-exist", String.class).getStatusCode())
 				.isEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 }

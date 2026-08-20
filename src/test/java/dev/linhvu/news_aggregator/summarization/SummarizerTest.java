@@ -23,10 +23,10 @@ class SummarizerTest {
 	 *
 	 * Hằng số này KHÔNG đọc từ `application.yaml`: `SummarizerTest` gọi thẳng
 	 * constructor nên nó không đi qua Spring. Chốt chặn cho giá trị cấu hình nằm ở
-	 * `SummarizerWiringTest#tran_do_dai_cau_hinh_la_500`; ở đây chỉ kiểm HÀNH VI
+	 * `SummarizerWiringTest#the_configured_length_cap_is_500`; ở đây chỉ kiểm HÀNH VI
 	 * quanh một trần cho trước.
 	 */
-	private static final int TRAN = 500;
+	private static final int LENGTH_CAP = 500;
 
 	private static final SummarizableArticle ARTICLE = new SummarizableArticle(
 			"a1", "Spring Boot 4.1 released",
@@ -45,14 +45,14 @@ class SummarizerTest {
 	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
 	@BeforeEach
-	void batLog() {
+	void captureLog() {
 		logs.start();
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Summarizer.class))
 				.addAppender(logs);
 	}
 
 	@AfterEach
-	void thaLog() {
+	void releaseLog() {
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Summarizer.class))
 				.detachAppender(logs);
 		logs.stop();
@@ -62,22 +62,22 @@ class SummarizerTest {
 		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
 	}
 
-	private Summarizer summarizerTraVe(String modelOutput) {
+	private Summarizer summarizerReturns(String modelOutput) {
 		ChatClient client = ChatClient.builder(
 				new FakeChatModel(modelOutput)).build();
-		return new Summarizer(client, Duration.ofSeconds(25), TRAN);
+		return new Summarizer(client, Duration.ofSeconds(25), LENGTH_CAP);
 	}
 
 	@Test
-	void tra_ve_tom_tat_khi_model_tra_van_ban() {
-		assertThat(summarizerTraVe("Spring Boot 4.1 thêm @ImportHttpServices.")
+	void returns_the_summary_when_the_model_answers_with_text() {
+		assertThat(summarizerReturns("Spring Boot 4.1 thêm @ImportHttpServices.")
 				.summarize(ARTICLE))
 				.contains("Spring Boot 4.1 thêm @ImportHttpServices.");
 	}
 
 	@Test
-	void cat_khoang_trang_thua_o_hai_dau() {
-		assertThat(summarizerTraVe("  Có khoảng trắng.  \n").summarize(ARTICLE))
+	void trims_the_surrounding_whitespace() {
+		assertThat(summarizerReturns("  Có khoảng trắng.  \n").summarize(ARTICLE))
 				.contains("Có khoảng trắng.");
 	}
 
@@ -87,9 +87,9 @@ class SummarizerTest {
 	 * không bao giờ thử lại, mà trang thì hiển thị một đoạn trống.
 	 */
 	@Test
-	void tra_ve_rong_khi_model_tra_rong() {
-		assertThat(summarizerTraVe("").summarize(ARTICLE)).isEmpty();
-		assertThat(summarizerTraVe("   \n  ").summarize(ARTICLE)).isEmpty();
+	void returns_empty_when_the_model_answers_empty() {
+		assertThat(summarizerReturns("").summarize(ARTICLE)).isEmpty();
+		assertThat(summarizerReturns("   \n  ").summarize(ARTICLE)).isEmpty();
 	}
 
 	/**
@@ -98,8 +98,8 @@ class SummarizerTest {
 	 * sẽ phá vỡ layout của trang lẫn item DynamoDB.
 	 */
 	@Test
-	void tra_ve_rong_khi_model_tra_qua_dai() {
-		assertThat(summarizerTraVe("x".repeat(TRAN + 1)).summarize(ARTICLE)).isEmpty();
+	void returns_empty_when_the_model_answers_too_long() {
+		assertThat(summarizerReturns("x".repeat(LENGTH_CAP + 1)).summarize(ARTICLE)).isEmpty();
 	}
 
 	/**
@@ -119,12 +119,12 @@ class SummarizerTest {
 	 * còn chỉ về đúng sự cố đã xảy ra.
 	 */
 	@Test
-	void ban_tom_tat_lo_tran_cu_khong_con_bi_vut() {
-		String bon_tram_muoi = "x".repeat(410);
+	void a_summary_just_over_the_old_cap_is_no_longer_thrown_away() {
+		String four_hundred_ten = "x".repeat(410);
 
-		assertThat(summarizerTraVe(bon_tram_muoi).summarize(ARTICLE))
+		assertThat(summarizerReturns(four_hundred_ten).summarize(ARTICLE))
 				.as("410 ký tự từng bị vứt khi trần là 400 — xem nợ §20B #6")
-				.contains(bon_tram_muoi);
+				.contains(four_hundred_ten);
 	}
 
 	/**
@@ -133,9 +133,9 @@ class SummarizerTest {
 	 * một tóm tắt trông hợp lệ. Chỉ có đọc prompt thật mới bắt được.
 	 */
 	@Test
-	void title_va_excerpt_vao_dung_cho_trong_prompt() {
+	void title_and_excerpt_land_in_the_right_slots_of_the_prompt() {
 		FakeChatModel model = new FakeChatModel("Tóm tắt.");
-		new Summarizer(ChatClient.builder(model).build(), Duration.ofSeconds(25), TRAN)
+		new Summarizer(ChatClient.builder(model).build(), Duration.ofSeconds(25), LENGTH_CAP)
 				.summarize(ARTICLE);
 
 		assertThat(model.lastPrompt)
@@ -153,11 +153,11 @@ class SummarizerTest {
 	 * short-circuit nào đó trả rỗng mà chưa từng chạm model.
 	 */
 	@Test
-	void tra_ve_rong_khi_model_nem() {
+	void returns_empty_when_the_model_throws() {
 		FakeChatModel model = new FakeChatModel("",
 				new IllegalStateException("429 rate limit"));
 		Summarizer summarizer = new Summarizer(
-				ChatClient.builder(model).build(), Duration.ofSeconds(25), TRAN);
+				ChatClient.builder(model).build(), Duration.ofSeconds(25), LENGTH_CAP);
 
 		assertThat(summarizer.summarize(ARTICLE)).isEmpty();
 		assertThat(model.calls).isEqualTo(1);
@@ -180,12 +180,12 @@ class SummarizerTest {
 	 * hỏng, chờ nó tự khỏi") nên người vận hành phải đọc ra được là loại nào.
 	 */
 	@Test
-	void loi_429_ghi_log_khac_loi_model_khac() {
+	void a_429_logs_differently_from_other_model_errors() {
 		FakeChatModel model = new FakeChatModel("",
 				new IllegalStateException("429 RESOURCE_EXHAUSTED"));
 
 		assertThat(new Summarizer(ChatClient.builder(model).build(),
-				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+				Duration.ofSeconds(25), LENGTH_CAP).summarize(ARTICLE)).isEmpty();
 		assertThat(logEvents()).anyMatch(m -> m.contains("quota"));
 	}
 
@@ -200,12 +200,12 @@ class SummarizerTest {
 	 * hồi, trong khi thứ hỏng là chỗ khác hoàn toàn.
 	 */
 	@Test
-	void loi_model_khac_khong_bi_gan_nhan_quota() {
+	void other_model_errors_are_not_labelled_as_quota() {
 		FakeChatModel model = new FakeChatModel("",
 				new IllegalStateException("500 INTERNAL"));
 
 		assertThat(new Summarizer(ChatClient.builder(model).build(),
-				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+				Duration.ofSeconds(25), LENGTH_CAP).summarize(ARTICLE)).isEmpty();
 		assertThat(logEvents()).noneMatch(m -> m.contains("quota"));
 	}
 
@@ -233,13 +233,13 @@ class SummarizerTest {
 	 * to generate content` — không một chữ nào nói vì sao.
 	 */
 	@Test
-	void nhan_ra_429_ngay_ca_khi_spring_ai_boc_bang_message_hang_so() {
+	void recognises_429_even_when_spring_ai_wraps_it_in_a_constant_message() {
 		FakeChatModel model = new FakeChatModel("", new RuntimeException(
 				"Failed to generate content",
 				new IllegalStateException("429 RESOURCE_EXHAUSTED")));
 
 		assertThat(new Summarizer(ChatClient.builder(model).build(),
-				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+				Duration.ofSeconds(25), LENGTH_CAP).summarize(ARTICLE)).isEmpty();
 		assertThat(logEvents()).anyMatch(m -> m.contains("quota"));
 	}
 
@@ -252,13 +252,13 @@ class SummarizerTest {
 	 * chờ lượt sweep kế tiếp (6 giờ) để đoán tiếp.
 	 */
 	@Test
-	void log_giu_nguyen_nhan_goc_chu_khong_chi_lop_boc() {
+	void the_log_keeps_the_root_cause_not_just_the_wrapper() {
 		FakeChatModel model = new FakeChatModel("", new RuntimeException(
 				"Failed to generate content",
 				new IllegalStateException("503 UNAVAILABLE model overloaded")));
 
 		assertThat(new Summarizer(ChatClient.builder(model).build(),
-				Duration.ofSeconds(25), TRAN).summarize(ARTICLE)).isEmpty();
+				Duration.ofSeconds(25), LENGTH_CAP).summarize(ARTICLE)).isEmpty();
 		assertThat(logEvents()).anyMatch(m -> m.contains("503 UNAVAILABLE"));
 	}
 }

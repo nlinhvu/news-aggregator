@@ -32,8 +32,8 @@ class ArticleCatalogService implements ArticleCatalog {
 	@Override
 	public Optional<SummarizableArticle> findSummarizable(String articleId) {
 		return repository.findById(articleId)
-				.filter(ArticleCatalogService::chuaCoSummary)
-				.filter(this::excerptDuDai)
+				.filter(ArticleCatalogService::withoutSummary)
+				.filter(this::longEnoughExcerpt)
 				.map(a -> new SummarizableArticle(
 						a.getArticleId(), a.getTitle(), a.getExcerpt()));
 	}
@@ -47,7 +47,7 @@ class ArticleCatalogService implements ArticleCatalog {
 				// Ngưỡng độ dài lọc ở tầng ứng dụng, KHÔNG ở FilterExpression:
 				// DynamoDB tính tiền theo item ĐỌC chứ không theo item trả về,
 				// nên đẩy nó xuống không tiết kiệm gì mà làm expression khó đọc.
-				.filter(this::excerptDuDai)
+				.filter(this::longEnoughExcerpt)
 				.map(a -> new SummarizableArticle(
 						a.getArticleId(), a.getTitle(), a.getExcerpt()))
 				.toList();
@@ -64,10 +64,10 @@ class ArticleCatalogService implements ArticleCatalog {
 	@Override
 	public List<ArticleSummaryDto> recentBySources(Collection<String> sourceIds,
 			int limit) {
-		boolean hienSummary = ArticleSummaries.hienSummary();
+		boolean showSummary = ArticleSummaries.showSummary();
 		try {
 			return repository.findRecentBySources(sourceIds, limit).stream()
-					.map(a -> ArticleSummaries.toDto(a, hienSummary))
+					.map(a -> ArticleSummaries.toDto(a, showSummary))
 					.toList();
 		}
 		catch (RuntimeException e) {
@@ -82,11 +82,11 @@ class ArticleCatalogService implements ArticleCatalog {
 
 	// Chuỗi rỗng cũng tính là chưa có: một `summary` rỗng lọt vào bảng là dữ
 	// liệu hỏng, và bỏ qua nó vĩnh viễn thì không có đường tự sửa.
-	private static boolean chuaCoSummary(Article a) {
+	private static boolean withoutSummary(Article a) {
 		return a.getSummary() == null || a.getSummary().isBlank();
 	}
 
-	private boolean excerptDuDai(Article a) {
+	private boolean longEnoughExcerpt(Article a) {
 		return a.getExcerpt() != null && a.getExcerpt().length() >= minExcerptChars;
 	}
 }

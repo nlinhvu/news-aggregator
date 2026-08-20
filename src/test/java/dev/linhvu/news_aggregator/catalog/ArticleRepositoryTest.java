@@ -49,7 +49,7 @@ class ArticleRepositoryTest {
 	 * là thứ `gsi-recent` sinh ra để làm.
 	 */
 	@BeforeEach
-	void napDuLieu() {
+	void loadFixtures() {
 		ArticleFixtures.load().stream()
 				.sorted(Comparator.comparing(Article::getPublishedAt))
 				.forEach(repository::save);
@@ -63,19 +63,19 @@ class ArticleRepositoryTest {
 	 * cơ chế nào với việc DynamoDB trả item theo range key của GSI.
 	 */
 	@Test
-	void tra_ve_article_moi_nhat_truoc() {
-		List<String> mongDoi = ArticleFixtures.load().stream()
+	void returns_articles_newest_first() {
+		List<String> expected = ArticleFixtures.load().stream()
 				.sorted(Comparator.comparing(Article::getPublishedAt).reversed())
 				.map(Article::getArticleId)
 				.toList();
 
 		assertThat(repository.findRecent(10))
 				.extracting(Article::getArticleId)
-				.containsExactlyElementsOf(mongDoi);
+				.containsExactlyElementsOf(expected);
 	}
 
 	@Test
-	void ton_trong_limit() {
+	void respects_limit() {
 		assertThat(repository.findRecent(2)).hasSize(2);
 	}
 
@@ -86,13 +86,13 @@ class ArticleRepositoryTest {
 	 * `containsExactly` là thứ phân biệt hai bản dựng đó.
 	 *
 	 * Thứ tự mong đợi suy ra từ fixture, không viết cứng, đúng lối
-	 * `tra_ve_article_moi_nhat_truoc`.
+	 * `returns_articles_newest_first`.
 	 */
 	@Test
-	void fan_out_tra_ve_dung_cac_nguon_da_chon_moi_nhat_truoc() {
-		assertThat(repository.findRecentBySources(DA_CHON, 20))
+	void fan_out_returns_exactly_the_selected_sources_newest_first() {
+		assertThat(repository.findRecentBySources(SELECTED, 20))
 				.extracting(Article::getArticleId)
-				.containsExactlyElementsOf(mongDoiTheoNguon(DA_CHON));
+				.containsExactlyElementsOf(expectedBySources(SELECTED));
 	}
 
 	/**
@@ -106,14 +106,14 @@ class ArticleRepositoryTest {
 	 * xem test dưới.
 	 */
 	@Test
-	void tap_rong_nghia_la_tat_ca_nguon() {
-		List<String> tatCa = repository.findRecent(20).stream()
+	void an_empty_set_means_all_sources() {
+		List<String> allIds = repository.findRecent(20).stream()
 				.map(Article::getArticleId)
 				.toList();
 
 		assertThat(repository.findRecentBySources(List.of(), 20))
 				.extracting(Article::getArticleId)
-				.containsExactlyElementsOf(tatCa);
+				.containsExactlyElementsOf(allIds);
 	}
 
 	/**
@@ -129,21 +129,21 @@ class ArticleRepositoryTest {
 	 * `sourceId` cho mọi bài trong fixture.
 	 */
 	@Test
-	void bai_chua_backfill_sourceId_bien_mat_khoi_feed_da_loc() {
-		List<String> moCoi = ArticleFixtures.load().stream()
+	void an_article_without_a_backfilled_sourceId_disappears_from_the_filtered_feed() {
+		List<String> orphan = ArticleFixtures.load().stream()
 				.filter(a -> a.getSourceId() == null)
 				.map(Article::getArticleId)
 				.toList();
-		assertThat(moCoi)
+		assertThat(orphan)
 				.as("fixture phải giữ ít nhất một bài chưa backfill")
 				.isNotEmpty();
 
-		assertThat(repository.findRecentBySources(DA_CHON, 20))
+		assertThat(repository.findRecentBySources(SELECTED, 20))
 				.extracting(Article::getArticleId)
-				.doesNotContainAnyElementsOf(moCoi);
+				.doesNotContainAnyElementsOf(orphan);
 		assertThat(repository.findRecent(20))
 				.extracting(Article::getArticleId)
-				.containsAll(moCoi);
+				.containsAll(orphan);
 	}
 
 	/**
@@ -154,10 +154,10 @@ class ArticleRepositoryTest {
 	 * phải lỗi mà là một trang dài gấp đôi.
 	 */
 	@Test
-	void limit_ap_len_ket_qua_da_gop_khong_phai_tung_nguon() {
-		assertThat(repository.findRecentBySources(DA_CHON, 2))
+	void limit_applies_to_the_merged_result_not_to_each_source() {
+		assertThat(repository.findRecentBySources(SELECTED, 2))
 				.extracting(Article::getArticleId)
-				.containsExactlyElementsOf(mongDoiTheoNguon(DA_CHON).subList(0, 2));
+				.containsExactlyElementsOf(expectedBySources(SELECTED).subList(0, 2));
 	}
 
 	/**
@@ -172,7 +172,7 @@ class ArticleRepositoryTest {
 	 * `ExecutionException` được bóc ra khỏi `Future`.
 	 */
 	@Test
-	void mot_query_hong_lam_ca_loi_goi_hong_khong_tra_ket_qua_mot_phan() {
+	void one_broken_query_fails_the_whole_call_without_partial_results() {
 		// `Arrays.asList` chứ không `List.of` — `List.of` từ chối phần tử null.
 		assertThatThrownBy(() -> repository.findRecentBySources(
 				Arrays.asList("spring-blog", null), 20))
@@ -196,23 +196,23 @@ class ArticleRepositoryTest {
 	 * thêm một Spring context (và một container Floci) chỉ cho một assertion.
 	 */
 	@Test
-	void fan_out_chay_tren_executor_da_bac_trace_context() {
-		TracePropagation soi = spy(new TracePropagation());
-		ArticleRepository rieng = new ArticleRepository(enhancedClient, soi, tableName);
+	void fan_out_runs_on_an_executor_that_bridges_the_trace_context() {
+		TracePropagation spied = spy(new TracePropagation());
+		ArticleRepository isolated = new ArticleRepository(enhancedClient, spied, tableName);
 
-		rieng.findRecentBySources(DA_CHON, 20);
+		isolated.findRecentBySources(SELECTED, 20);
 
-		verify(soi).wrap(any());
+		verify(spied).wrap(any());
 	}
 
 	/** Hai nguồn có bài xen kẽ nhau theo thời gian — xem fixture. */
-	private static final List<String> DA_CHON = List.of("spring-blog", "aws-news");
+	private static final List<String> SELECTED = List.of("spring-blog", "aws-news");
 
 	/**
 	 * `contains` trên `List.of(...)` ném NPE khi phần tử là null, mà bài chưa
 	 * backfill có `sourceId` null — nên vế kiểm null phải đứng trước.
 	 */
-	private static List<String> mongDoiTheoNguon(List<String> sourceIds) {
+	private static List<String> expectedBySources(List<String> sourceIds) {
 		return ArticleFixtures.load().stream()
 				.filter(a -> a.getSourceId() != null && sourceIds.contains(a.getSourceId()))
 				.sorted(Comparator.comparing(Article::getPublishedAt).reversed())

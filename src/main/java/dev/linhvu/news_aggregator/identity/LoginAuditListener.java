@@ -73,8 +73,8 @@ class LoginAuditListener {
 		}
 		// KHÔNG log email: nó nằm cùng danh sách cấm với token và client secret
 		// (TDD §14.2), và module này cố ý không sở hữu email.
-		log.info("đăng nhập thành công sub={} idpDaLienKet={}",
-				user.getSubject(), idpDaLienKet(user));
+		log.info("đăng nhập thành công sub={} linkedIdps={}",
+				user.getSubject(), linkedIdps(user));
 	}
 
 	/**
@@ -83,7 +83,7 @@ class LoginAuditListener {
 	 * Tên biến và tên field trong log CỐ Ý dài: `provider` là cái tên đã làm bản
 	 * trước sai suốt, vì nó đọc như *"đường đăng nhập lần này"*.
 	 */
-	private static List<String> idpDaLienKet(OidcUser user) {
+	private static List<String> linkedIdps(OidcUser user) {
 		if (!(user.getClaim("identities") instanceof List<?> identities)) {
 			return List.of();
 		}

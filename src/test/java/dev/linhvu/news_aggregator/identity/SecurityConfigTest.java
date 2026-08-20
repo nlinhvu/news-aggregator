@@ -39,7 +39,7 @@ class SecurityConfigTest {
 	MockMvc mvc;
 
 	@Test
-	void duong_doc_an_danh_van_200_khong_bi_chuyen_huong() throws Exception {
+	void anonymous_read_paths_stay_200_and_are_not_redirected() throws Exception {
 		// Quy tắc quan trọng nhất của cả phase. Một `formLogin()` bỏ quên hay một
 		// `anyRequest().authenticated()` là đủ để biến trang chủ thành 302 —
 		// và đó là hồi quy cho TOÀN BỘ sản phẩm, không phải cho một feature.
@@ -48,7 +48,7 @@ class SecurityConfigTest {
 	}
 
 	@Test
-	void me_tra_401_khi_chua_dang_nhap_khong_phai_302() throws Exception {
+	void me_returns_401_when_not_logged_in_not_302() throws Exception {
 		// 302 sang trang đăng nhập là hành vi cho trình duyệt điều hướng; với
 		// một lời gọi `fetch` từ SPA nó biến thành lỗi CORS khó hiểu hoặc một
 		// trang HTML nhét vào chỗ chờ JSON. API luôn trả 401.
@@ -56,12 +56,12 @@ class SecurityConfigTest {
 	}
 
 	@Test
-	void ghi_khong_co_csrf_token_tra_403() throws Exception {
+	void a_write_without_a_csrf_token_returns_403() throws Exception {
 		mvc.perform(post("/api/auth/logout")).andExpect(status().isForbidden());
 	}
 
 	@Test
-	void cookie_phien_la_httponly() throws Exception {
+	void the_session_cookie_is_httponly() throws Exception {
 		MvcResult result = mvc.perform(get("/api/articles?limit=1")).andReturn();
 		result.getResponse().getHeaders("Set-Cookie")
 				.forEach(c -> assertThat(c)
@@ -73,7 +73,7 @@ class SecurityConfigTest {
 	}
 
 	@Test
-	void dang_nhap_dan_sang_idp_chu_khong_sang_trang_cua_chinh_ta() throws Exception {
+	void login_leads_to_the_idp_not_to_our_own_page() throws Exception {
 		// `/api/auth/login` là bề mặt TDD §7 công bố; entry point thật của Spring
 		// Security nằm ở `/api/auth/login/{registrationId}`. Không có endpoint
 		// bắc cầu thì SPA phải tự biết chuỗi "cognito" — một chi tiết của backend

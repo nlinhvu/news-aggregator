@@ -167,7 +167,7 @@ public class IdentityStack extends Stack {
 				// AWS chỉ BẮT BUỘC khai RP ID khi pool có CUSTOM DOMAIN — thứ phase
 				// này cố ý không dùng (xem javadoc của class).
 				//
-				// Xem `SecurityBoundaryTest#pool_khong_khai_relying_party_id_vi_no_khong_deploy_duoc`
+				// Xem `SecurityBoundaryTest#the_pool_declares_no_relying_party_id_because_it_would_not_deploy`
 				// về đường sửa nếu QA passkey cho thấy Cognito không tự suy RP ID.
 				.build();
 

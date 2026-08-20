@@ -11,7 +11,7 @@ import java.util.HexFormat;
  *
  * Trùng lặp có ý thức, cùng loại với việc schema DynamoDB bị chép ở ba nơi
  * (master §9): gộp lại đòi hỏi đúng cái phụ thuộc mà ranh giới module cấm.
- * Giảm nhẹ bằng test `hai_module_suy_ra_cung_mot_id`.
+ * Giảm nhẹ bằng test `both_modules_derive_the_same_id`.
  */
 final class CatalogIds {
 

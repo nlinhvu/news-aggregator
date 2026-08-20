@@ -43,28 +43,28 @@ class ArticleSummarizedListenerTest {
 
 	/** Bảng dùng chung giữa các test class — xem `ArticleCatalogServiceTest`. */
 	@AfterEach
-	void donBang() {
+	void cleanTable() {
 		DynamoDbTable<Article> table =
 				enhancedClient.table(tableName, TableSchema.fromBean(Article.class));
 		table.scan().items().stream().toList().forEach(table::deleteItem);
 	}
 
 	@Test
-	void ghi_summary_va_khong_dung_toi_field_khac() {
+	void writes_the_summary_without_touching_other_fields() {
 		Article a = new Article();
-		a.setArticleId("da-tom-tat");
+		a.setArticleId("summarised");
 		a.setListBucket(Article.LIST_BUCKET);
 		a.setPublishedAt("2026-08-10T10:00:00Z");
 		a.setTitle("Tiêu đề gốc");
-		a.setCanonicalUrl("https://a.test/da-tom-tat");
+		a.setCanonicalUrl("https://a.test/summarised");
 		a.setSourceName("Test");
 		a.setExcerpt("Đoạn trích gốc.");
 		repository.save(a);
 
 		publisher.publishEvent(
-				new ArticleSummarized("da-tom-tat", "Tóm tắt tiếng Việt."));
+				new ArticleSummarized("summarised", "Tóm tắt tiếng Việt."));
 
-		Article after = repository.findById("da-tom-tat").orElseThrow();
+		Article after = repository.findById("summarised").orElseThrow();
 		assertThat(after.getSummary()).isEqualTo("Tóm tắt tiếng Việt.");
 		assertThat(after.getExcerpt()).isEqualTo("Đoạn trích gốc.");
 		assertThat(after.getTitle()).isEqualTo("Tiêu đề gốc");

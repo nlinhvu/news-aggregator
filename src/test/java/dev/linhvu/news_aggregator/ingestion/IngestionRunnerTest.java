@@ -50,13 +50,13 @@ class IngestionRunnerTest {
 	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
 	@BeforeEach
-	void batLog() {
+	void captureLog() {
 		logs.start();
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IngestionRunner.class)).addAppender(logs);
 	}
 
 	@AfterEach
-	void thaLog() {
+	void releaseLog() {
 		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IngestionRunner.class)).detachAppender(logs);
 		logs.stop();
 	}
@@ -71,7 +71,7 @@ class IngestionRunnerTest {
 	}
 
 	@Test
-	void mot_nguon_hong_khong_giet_luot_chay() {
+	void one_broken_source_does_not_kill_the_run() {
 		given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b")));
 		given(fetcher.fetch(source("a"))).willThrow(new RuntimeException("hỏng"));
 		given(fetcher.fetch(source("b"))).willReturn(body());
@@ -91,7 +91,7 @@ class IngestionRunnerTest {
 	 * công.
 	 */
 	@Test
-	void khong_nguon_nao_chay_duoc_thi_luot_chay_that_bai() {
+	void the_run_fails_when_no_source_can_run() {
 		given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b")));
 		given(fetcher.fetch(any())).willThrow(new RuntimeException("hỏng"));
 
@@ -99,7 +99,7 @@ class IngestionRunnerTest {
 	}
 
 	@Test
-	void bang_sources_rong_thi_that_bai() {
+	void an_empty_sources_table_fails_the_run() {
 		given(catalog.enabledSources()).willReturn(List.of());
 
 		assertThatThrownBy(runner::run)
@@ -113,7 +113,7 @@ class IngestionRunnerTest {
 	 * các lượt — trông như ingestion đang chạy rất tốt.
 	 */
 	@Test
-	void reset_metrics_dau_moi_luot() {
+	void resets_metrics_at_the_start_of_every_run() {
 		metrics.countAdded();
 		metrics.countAdded();
 		given(catalog.enabledSources()).willReturn(List.of(source("a")));
@@ -130,7 +130,7 @@ class IngestionRunnerTest {
 	 * thật là không bài nào có tóm tắt.
 	 */
 	@Test
-	void excerpt_di_tu_item_toi_event() {
+	void the_excerpt_travels_from_item_to_event() {
 		given(catalog.enabledSources()).willReturn(List.of(source("a")));
 		given(fetcher.fetch(any())).willReturn(body());
 		given(parser.parse(any())).willReturn(List.of(new ParsedItem("T",
@@ -154,15 +154,15 @@ class IngestionRunnerTest {
 	 * hai nguồn kia. Chạy tuần tự thì nguồn đầu tiên chờ mãi và hết giờ.
 	 */
 	@Test
-	void fetch_chay_song_song() {
-		CountDownLatch gap = new CountDownLatch(3);
-		AtomicInteger gapDu = new AtomicInteger();
+	void fetches_run_in_parallel() {
+		CountDownLatch latch = new CountDownLatch(3);
+		AtomicInteger metEnough = new AtomicInteger();
 		given(catalog.enabledSources())
 				.willReturn(List.of(source("a"), source("b"), source("c")));
 		given(fetcher.fetch(any())).willAnswer(inv -> {
-			gap.countDown();
-			if (gap.await(5, TimeUnit.SECONDS)) {
-				gapDu.incrementAndGet();
+			latch.countDown();
+			if (latch.await(5, TimeUnit.SECONDS)) {
+				metEnough.incrementAndGet();
 			}
 			return body();
 		});
@@ -170,7 +170,7 @@ class IngestionRunnerTest {
 
 		IngestResult result = runner.run();
 
-		assertThat(gapDu).hasValue(3);
+		assertThat(metEnough).hasValue(3);
 		assertThat(result.failed()).isZero();
 	}
 
@@ -184,25 +184,25 @@ class IngestionRunnerTest {
 	 * có song song) và KHÔNG VƯỢT 2 (chứng minh có trần).
 	 */
 	@Test
-	void semaphore_chan_tren_so_luot_song_song() {
-		IngestionRunner tran2 =
+	void the_semaphore_caps_how_many_runs_go_in_parallel() {
+		IngestionRunner limitedToTwo =
 				new IngestionRunner(catalog, fetcher, parser, events, metrics,
 						new TracePropagation(), 2);
-		AtomicInteger dangChay = new AtomicInteger();
-		AtomicInteger dinh = new AtomicInteger();
+		AtomicInteger running = new AtomicInteger();
+		AtomicInteger peak = new AtomicInteger();
 		given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b"),
 				source("c"), source("d"), source("e"), source("f")));
 		given(fetcher.fetch(any())).willAnswer(inv -> {
-			dinh.accumulateAndGet(dangChay.incrementAndGet(), Math::max);
+			peak.accumulateAndGet(running.incrementAndGet(), Math::max);
 			Thread.sleep(Duration.ofMillis(100));
-			dangChay.decrementAndGet();
+			running.decrementAndGet();
 			return body();
 		});
 		given(parser.parse(any())).willReturn(List.of());
 
-		tran2.run();
+		limitedToTwo.run();
 
-		assertThat(dinh).hasValue(2);
+		assertThat(peak).hasValue(2);
 	}
 
 	/**
@@ -213,7 +213,7 @@ class IngestionRunnerTest {
 	 * chỉ lộ ra ở production.
 	 */
 	@Test
-	void luot_cham_van_ket_thuc_va_tra_permit() {
+	void a_slow_run_still_finishes_and_returns_its_permit() {
 		given(catalog.enabledSources())
 				.willReturn(List.of(source("a"), source("b"), source("c")));
 		given(fetcher.fetch(source("a"))).willAnswer(inv -> {
@@ -246,7 +246,7 @@ class IngestionRunnerTest {
 	 * nó thật sự canh, nên nó đi kèm một bước mutation trong plan Task 6 Step 3.
 	 */
 	@Test
-	void log_ket_thuc_luot_giu_dung_tien_to_ma_metric_filter_can() {
+	void the_run_end_log_keeps_the_exact_prefix_the_metric_filter_needs() {
 		given(catalog.enabledSources()).willReturn(List.of(source("a")));
 		given(fetcher.fetch(any())).willReturn(body());
 		given(parser.parse(any())).willReturn(List.of(new ParsedItem("T",
@@ -274,12 +274,12 @@ class IngestionRunnerTest {
 	 * LÒNG một module, không qua ranh giới module nào. Xem ADR-0016 §3.
 	 *
 	 * Là `@SpringBootTest` chứ không phải unit test thuần vì cần `ObservationRegistry`
-	 * THẬT — xem lý do ở `log_trong_vong_fetch_song_song_mang_cung_trace_id`. Phần
+	 * THẬT — xem lý do ở `logs_inside_the_parallel_fetch_carry_the_same_trace_id`. Phần
 	 * còn lại của lớp ngoài vẫn chạy không cần Spring.
 	 */
 	@Nested
 	@SpringBootTest
-	class TraceContextSangVirtualThread {
+	class TraceContextIntoVirtualThread {
 
 		@Autowired
 		ObservationRegistry observations;
@@ -300,16 +300,16 @@ class IngestionRunnerTest {
 		 * khi tới `IngestionRunner`.
 		 */
 		@Test
-		void log_trong_vong_fetch_song_song_mang_cung_trace_id() {
+		void logs_inside_the_parallel_fetch_carry_the_same_trace_id() {
 			given(catalog.enabledSources()).willReturn(List.of(source("a"), source("b")));
 			given(fetcher.fetch(source("a"))).willThrow(new RuntimeException("hỏng"));
 			given(fetcher.fetch(source("b"))).willReturn(body());
 			given(parser.parse(any())).willReturn(List.of());
 
-			String traceIdNgoai;
+			String outerTraceId;
 			Observation ingest = Observation.start("ingest", observations);
 			try (var ignored = ingest.openScope()) {
-				traceIdNgoai = tracer.currentSpan().context().traceId();
+				outerTraceId = tracer.currentSpan().context().traceId();
 				runner.run();   // một nguồn cố ý hỏng ⇒ sinh dòng log "nguồn … thất bại"
 			}
 			finally {
@@ -323,7 +323,7 @@ class IngestionRunnerTest {
 			assertThat(traceIdsOfLogEvents())
 					.as("mọi dòng log của lượt chạy phải mang trace_id của lượt đó")
 					.isNotEmpty()
-					.allMatch(traceIdNgoai::equals);
+					.allMatch(outerTraceId::equals);
 		}
 	}
 

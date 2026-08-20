@@ -29,10 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SigV4HttpSenderProviderTest {
 
-	private static final byte[] BODY = "khong-phai-protobuf-that".getBytes();
+	private static final byte[] BODY = "not-real-protobuf".getBytes();
 
 	@Test
-	void ky_sigv4_khi_endpoint_la_xray() {
+	void signs_with_sigv4_when_the_endpoint_is_xray() {
 		Map<String, List<String>> headers = headersFor(
 				"https://xray.us-east-1.amazonaws.com/v1/traces");
 
@@ -57,7 +57,7 @@ class SigV4HttpSenderProviderTest {
 	 * trong thread của batch processor nên không ai thấy.
 	 */
 	@Test
-	void khong_ky_khi_endpoint_la_local() {
+	void does_not_sign_when_the_endpoint_is_local() {
 		Map<String, List<String>> headers = headersFor("http://localhost:4318/v1/traces");
 
 		assertThat(headers).doesNotContainKey("Authorization");
@@ -69,10 +69,10 @@ class SigV4HttpSenderProviderTest {
 	 * 403 ở prod trong khi mọi test dùng credential tĩnh vẫn xanh.
 	 */
 	@Test
-	void credential_tam_thoi_mang_theo_security_token() {
+	void temporary_credentials_carry_the_security_token() {
 		var sender = new SigV4HttpSenderProvider(
 				StaticCredentialsProvider.create(AwsSessionCredentials.create(
-						"AKIDTEST", "secret", "token-cua-lambda")),
+						"AKIDTEST", "secret", "lambda-token")),
 				() -> Region.US_EAST_1)
 				.createSender(config("https://xray.us-east-1.amazonaws.com/v1/traces"));
 
@@ -80,7 +80,7 @@ class SigV4HttpSenderProviderTest {
 				((SigV4HttpSenderProvider.SigV4HttpSender) sender).headers(BODY);
 
 		assertThat(headers).containsEntry("X-Amz-Security-Token",
-				List.of("token-cua-lambda"));
+				List.of("lambda-token"));
 	}
 
 	private Map<String, List<String>> headersFor(String endpoint) {

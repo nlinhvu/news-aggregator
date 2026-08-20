@@ -53,7 +53,7 @@ class AnonymousReadTest {
 	SsmClient ssm;
 
 	@Test
-	void doc_feed_an_danh_khong_tra_phien_va_khong_goi_ssm() throws Exception {
+	void an_anonymous_feed_read_returns_no_session_and_calls_no_ssm() throws Exception {
 		mvc.perform(get("/api/articles?limit=20")).andExpect(status().isOk());
 
 		verifyNoInteractions(sessions);
@@ -71,7 +71,7 @@ class AnonymousReadTest {
 	 * gọi SSM.
 	 */
 	@Test
-	void danh_sach_nguon_an_danh_khong_tra_phien_va_khong_goi_ssm() throws Exception {
+	void the_anonymous_source_list_returns_no_session_and_calls_no_ssm() throws Exception {
 		mvc.perform(get("/api/sources")).andExpect(status().isOk());
 
 		verifyNoInteractions(sessions);
@@ -79,7 +79,7 @@ class AnonymousReadTest {
 	}
 
 	@Test
-	void health_an_danh_cung_khong_cham_gi() throws Exception {
+	void anonymous_health_touches_nothing_either() throws Exception {
 		// `/api/health` là đường CloudFront và người vận hành gọi thường xuyên
 		// nhất. Nó đắt lên thì không ai nhìn thấy, chỉ hoá đơn thấy.
 		mvc.perform(get("/api/health")).andExpect(status().isOk());
@@ -107,7 +107,7 @@ class AnonymousReadTest {
 	 * đè đích đến.
 	 */
 	@Test
-	void me_an_danh_tra_401_ma_khong_tao_phien() throws Exception {
+	void anonymous_me_returns_401_without_creating_a_session() throws Exception {
 		mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
 
 		verifyNoInteractions(sessions);

@@ -48,7 +48,7 @@ class AdminAccessTest {
 	 * hẳn với `/api/**`, nơi 401 mới đúng vì người gọi là `fetch` của SPA.
 	 *
 	 * <p>Kiểm ĐÍCH ĐẾN chứ không chỉ "là 3xx", cùng lý do đã ghi ở
-	 * `SecurityConfigTest#dang_nhap_dan_sang_idp_chu_khong_sang_trang_cua_chinh_ta`:
+	 * `SecurityConfigTest#login_leads_to_the_idp_not_to_our_own_page`:
 	 * chính người ĐÃ có quyền `ops` cũng nhận 3xx ở đúng URL này (console tự
 	 * redirect `/admin/togglz` → `/admin/togglz/index`), nên một assertion chỉ
 	 * đòi 3xx sẽ xanh kể cả khi cổng mở toang.
@@ -58,7 +58,7 @@ class AdminAccessTest {
 	 * trình duyệt vào chỗ nó nhận 403.
 	 */
 	@Test
-	void an_danh_bi_chuyen_sang_dang_nhap() throws Exception {
+	void anonymous_is_redirected_to_login() throws Exception {
 		mvc.perform(get("/admin/togglz"))
 				.andExpect(status().is3xxRedirection())
 				.andExpect(redirectedUrl("http://localhost:8080/api/auth/login/cognito"));
@@ -70,7 +70,7 @@ class AdminAccessTest {
 	 * CloudFront với site công khai.
 	 */
 	@Test
-	void dang_nhap_nhung_khong_thuoc_ops_tra_403_khong_phai_404() throws Exception {
+	void logged_in_but_not_in_ops_returns_403_not_404() throws Exception {
 		mvc.perform(get("/admin/togglz").with(oidcLogin().authorities()))
 				.andExpect(status().isForbidden());
 	}
@@ -88,7 +88,7 @@ class AdminAccessTest {
 	 * </pre>
 	 */
 	@Test
-	void thuoc_ops_thi_qua_duoc_cong() throws Exception {
+	void an_ops_member_passes_the_gate() throws Exception {
 		mvc.perform(get("/admin/togglz")
 						.with(oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_ops"))))
 				.andExpect(status().isNotFound());
@@ -105,7 +105,7 @@ class AdminAccessTest {
 	 * ra.
 	 */
 	@Test
-	void api_van_tra_401_chu_khong_bi_keo_theo_chuyen_huong() throws Exception {
+	void the_api_still_returns_401_and_is_not_dragged_into_the_redirect() throws Exception {
 		mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
 	}
 }

@@ -36,18 +36,18 @@ class FeedDatesTest {
 			"2026-08-04T21:40:43+07:00          | 2026-08-04T14:40:43Z",
 			"2026-08-04T14:40:43.123Z           | 2026-08-04T14:40:43Z",
 	})
-	void parse_dung_ca_hai_chuan(String input, String expected) {
+	void parses_both_standards_correctly(String input, String expected) {
 		assertThat(FeedDates.parse(input.trim())).contains(expected.trim());
 	}
 
 	@ParameterizedTest
 	@ValueSource(strings = { "hôm qua", "04/08/2026", "", "   ", "not a date" })
-	void tra_ve_rong_khi_khong_parse_duoc(String bad) {
+	void returns_empty_when_it_cannot_parse(String bad) {
 		assertThat(FeedDates.parse(bad)).isEmpty();
 	}
 
 	@Test
-	void tra_ve_rong_khi_null() {
+	void returns_empty_when_null() {
 		assertThat(FeedDates.parse(null)).isEqualTo(Optional.empty());
 	}
 
@@ -64,12 +64,12 @@ class FeedDatesTest {
 	 * với phần giờ nguyên văn của chúng.
 	 */
 	@Test
-	void thu_tu_chuoi_trung_thu_tu_thoi_gian() {
-		String som = FeedDates.parse("Tue, 04 Aug 2026 21:40:43 +0700").orElseThrow();
-		String giua = FeedDates.parse("2026-08-04T15:00:00Z").orElseThrow();
-		String muon = FeedDates.parse("Tue, 04 Aug 2026 11:00:00 -0500").orElseThrow();
+	void string_order_matches_chronological_order() {
+		String earliest = FeedDates.parse("Tue, 04 Aug 2026 21:40:43 +0700").orElseThrow();
+		String middle = FeedDates.parse("2026-08-04T15:00:00Z").orElseThrow();
+		String latest = FeedDates.parse("Tue, 04 Aug 2026 11:00:00 -0500").orElseThrow();
 
-		assertThat(som).isLessThan(giua);
-		assertThat(giua).isLessThan(muon);
+		assertThat(earliest).isLessThan(middle);
+		assertThat(middle).isLessThan(latest);
 	}
 }

@@ -66,7 +66,7 @@ class SecurityConfig {
 					//
 					// ĐÃ ĐO trên dev 2026-08-13, sau khi Task 10+11 đưa Spring
 					// Security vào:
-					//   /api/khong-ton-tai      → 401  (phải là 404)
+					//   /api/does-not-exist      → 401  (phải là 404)
 					//   /api/articles?limit=abc → 401  (phải là 400)
 					//
 					// Vế nguy hiểm không phải 404: một lỗi 500 trên đường đọc công
@@ -115,9 +115,9 @@ class SecurityConfig {
 					.defaultSuccessUrl(publicBaseUrl + "/", true)
 					.failureUrl(publicBaseUrl + "/?login=failed"))
 			// HAI câu trả lời cho "chưa xác thực", chọn theo NGƯỜI GỌI chứ không
-			// theo sở thích — xem `EntryPointTheoNguoiGoi`.
+			// theo sở thích — xem `EntryPointByCaller`.
 			.exceptionHandling(e -> e.authenticationEntryPoint(
-					new EntryPointTheoNguoiGoi(publicBaseUrl)))
+					new EntryPointByCaller(publicBaseUrl)))
 			// TẮT request cache, và đây là một quyết định về CHI PHÍ.
 			//
 			// `ExceptionTranslationFilter` gọi `HttpSessionRequestCache.saveRequest()`
@@ -322,7 +322,7 @@ class SecurityConfig {
 	 * (`AuthType=AWS_IAM`), nên `sendRedirect` với đường dẫn tương đối đẩy trình
 	 * duyệt tới chỗ nó nhận 403.
 	 */
-	private static final class EntryPointTheoNguoiGoi implements AuthenticationEntryPoint {
+	private static final class EntryPointByCaller implements AuthenticationEntryPoint {
 
 		private static final RequestMatcher CONSOLE =
 				PathPatternRequestMatcher.pathPattern("/admin/**");
@@ -332,7 +332,7 @@ class SecurityConfig {
 
 		private final String loginUrl;
 
-		private EntryPointTheoNguoiGoi(String publicBaseUrl) {
+		private EntryPointByCaller(String publicBaseUrl) {
 			this.loginUrl = publicBaseUrl + "/api/auth/login/"
 					+ SsmClientRegistrationRepository.REGISTRATION_ID;
 		}

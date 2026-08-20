@@ -25,7 +25,7 @@ class CanonicalUrlTest {
 			"https://spring.io:8443/blog/post     | https://spring.io:8443/blog/post",
 			"https://spring.io/blog/../post       | https://spring.io/post",
 	})
-	void chuan_hoa_dung(String input, String expected) {
+	void normalises_correctly(String input, String expected) {
 		assertThat(CanonicalUrl.normalise(input.trim())).isEqualTo(expected.trim());
 	}
 
@@ -36,13 +36,13 @@ class CanonicalUrlTest {
 	 * lộ khi có người bấm vào.
 	 */
 	@Test
-	void khong_ep_http_thanh_https() {
+	void does_not_force_http_into_https() {
 		assertThat(CanonicalUrl.normalise("http://example.test/a"))
 				.isEqualTo("http://example.test/a");
 	}
 
 	@Test
-	void giu_nguyen_param_khong_phai_tracking() {
+	void keeps_params_that_are_not_tracking() {
 		assertThat(CanonicalUrl.normalise("https://a.test/x?p=1&utm_source=rss&q=2"))
 				.isEqualTo("https://a.test/x?p=1&q=2");
 	}
@@ -54,20 +54,20 @@ class CanonicalUrlTest {
 	 * trùng lặp hiện lên trang, đúng thứ chuẩn hoá sinh ra để chặn.
 	 */
 	@Test
-	void bo_tracking_param_khong_phan_biet_hoa_thuong() {
+	void strips_tracking_params_case_insensitively() {
 		assertThat(CanonicalUrl.normalise("https://a.test/x?UTM_Source=rss&FBCLID=y&p=1"))
 				.isEqualTo("https://a.test/x?p=1");
 	}
 
 	@ParameterizedTest
 	@ValueSource(strings = { "/blog/post", "not-a-url", "ftp://a.test/x", "" })
-	void tu_choi_url_khong_dung(String bad) {
+	void rejects_invalid_urls(String bad) {
 		assertThatThrownBy(() -> CanonicalUrl.normalise(bad))
 				.isInstanceOf(IllegalArgumentException.class);
 	}
 
 	@Test
-	void article_id_la_32_ky_tu_hex_va_on_dinh() {
+	void the_article_id_is_32_hex_chars_and_stable() {
 		String id = CanonicalUrl.articleId("https://spring.io/blog/post");
 
 		assertThat(id).hasSize(32).matches("[0-9a-f]{32}");
@@ -76,7 +76,7 @@ class CanonicalUrlTest {
 	}
 
 	@Test
-	void url_khac_nhau_cho_id_khac_nhau() {
+	void different_urls_give_different_ids() {
 		assertThat(CanonicalUrl.articleId("https://a.test/1"))
 				.isNotEqualTo(CanonicalUrl.articleId("https://a.test/2"));
 	}
@@ -87,17 +87,17 @@ class CanonicalUrlTest {
 	 * cùng một `articleId`, để lượt ingest thứ hai bị dedupe chặn thay vì đẻ
 	 * dòng trùng lên trang.
 	 *
-	 * Các test ở trên KHÔNG bắt được nếu nối hai hàm lại sai: `chuan_hoa_dung`
+	 * Các test ở trên KHÔNG bắt được nếu nối hai hàm lại sai: `normalises_correctly`
 	 * chỉ kiểm `normalise`, còn `article_id_...` chỉ kiểm `articleId` trên
 	 * chuỗi đã chuẩn. Không cái nào nói rằng người gọi phải chuẩn hoá TRƯỚC khi
 	 * băm — mà quên đúng bước đó là cách hỏng dễ xảy ra nhất.
 	 */
 	@Test
-	void url_tuong_duong_cho_cung_mot_article_id() {
-		String chuan = CanonicalUrl.articleId(
+	void equivalent_urls_give_the_same_article_id() {
+		String canonical = CanonicalUrl.articleId(
 				CanonicalUrl.normalise("https://spring.io/blog/post"));
 
-		for (String tuongDuong : new String[] {
+		for (String equivalent : new String[] {
 				"https://Spring.io/blog/post",
 				"https://spring.io/blog/post/",
 				"https://spring.io/blog/post#intro",
@@ -105,9 +105,9 @@ class CanonicalUrlTest {
 				"https://spring.io/blog/post?utm_source=rss",
 				"https://spring.io/blog/sub/../post",
 		}) {
-			assertThat(CanonicalUrl.articleId(CanonicalUrl.normalise(tuongDuong)))
-					.as("phải cùng articleId với bản chuẩn: %s", tuongDuong)
-					.isEqualTo(chuan);
+			assertThat(CanonicalUrl.articleId(CanonicalUrl.normalise(equivalent)))
+					.as("phải cùng articleId với bản chuẩn: %s", equivalent)
+					.isEqualTo(canonical);
 		}
 	}
 }

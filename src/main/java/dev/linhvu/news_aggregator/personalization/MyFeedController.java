@@ -66,11 +66,11 @@ class MyFeedController {
 		// Đây là trạng thái bình thường nhất của một người vừa đăng nhập, nên
 		// hiểu nhầm nó thành "không nguồn nào" biến trang chủ của họ thành trang
 		// trắng.
-		List<String> daChon = repository.findByUserId(sub.get())
+		List<String> selected = repository.findByUserId(sub.get())
 				.map(SourcePreferences::getSourceIds)
 				.orElse(List.of());
 
-		return ResponseEntity.ok(catalog.recentBySources(daChon, effective));
+		return ResponseEntity.ok(catalog.recentBySources(selected, effective));
 	}
 
 	/**
@@ -82,7 +82,7 @@ class MyFeedController {
 	 * mới — kiểu hỏng tệ nhất vì không ai phát hiện ra.
 	 */
 	@ExceptionHandler(CatalogUnavailableException.class)
-	ResponseEntity<Void> catalogHong() {
+	ResponseEntity<Void> catalogUnavailable() {
 		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
 	}
 }

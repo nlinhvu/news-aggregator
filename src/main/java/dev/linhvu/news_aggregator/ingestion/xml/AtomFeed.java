@@ -32,7 +32,7 @@ public class AtomFeed {
 		/**
 		 * Atom có HAI element mang nội dung. `content` dài hơn nên được ưu tiên;
 		 * `summary` là bản lùi. Ưu tiên ngược lại là một lỗi KHÔNG có exception —
-		 * xem `atom_uu_tien_content_hon_summary`.
+		 * xem `atom_prefers_content_over_summary`.
 		 */
 		public String summary;
 

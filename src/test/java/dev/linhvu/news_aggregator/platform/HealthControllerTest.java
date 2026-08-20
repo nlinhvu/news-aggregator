@@ -17,7 +17,7 @@ class HealthControllerTest {
 	MockMvc mockMvc;
 
 	@Test
-	void tra_ve_UP_va_dung_commit_sha() throws Exception {
+	void returns_UP_and_the_right_commit_sha() throws Exception {
 		mockMvc.perform(get("/api/health"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("UP"))
@@ -32,7 +32,7 @@ class HealthControllerTest {
 	 * "CloudFront cache nhầm /api/*" — tức là sẽ đi tìm sai chỗ.
 	 */
 	@Test
-	void cam_trinh_duyet_cache_health() throws Exception {
+	void forbids_browsers_from_caching_health() throws Exception {
 		mockMvc.perform(get("/api/health"))
 				.andExpect(header().string("Cache-Control", "no-store"));
 	}

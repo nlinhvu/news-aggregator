@@ -49,7 +49,7 @@ class CdkNagTest {
 					+ "tắc 3) — mà test này chỉ synth EnvConfig.DEV. Rule KHÔNG tham số "
 					+ "nên entry này nuốt luôn DDB3 của mọi bảng thêm sau vào DataStack; "
 					+ "chốt chặn thật cho prod nằm ở "
-					+ "DataStackTest#pitr_bat_o_prod_tat_o_dev."),
+					+ "DataStackTest#pitr_is_on_in_prod_and_off_in_dev."),
 
 			Map.entry("AwsSolutions-CFR2", "WAF bị loại theo master §4 nguyên tắc 3 — nó tính "
 					+ "tiền theo tháng và là chi phí cố định."),
@@ -67,7 +67,7 @@ class CdkNagTest {
 			// Nên cửa mật khẩu là thứ không đóng được, COG1 nói một điều CÓ THẬT, và
 			// cách trả lời đúng là dựng `passwordPolicy` thật chứ không phải giữ một
 			// ngoại lệ. Xem `IdentityStack` và
-			// SecurityBoundaryTest#chinh_sach_mat_khau_du_manh_cho_canh_cua_khong_dong_duoc.
+			// SecurityBoundaryTest#the_password_policy_is_strong_enough_for_a_door_that_cannot_be_closed.
 
 			Map.entry("AwsSolutions-COG2", "MFA bắt buộc và email OTP LOẠI TRỪ NHAU — đây là "
 					+ "mâu thuẫn kỹ thuật, không phải đánh đổi tiện lợi. AWS ghi rõ: "
@@ -113,9 +113,9 @@ class CdkNagTest {
 					+ "SQS3 của MỌI queue thêm sau vào bất kỳ stack nào, kể cả queue "
 					+ "làm việc quên mất DLQ — mỗi queue mới phải tự mang theo một test "
 					+ "canh DLQ. Chốt chặn hiện có: "
-					+ "SecurityBoundaryTest#schedule_gioi_han_retry_va_co_dlq và "
-					+ "#sweep_schedule_co_retry_va_dlq cho ingestion, "
-					+ "#queue_summarize_co_dlq_voi_max_receive_count_3 cho summarization."),
+					+ "SecurityBoundaryTest#the_schedule_caps_retries_and_has_a_dlq và "
+					+ "#the_sweep_schedule_has_retries_and_a_dlq cho ingestion, "
+					+ "#the_summarize_queue_has_a_dlq_with_max_receive_count_3 cho summarization."),
 
 
 
@@ -176,7 +176,7 @@ class CdkNagTest {
 	// KHÔNG có entry nào cho SNS, và đó là kết luận đã đo chứ không phải bỏ sót.
 	//
 	// Topic của ObservabilityStack CỐ Ý không bật SSE (xem Javadoc của
-	// `SecurityBoundaryTest#sns_khong_bat_sse_nhung_bat_ssl`), nên phản xạ đầu
+	// `SecurityBoundaryTest#sns_leaves_sse_off_but_enforces_ssl`), nên phản xạ đầu
 	// tiên là thêm một suppression `AwsSolutions-SNS2`. Entry đó sẽ là entry
 	// CHẾT: rule ấy KHÔNG TỒN TẠI trong cdk-nag 3.0.1. Pack `aws-solutions` nạp
 	// đúng MỘT rule SNS — `SNSTopicSSLPublishOnly` → `AwsSolutions-SNS3`; rule
@@ -186,7 +186,7 @@ class CdkNagTest {
 	// Một entry chết ở đây tệ hơn không có entry: nó trông y hệt một ngoại lệ đã
 	// được cân nhắc, và nếu bản cdk-nag sau này THÊM rule SSE thật thì nó nuốt
 	// luôn finding đó mà không ai phải quyết định lại. Cùng lý do với comment
-	// "assertion CHẾT" ở cuối `SecurityBoundaryTest#kms_decrypt_ghim_ve_khoa_cua_ssm`.
+	// "assertion CHẾT" ở cuối `SecurityBoundaryTest#kms_decrypt_is_pinned_to_the_ssm_key`.
 	//
 	// `AwsSolutions-SNS3` thì có thật và ĐANG xanh nhờ `enforceSsl(true)` — đo
 	// bằng mutation: bỏ dòng đó ra thì test này đỏ với
@@ -207,7 +207,7 @@ class CdkNagTest {
 	 * mỗi lần sửa lại lòi ra một đợt mới.
 	 */
 	@Test
-	void khong_con_finding_ngoai_danh_sach_chap_nhan() {
+	void no_finding_remains_outside_the_accepted_list() {
 		App app = new App();
 		AppStage stage = new AppStage(app, EnvConfig.DEV);
 

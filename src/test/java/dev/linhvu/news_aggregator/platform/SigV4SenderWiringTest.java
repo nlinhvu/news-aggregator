@@ -41,7 +41,7 @@ class SigV4SenderWiringTest {
 	private static final List<String> authorizations = new CopyOnWriteArrayList<>();
 
 	@BeforeAll
-	static void dungServer() throws IOException {
+	static void startServer() throws IOException {
 		server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
 		server.createContext("/v1/traces", (exchange) -> {
 			authorizations.add(String.valueOf(
@@ -53,7 +53,7 @@ class SigV4SenderWiringTest {
 	}
 
 	@AfterAll
-	static void dongServer() {
+	static void stopServer() {
 		server.stop(0);
 	}
 
@@ -73,14 +73,14 @@ class SigV4SenderWiringTest {
 	OtlpHttpSpanExporter exporter;
 
 	@Test
-	void exporter_dung_component_loader_cua_ta() {
+	void the_exporter_uses_our_own_component_loader() {
 		assertThat(this.exporter.toString())
 				.as("gỡ bean customizer thì đây là ComponentLoader mặc định của OTel")
 				.contains("componentLoader=" + SigV4HttpSenderProvider.class.getName());
 	}
 
 	@Test
-	void span_that_su_roi_khoi_tien_trinh_va_khong_ky_o_local() {
+	void spans_really_leave_the_process_and_are_not_signed_locally() {
 		var span = this.tracer.nextSpan().name("wiring");
 		span.start().end();
 
