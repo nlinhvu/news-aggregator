@@ -46,8 +46,20 @@ services:
         "tokenExpiry":3600,"requestMappings":[{"requestParam":"grant_type",
         "match":"authorization_code",
         "claims":{"cognito:groups":["ops"],"email":"dev@local"}}]}]}
+    # `wget` chứ không `curl`: image này KHÔNG có curl, và Docker không phân biệt
+    # "lệnh không tồn tại" với "server hỏng" — cả hai đều là exit khác 0. Server
+    # trả 200 mà service vẫn `unhealthy` mãi mãi, nên `depends_on` bên dưới đứng
+    # đủ `retries × interval` (đo được 102 giây) rồi bỏ cuộc bằng một lỗi không
+    # nhắc gì tới `curl`. Xem TS-0004.
+    #
+    # `-O /dev/null` chứ không `--spider`: `--spider` gửi HEAD, và endpoint
+    # discovery trả 405 cho HEAD.
+    #
+    # `-t 1` tắt retry của wget. Để mặc định (20 lần) thì một lượt kiểm chạy lâu
+    # hơn `timeout: 3s` rất nhiều, và Docker giết nó giữa chừng — kết quả là
+    # `unhealthy` vì hết giờ chứ không vì server hỏng.
     healthcheck:
-      test: ['CMD', 'curl', '-f',
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', '-T', '2', '-t', '1',
              'http://localhost:8080/cognito/.well-known/openid-configuration']
       interval: 5s
       timeout: 3s
