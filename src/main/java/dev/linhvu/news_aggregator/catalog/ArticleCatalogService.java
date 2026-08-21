@@ -66,7 +66,7 @@ class ArticleCatalogService implements ArticleCatalog {
 			int limit) {
 		boolean showSummary = ArticleSummaries.showSummary();
 		try {
-			return repository.findRecentBySources(sourceIds, limit).stream()
+			return repository.findRecentBySources(sourceIds, limit, null).stream()
 					.map(a -> ArticleSummaries.toDto(a, showSummary))
 					.toList();
 		}

@@ -90,7 +90,7 @@ class ArticleRepositoryTest {
 	 */
 	@Test
 	void fan_out_returns_exactly_the_selected_sources_newest_first() {
-		assertThat(repository.findRecentBySources(SELECTED, 20))
+		assertThat(repository.findRecentBySources(SELECTED, 20, null))
 				.extracting(Article::getArticleId)
 				.containsExactlyElementsOf(expectedBySources(SELECTED));
 	}
@@ -111,7 +111,7 @@ class ArticleRepositoryTest {
 				.map(Article::getArticleId)
 				.toList();
 
-		assertThat(repository.findRecentBySources(List.of(), 20))
+		assertThat(repository.findRecentBySources(List.of(), 20, null))
 				.extracting(Article::getArticleId)
 				.containsExactlyElementsOf(allIds);
 	}
@@ -138,7 +138,7 @@ class ArticleRepositoryTest {
 				.as("fixture phải giữ ít nhất một bài chưa backfill")
 				.isNotEmpty();
 
-		assertThat(repository.findRecentBySources(SELECTED, 20))
+		assertThat(repository.findRecentBySources(SELECTED, 20, null))
 				.extracting(Article::getArticleId)
 				.doesNotContainAnyElementsOf(orphan);
 		assertThat(repository.findRecent(20, null))
@@ -155,7 +155,7 @@ class ArticleRepositoryTest {
 	 */
 	@Test
 	void limit_applies_to_the_merged_result_not_to_each_source() {
-		assertThat(repository.findRecentBySources(SELECTED, 2))
+		assertThat(repository.findRecentBySources(SELECTED, 2, null))
 				.extracting(Article::getArticleId)
 				.containsExactlyElementsOf(expectedBySources(SELECTED).subList(0, 2));
 	}
@@ -175,7 +175,7 @@ class ArticleRepositoryTest {
 	void one_broken_query_fails_the_whole_call_without_partial_results() {
 		// `Arrays.asList` chứ không `List.of` — `List.of` từ chối phần tử null.
 		assertThatThrownBy(() -> repository.findRecentBySources(
-				Arrays.asList("spring-blog", null), 20))
+				Arrays.asList("spring-blog", null), 20, null))
 				.isInstanceOf(RuntimeException.class);
 	}
 
@@ -200,7 +200,7 @@ class ArticleRepositoryTest {
 		TracePropagation spied = spy(new TracePropagation());
 		ArticleRepository isolated = new ArticleRepository(enhancedClient, spied, tableName);
 
-		isolated.findRecentBySources(SELECTED, 20);
+		isolated.findRecentBySources(SELECTED, 20, null);
 
 		verify(spied).wrap(any());
 	}

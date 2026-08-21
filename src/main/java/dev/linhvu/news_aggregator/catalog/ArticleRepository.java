@@ -33,6 +33,23 @@ import org.springframework.stereotype.Repository;
 @Lazy
 class ArticleRepository {
 
+	/**
+	 * Thứ tự của một trang: mới nhất trước, `articleId` giảm dần khi trùng giây.
+	 *
+	 * Khoá phụ `articleId` KHÔNG phải trang trí. Thiếu nó thì thứ tự giữa các bài
+	 * cùng giây là bất kỳ, và một thứ tự bất kỳ nghĩa là không có "bài đứng sau
+	 * watermark" nào xác định — cursor mất nghĩa đúng ở chỗ nó cần nhất.
+	 *
+	 * Thứ tự này do ỨNG DỤNG áp đặt, KHÔNG mượn thứ tự DynamoDB trả về: giữa các
+	 * item cùng sort key DynamoDB không bảo đảm chiều nào (đo trên `dev`
+	 * 2026-08-21, cụm 5 bài và cụm 3 bài đều trả về không theo chiều nào), trong
+	 * khi Floci thì tất định — một khác biệt mà test ở local không thể lộ ra.
+	 */
+	private static final Comparator<Article> PAGE_ORDER =
+			Comparator.comparing(Article::getPublishedAt)
+					.thenComparing(Article::getArticleId)
+					.reversed();
+
 	private final DynamoDbTable<Article> table;
 	private final DynamoDbIndex<Article> recentIndex;
 	private final DynamoDbIndex<Article> bySourceIndex;
@@ -174,39 +191,90 @@ class ArticleRepository {
 	 *
 	 * `limit` áp hai lần và cả hai đều cần: lần trong `queryOneSource` chặn
 	 * lượng đọc, lần sau khi gộp mới là con số người dùng xin.
+	 *
+	 * `cursor` là watermark CHUNG cho mọi nguồn, KHÔNG phải một khoá riêng mỗi
+	 * nguồn — ADR-0022 §3 Option B ghi vì sao phương án "mỗi nguồn một
+	 * `LastEvaluatedKey`" trông chuẩn mực hơn mà lại sai. Phần đã trả bị lọc
+	 * ngay tại từng nguồn, nên chỗ này chỉ còn việc merge-sort.
 	 */
-	List<Article> findRecentBySources(Collection<String> sourceIds, int limit) {
+	List<Article> findRecentBySources(Collection<String> sourceIds, int limit,
+			ArticleCursor cursor) {
 		// Rỗng = TẤT CẢ nguồn (TDD §17 #10), và nó uỷ quyền cho `findRecent` chứ
 		// KHÔNG fan-out qua mọi nguồn: đường cũ đi qua `gsi-recent-v2`, thứ chứa
-		// cả bài chưa có `sourceId`.
+		// cả bài chưa có `sourceId`. Cursor đi theo — nhánh này cũng phải phân
+		// trang được, và ở đó nó còn CHÍNH XÁC HƠN nhờ `ExclusiveStartKey`.
 		if (sourceIds.isEmpty()) {
-			return findRecent(limit, null);
+			return findRecent(limit, cursor);
 		}
 		try (ExecutorService executor = tracePropagation.wrap(
 				Executors.newVirtualThreadPerTaskExecutor())) {
 			List<Future<List<Article>>> futures = sourceIds.stream()
-					.map(id -> executor.submit(() -> queryOneSource(id, limit)))
+					.map(id -> executor.submit(() -> queryOneSource(id, limit, cursor)))
 					.toList();
 			return futures.stream()
 					.flatMap(future -> join(future).stream())
-					.sorted(Comparator.comparing(Article::getPublishedAt).reversed())
+					.sorted(PAGE_ORDER)
 					.limit(limit)
 					.toList();
 		}
 	}
 
-	/** AP10. `scanIndexForward(false)` cho ra mới nhất trước trong MỘT nguồn. */
-	private List<Article> queryOneSource(String sourceId, int limit) {
+	/**
+	 * AP10. `scanIndexForward(false)` cho ra mới nhất trước trong MỘT nguồn.
+	 *
+	 * `cursor` khác null ⇒ `sortLessThanOrEqualTo`, tức `<=` chứ KHÔNG `<`. Một
+	 * mốc chung cho mọi nguồn là hợp lệ vì merge nhiều dòng đã sắp xếp bảo đảm
+	 * mọi bài nằm TRÊN watermark đều đã được trả ở trang trước — kể cả ở nguồn
+	 * chưa đóng góp bài nào. Chứng minh ở ADR-0022 §6. Dùng `<` cho gọn thì SAI:
+	 * nó bỏ luôn phần đuôi cụm trùng nằm cùng giây với watermark — đúng những bài
+	 * mà cursor sinh ra để không đánh mất.
+	 *
+	 * Lọc TRƯỚC `limit`, KHÔNG phải sau khi gộp, và đây là chỗ dễ viết sai nhất
+	 * của cả đường fan-out. `<=` luôn đọc lại CHÍNH bài watermark; cắt `limit`
+	 * item thô rồi mới lọc làm lượt đọc thừa-một teo lại còn đúng `limit`, nên
+	 * `hasMore` thành false và feed cụt ngay sau trang 2. Nhiều nguồn thì phần dư
+	 * của nguồn khác lấp chỗ trống ấy, nên nó chỉ lộ ra khi người đọc chọn ĐÚNG
+	 * MỘT nguồn — im lặng, không lỗi, không log.
+	 *
+	 * `.limit(n)` trong request chỉ là CỠ TRANG. Enhanced client phân trang lười
+	 * nên stream tự đọc tiếp cho tới khi đủ `limit` item ĐÃ LỌC — cùng cơ chế mà
+	 * `findPendingSummary` dựa vào.
+	 */
+	private List<Article> queryOneSource(String sourceId, int limit,
+			ArticleCursor cursor) {
+		QueryConditional condition = (cursor == null)
+				? QueryConditional.keyEqualTo(
+						Key.builder().partitionValue(sourceId).build())
+				: QueryConditional.sortLessThanOrEqualTo(Key.builder()
+						.partitionValue(sourceId)
+						.sortValue(cursor.publishedAt())
+						.build());
 		return bySourceIndex.query(QueryEnhancedRequest.builder()
-						.queryConditional(QueryConditional.keyEqualTo(
-								Key.builder().partitionValue(sourceId).build()))
+						.queryConditional(condition)
 						.scanIndexForward(false)
 						.limit(limit)
 						.build())
 				.stream()
 				.flatMap(page -> page.items().stream())
+				.filter(a -> afterCursor(a, cursor))
 				.limit(limit)
 				.toList();
+	}
+
+	/**
+	 * "Đứng sau watermark" trong thứ tự {@link #PAGE_ORDER}.
+	 *
+	 * Cần vì key condition chỉ diễn đạt được `publishedAt <=`, không diễn đạt
+	 * được cặp `(publishedAt, articleId) <`. Phần chênh giữa hai điều đó — cụm
+	 * bài cùng giây với watermark — là thứ hàm này cắt đi.
+	 */
+	private static boolean afterCursor(Article a, ArticleCursor cursor) {
+		if (cursor == null) {
+			return true;
+		}
+		int cmp = a.getPublishedAt().compareTo(cursor.publishedAt());
+		return cmp < 0
+				|| (cmp == 0 && a.getArticleId().compareTo(cursor.articleId()) < 0);
 	}
 
 	/**
