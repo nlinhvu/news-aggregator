@@ -3,6 +3,7 @@ package dev.linhvu.news_aggregator.catalog;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -19,6 +20,7 @@ import software.amazon.awssdk.enhanced.dynamodb.model.PutItemEnhancedRequest;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
 import software.amazon.awssdk.enhanced.dynamodb.model.UpdateItemEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 
 import dev.linhvu.news_aggregator.platform.TracePropagation;
@@ -118,14 +120,32 @@ class ArticleRepository {
 	 * `publishedAt` là chuỗi ISO-8601 UTC nên thứ tự chuỗi trùng thứ tự thời
 	 * gian; `scanIndexForward(false)` cho ra mới nhất trước mà không cần sắp
 	 * xếp lại ở tầng ứng dụng.
+	 *
+	 * `cursor` null = từ đầu danh sách. Khác null thì nó được dịch thành
+	 * `ExclusiveStartKey` — và phép dịch ấy CHÍNH XÁC TUYỆT ĐỐI vì
+	 * `{listBucket, publishedAt, articleId}` đúng bằng hình dạng
+	 * `LastEvaluatedKey` mà DynamoDB trả về cho index này (index key + table
+	 * key). Cụm bài trùng `publishedAt` vì thế không ảnh hưởng gì tới đường này;
+	 * chỉ đường fan-out mới phải tự xử lý (xem `findRecentBySources`).
+	 *
+	 * TUYỆT ĐỐI KHÔNG sắp xếp lại kết quả ở đây. Chỗ gọi dựng cursor từ phần tử
+	 * CUỐI của trang, và trang sau nối tiếp đúng sau phần tử ấy *theo thứ tự của
+	 * DynamoDB*. Sắp xếp lại làm "phần tử cuối" không còn là chỗ DynamoDB dừng,
+	 * và hệ quả là nhảy cóc qua vài bài — im lặng.
 	 */
-	List<Article> findRecent(int limit) {
-		return recentIndex.query(QueryEnhancedRequest.builder()
-						.queryConditional(QueryConditional.keyEqualTo(
-								Key.builder().partitionValue(Article.LIST_BUCKET).build()))
-						.scanIndexForward(false)
-						.limit(limit)
-						.build())
+	List<Article> findRecent(int limit, ArticleCursor cursor) {
+		QueryEnhancedRequest.Builder request = QueryEnhancedRequest.builder()
+				.queryConditional(QueryConditional.keyEqualTo(
+						Key.builder().partitionValue(Article.LIST_BUCKET).build()))
+				.scanIndexForward(false)
+				.limit(limit);
+		if (cursor != null) {
+			request.exclusiveStartKey(Map.of(
+					"listBucket", AttributeValue.fromS(Article.LIST_BUCKET),
+					"publishedAt", AttributeValue.fromS(cursor.publishedAt()),
+					"articleId", AttributeValue.fromS(cursor.articleId())));
+		}
+		return recentIndex.query(request.build())
 				.stream()
 				.flatMap(page -> page.items().stream())
 				.limit(limit)
@@ -160,7 +180,7 @@ class ArticleRepository {
 		// KHÔNG fan-out qua mọi nguồn: đường cũ đi qua `gsi-recent-v2`, thứ chứa
 		// cả bài chưa có `sourceId`.
 		if (sourceIds.isEmpty()) {
-			return findRecent(limit);
+			return findRecent(limit, null);
 		}
 		try (ExecutorService executor = tracePropagation.wrap(
 				Executors.newVirtualThreadPerTaskExecutor())) {

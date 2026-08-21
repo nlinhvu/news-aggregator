@@ -69,14 +69,14 @@ class ArticleRepositoryTest {
 				.map(Article::getArticleId)
 				.toList();
 
-		assertThat(repository.findRecent(10))
+		assertThat(repository.findRecent(10, null))
 				.extracting(Article::getArticleId)
 				.containsExactlyElementsOf(expected);
 	}
 
 	@Test
 	void respects_limit() {
-		assertThat(repository.findRecent(2)).hasSize(2);
+		assertThat(repository.findRecent(2, null)).hasSize(2);
 	}
 
 	/**
@@ -107,7 +107,7 @@ class ArticleRepositoryTest {
 	 */
 	@Test
 	void an_empty_set_means_all_sources() {
-		List<String> allIds = repository.findRecent(20).stream()
+		List<String> allIds = repository.findRecent(20, null).stream()
 				.map(Article::getArticleId)
 				.toList();
 
@@ -141,7 +141,7 @@ class ArticleRepositoryTest {
 		assertThat(repository.findRecentBySources(SELECTED, 20))
 				.extracting(Article::getArticleId)
 				.doesNotContainAnyElementsOf(orphan);
-		assertThat(repository.findRecent(20))
+		assertThat(repository.findRecent(20, null))
 				.extracting(Article::getArticleId)
 				.containsAll(orphan);
 	}
