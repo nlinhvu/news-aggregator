@@ -1,5 +1,8 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.util.List;
+
+import dev.linhvu.news_aggregator.catalog.api.ArticlePage;
 import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
 import dev.linhvu.news_aggregator.platform.NewsFeature;
 
@@ -47,5 +50,26 @@ final class ArticleSummaries {
 				article.getArticleId(), article.getTitle(), article.getPublishedAt(),
 				article.getCanonicalUrl(), article.getSourceName(),
 				showSummary ? article.getSummary() : null);
+	}
+
+	/**
+	 * Đóng gói một trang — chỗ DUY NHẤT quyết định `nextCursor`, đặt ngay cạnh
+	 * chỗ duy nhất quyết định hình dạng DTO, và vì cùng một lý do.
+	 *
+	 * `overRead` là kết quả đọc `limit + 1` phần tử. Phần tử thứ `limit + 1` KHÔNG
+	 * bao giờ được trả về — nó chỉ tồn tại để trả lời câu "còn nữa không". Đọc
+	 * đúng `limit` rồi luôn phát cursor sẽ tạo một lượt tải thừa ở cuối: người
+	 * đọc thấy "Đang tải…" rồi "Đã hết bài" cho một request trả về rỗng.
+	 *
+	 * Đọc flag MỘT lần cho cả trang, không phải mỗi item: giá trị đổi giữa chừng
+	 * sẽ cho ra một trang nửa có summary nửa không.
+	 */
+	static ArticlePage toPage(List<Article> overRead, int limit) {
+		boolean hasMore = overRead.size() > limit;
+		List<Article> page = hasMore ? overRead.subList(0, limit) : overRead;
+		boolean showSummary = showSummary();
+		return new ArticlePage(
+				page.stream().map(a -> toDto(a, showSummary)).toList(),
+				hasMore ? ArticleCursor.fromLastArticle(page) : null);
 	}
 }

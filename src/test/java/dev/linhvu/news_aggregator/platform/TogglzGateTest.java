@@ -97,7 +97,7 @@ class TogglzGateTest {
 	void flag_on_yields_a_summary() throws Exception {
 		mockMvc.perform(get("/api/articles?limit=1"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[0].summary").exists());
+				.andExpect(jsonPath("$.items[0].summary").exists());
 	}
 
 	/**
@@ -111,9 +111,9 @@ class TogglzGateTest {
 		mockMvc.perform(get("/api/articles?limit=1"))
 				.andExpect(status().isOk())
 				// Chốt chống test rỗng: thiếu dòng này thì một bảng rỗng cũng làm
-				// `$[0].summary` "không tồn tại" và test xanh mà chẳng kiểm gì.
-				.andExpect(jsonPath("$[0].id").exists())
-				.andExpect(jsonPath("$[0].summary").doesNotExist());
+				// `$.items[0].summary` "không tồn tại" và test xanh mà chẳng kiểm gì.
+				.andExpect(jsonPath("$.items[0].id").exists())
+				.andExpect(jsonPath("$.items[0].summary").doesNotExist());
 	}
 
 	/**
