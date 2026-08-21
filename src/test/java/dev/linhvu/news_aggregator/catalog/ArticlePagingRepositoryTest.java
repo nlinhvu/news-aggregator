@@ -192,6 +192,63 @@ class ArticlePagingRepositoryTest {
 	}
 
 	/**
+	 * Cửa sổ đọc của MỘT nguồn không bao giờ kết thúc GIỮA một cụm trùng
+	 * `publishedAt` — nó nới ra tới hết cụm.
+	 *
+	 * Canh CƠ CHẾ chứ không canh triệu chứng, và đó là lựa chọn BẮT BUỘC chứ
+	 * không phải cho tiện: triệu chứng (sót bài) chỉ xuất hiện khi thứ tự BÊN
+	 * TRONG cụm khác `PAGE_ORDER`, mà Floci luôn trả cụm theo đúng `articleId`
+	 * giảm dần. Trên Floci, một bản dựng cắt đúng `limit` vẫn vớ được phần ĐẦU
+	 * cụm nên không sót gì; trên DynamoDB thật thứ tự trong cụm là bất kỳ nên
+	 * tập lấy về là tập con BẤT KỲ, và những bài nằm TRÊN watermark mà chưa được
+	 * đọc thì mất vĩnh viễn.
+	 *
+	 * Đo trên `dev` 2026-08-21: `spring-blog` 16 bài với cụm 7 bài cùng
+	 * `2026-08-20T00:00:00Z`; `limit` 3→13 bài, 4→14, 5→15, 6→16. Sót khi
+	 * `cỡ cụm > limit + 1`, tất định.
+	 *
+	 * So KHÔNG theo thứ tự: thứ tự bên trong cụm là thứ test này cố ý không dựa
+	 * vào. Điều phải đúng là cụm về ĐỦ.
+	 */
+	@Test
+	void the_read_window_never_ends_inside_a_duplicate_cluster() {
+		List<String> fromA = PagingFixtures.idsOfSources(PagingFixtures.SOURCE_A);
+		List<String> cluster = PagingFixtures.idsInOrder()
+				.subList(PagingFixtures.CLUSTER_FROM, PagingFixtures.CLUSTER_TO + 1);
+		int clusterStart = fromA.indexOf(cluster.getFirst());
+		assertThat(clusterStart)
+				.as("cụm phải nằm trong SOURCE_A, nếu không test này vô nghĩa")
+				.isNotNegative();
+
+		// `limit` cắt ngay SAU phần tử đầu của cụm ⇒ ranh giới rơi vào GIỮA cụm.
+		assertThat(repository.queryOneSource(
+						PagingFixtures.SOURCE_A, clusterStart + 1, null))
+				.extracting(Article::getArticleId)
+				.as("phải nới tới hết cụm, không dừng giữa chừng")
+				.containsExactlyInAnyOrderElementsOf(
+						fromA.subList(0, clusterStart + cluster.size()));
+	}
+
+	/**
+	 * Ranh giới SẠCH thì KHÔNG nới.
+	 *
+	 * Thiếu vế này thì "nới tới hết cụm" hoá thành "đọc cả nguồn" mà vẫn xanh —
+	 * và chi phí đọc mỗi trang lại phụ thuộc độ sâu, đúng thứ ADR-0022 driver #2
+	 * đặt ra để tránh.
+	 */
+	@Test
+	void a_clean_boundary_reads_exactly_limit() {
+		List<String> fromA = PagingFixtures.idsOfSources(PagingFixtures.SOURCE_A);
+		int clusterStart = fromA.indexOf(PagingFixtures.idsInOrder()
+				.get(PagingFixtures.CLUSTER_FROM));
+
+		// Cắt NGAY TRƯỚC cụm: phần tử cuối cửa sổ khác `publishedAt` với bài kế tiếp.
+		assertThat(repository.queryOneSource(PagingFixtures.SOURCE_A, clusterStart, null))
+				.extracting(Article::getArticleId)
+				.containsExactlyInAnyOrderElementsOf(fromA.subList(0, clusterStart));
+	}
+
+	/**
 	 * Tập rỗng = TẤT CẢ nguồn, và nó uỷ quyền cho `findRecent` — tức phân trang
 	 * cũng phải đi theo. Một bản dựng quên truyền cursor xuống nhánh uỷ quyền sẽ
 	 * trả mãi trang đầu, và `scrollAllBySources` sẽ chạm chốt chặn 100 vòng.

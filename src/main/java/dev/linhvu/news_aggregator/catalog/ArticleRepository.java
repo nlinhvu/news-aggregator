@@ -1,7 +1,9 @@
 package dev.linhvu.news_aggregator.catalog;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -9,6 +11,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbIndex;
@@ -237,10 +240,12 @@ class ArticleRepository {
 	 * MỘT nguồn — im lặng, không lỗi, không log.
 	 *
 	 * `.limit(n)` trong request chỉ là CỠ TRANG. Enhanced client phân trang lười
-	 * nên stream tự đọc tiếp cho tới khi đủ `limit` item ĐÃ LỌC — cùng cơ chế mà
+	 * nên stream tự đọc tiếp cho tới khi đủ item ĐÃ LỌC — cùng cơ chế mà
 	 * `findPendingSummary` dựa vào.
+	 *
+	 * Cắt cửa sổ bằng {@link #takeThroughCluster} chứ KHÔNG bằng `.limit(limit)`.
 	 */
-	private List<Article> queryOneSource(String sourceId, int limit,
+	List<Article> queryOneSource(String sourceId, int limit,
 			ArticleCursor cursor) {
 		QueryConditional condition = (cursor == null)
 				? QueryConditional.keyEqualTo(
@@ -249,16 +254,57 @@ class ArticleRepository {
 						.partitionValue(sourceId)
 						.sortValue(cursor.publishedAt())
 						.build());
-		return bySourceIndex.query(QueryEnhancedRequest.builder()
+		return takeThroughCluster(bySourceIndex.query(QueryEnhancedRequest.builder()
 						.queryConditional(condition)
 						.scanIndexForward(false)
 						.limit(limit)
 						.build())
 				.stream()
 				.flatMap(page -> page.items().stream())
-				.filter(a -> afterCursor(a, cursor))
-				.limit(limit)
-				.toList();
+				.filter(a -> afterCursor(a, cursor)), limit);
+	}
+
+	/**
+	 * Lấy `limit` item, rồi NỚI tới hết cụm trùng `publishedAt` nếu ranh giới rơi
+	 * vào giữa một cụm.
+	 *
+	 * Vì sao không cắt thẳng `limit`: item cùng sort key nằm LIỀN NHAU trong
+	 * index, nhưng thứ tự BÊN TRONG cụm thì DynamoDB không bảo đảm. Cắt đúng
+	 * `limit` vì thế lấy về một tập con BẤT KỲ của cụm — không phải top-`limit`
+	 * theo {@link #PAGE_ORDER} — và sắp xếp lại một tập ĐÃ THIẾU thì không cứu
+	 * được: watermark tiến qua luôn những bài chưa từng được đọc, và lần sau
+	 * `afterCursor` loại chúng vì chúng nằm TRÊN watermark. Mất vĩnh viễn, im lặng.
+	 *
+	 * Đo trên `dev` 2026-08-21 trước khi có hàm này: `spring-blog` 16 bài với cụm
+	 * 7 bài cùng `2026-08-20T00:00:00Z`, cuộn hết chỉ nguồn đó cho ra 13 bài ở
+	 * `limit = 3`, 15 ở `limit = 5`, đủ 16 từ `limit = 6`. Sót khi
+	 * `cỡ cụm > limit + 1`.
+	 *
+	 * Nới xong thì cụm về ĐỦ, nên `PAGE_ORDER` ở chỗ gộp chọn được đúng
+	 * top-`limit` bất kể DynamoDB trả cụm theo chiều nào. Đường fan-out từ đây
+	 * chính xác tuyệt đối, ngang đường `ExclusiveStartKey`.
+	 *
+	 * Đọc thêm bị chặn trên bởi CỠ CỤM, không phải bởi kích thước nguồn — nên chi
+	 * phí mỗi trang vẫn không đổi theo độ sâu (ADR-0022 driver #2).
+	 */
+	private static List<Article> takeThroughCluster(Stream<Article> items, int limit) {
+		List<Article> window = new ArrayList<>(limit + 1);
+		Iterator<Article> remaining = items.iterator();
+		while (window.size() < limit && remaining.hasNext()) {
+			window.add(remaining.next());
+		}
+		if (window.isEmpty()) {
+			return List.of();
+		}
+		String boundary = window.getLast().getPublishedAt();
+		while (remaining.hasNext()) {
+			Article next = remaining.next();
+			if (!next.getPublishedAt().equals(boundary)) {
+				break;
+			}
+			window.add(next);
+		}
+		return List.copyOf(window);
 	}
 
 	/**
