@@ -3,8 +3,9 @@ package dev.linhvu.news_aggregator.personalization;
 import java.util.List;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
-import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
+import dev.linhvu.news_aggregator.catalog.api.ArticlePage;
 import dev.linhvu.news_aggregator.catalog.api.CatalogUnavailableException;
+import dev.linhvu.news_aggregator.catalog.api.InvalidCursorException;
 import dev.linhvu.news_aggregator.identity.api.CurrentUser;
 import dev.linhvu.news_aggregator.platform.RoleProfiles;
 
@@ -54,8 +55,9 @@ class MyFeedController {
 	}
 
 	@GetMapping
-	ResponseEntity<List<ArticleSummaryDto>> myFeed(
-			@RequestParam(required = false) Integer limit) {
+	ResponseEntity<ArticlePage> myFeed(
+			@RequestParam(required = false) Integer limit,
+			@RequestParam(required = false) String cursor) {
 		var sub = currentUser.sub();
 		if (sub.isEmpty()) {
 			return ResponseEntity.status(401).build();
@@ -70,7 +72,22 @@ class MyFeedController {
 				.map(SourcePreferences::getSourceIds)
 				.orElse(List.of());
 
-		return ResponseEntity.ok(catalog.recentBySources(selected, effective));
+		// `cursor` đi qua đây như một chuỗi ĐỤC. Module này không giải mã, không
+		// kiểm, không dựng — codec sống trong `catalog` vì hai đường đọc feed
+		// phải dùng chung đúng một bản.
+		return ResponseEntity.ok(catalog.recentBySources(selected, effective, cursor));
+	}
+
+	/**
+	 * `400`: cursor hỏng là lỗi của người gọi, khác hẳn `503` ngay dưới. Trộn
+	 * hai thứ lại là mời người đọc thử lại một request không bao giờ thành công.
+	 *
+	 * Một bản y hệt nằm ở `ArticleController` — hai dòng lặp lại, có chủ ý; lý
+	 * do ghi ở đó.
+	 */
+	@ExceptionHandler(InvalidCursorException.class)
+	ResponseEntity<Void> invalidCursor() {
+		return ResponseEntity.badRequest().build();
 	}
 
 	/**

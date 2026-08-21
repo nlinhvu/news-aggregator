@@ -30,6 +30,12 @@ public interface ArticleCatalog {
 	 * nào" — hợp đồng này phải viết ra vì hai cách hiểu đều tự nhiên và chọn sai
 	 * cho ra một trang trống thay vì một feed đầy đủ.
 	 *
+	 * `cursor` là chuỗi ĐỤC do chính module này phát ra ở lần gọi trước; `null`
+	 * hoặc rỗng nghĩa là từ đầu danh sách. Người gọi KHÔNG được tự dựng nó.
+	 *
+	 * Ném {@link InvalidCursorException} khi cursor có mặt nhưng không giải mã
+	 * được — người gọi ánh xạ thành `400`.
+	 *
 	 * Ném {@link CatalogUnavailableException} khi bất kỳ query nào hỏng. KHÔNG
 	 * trả kết quả một phần: feed thiếu bài mà không báo gì khiến người đọc tưởng
 	 * nguồn đó không có bài mới.
@@ -39,7 +45,7 @@ public interface ArticleCatalog {
 	 * sparse index.
 	 *
 	 * Cùng hình dạng với `/api/articles` (TDD §7), kể cả việc `summary` vắng mặt
-	 * khi `AI_SUMMARIZATION` tắt.
+	 * khi `AI_SUMMARIZATION` tắt và kể cả hợp đồng cursor.
 	 */
-	List<ArticleSummaryDto> recentBySources(Collection<String> sourceIds, int limit);
+	ArticlePage recentBySources(Collection<String> sourceIds, int limit, String cursor);
 }

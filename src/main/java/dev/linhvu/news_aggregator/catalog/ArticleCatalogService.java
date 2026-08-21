@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 import dev.linhvu.news_aggregator.catalog.api.ArticleCatalog;
-import dev.linhvu.news_aggregator.catalog.api.ArticleSummaryDto;
+import dev.linhvu.news_aggregator.catalog.api.ArticlePage;
 import dev.linhvu.news_aggregator.catalog.api.CatalogUnavailableException;
 import dev.linhvu.news_aggregator.catalog.api.SummarizableArticle;
 
@@ -55,20 +55,24 @@ class ArticleCatalogService implements ArticleCatalog {
 
 	/**
 	 * Đường vào của `personalization`. Ánh xạ đi qua `ArticleSummaries` — chỗ
-	 * DUY NHẤT quyết định `summary` có kèm hay không — nên `/api/my/feed` và
-	 * `/api/articles` không thể phản ứng khác nhau với `AI_SUMMARIZATION`.
-	 *
-	 * Đọc flag MỘT lần cho cả danh sách, không phải mỗi item: giá trị đổi giữa
-	 * chừng sẽ cho ra một trang nửa có nửa không.
+	 * DUY NHẤT quyết định cả hình dạng DTO lẫn `nextCursor` — nên `/api/my/feed`
+	 * và `/api/articles` không thể phản ứng khác nhau với `AI_SUMMARIZATION`,
+	 * cũng không thể phân trang khác nhau.
 	 */
 	@Override
-	public List<ArticleSummaryDto> recentBySources(Collection<String> sourceIds,
-			int limit) {
-		boolean showSummary = ArticleSummaries.showSummary();
+	public ArticlePage recentBySources(Collection<String> sourceIds, int limit,
+			String cursor) {
+		// GIẢI MÃ NGOÀI `try`, và đây không phải chuyện phong cách: khối catch
+		// dưới bọc MỌI `RuntimeException` thành `CatalogUnavailableException`,
+		// nên một cursor hỏng giải mã bên trong sẽ ra `503` thay vì `400` — mời
+		// người đọc thử lại một request không bao giờ thành công.
+		ArticleCursor watermark = ArticleCursor.decodeOrNull(cursor);
 		try {
-			return repository.findRecentBySources(sourceIds, limit, null).stream()
-					.map(a -> ArticleSummaries.toDto(a, showSummary))
-					.toList();
+			// Đọc THỪA MỘT; `toPage` cắt lại còn `limit` và quyết định
+			// `nextCursor`.
+			return ArticleSummaries.toPage(
+					repository.findRecentBySources(sourceIds, limit + 1, watermark),
+					limit);
 		}
 		catch (RuntimeException e) {
 			// Bọc TẠI RANH GIỚI module, không để chỗ gọi bắt `RuntimeException`

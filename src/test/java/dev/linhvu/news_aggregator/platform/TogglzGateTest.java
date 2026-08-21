@@ -131,7 +131,8 @@ class TogglzGateTest {
 	@Test
 	@AllEnabled(NewsFeature.class)
 	void flag_on_gives_the_source_filtered_feed_a_summary_too() {
-		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
+		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10, null)
+						.items())
 				.isNotEmpty()
 				.allSatisfy(dto -> assertThat(dto.summary()).isNotNull());
 	}
@@ -140,7 +141,8 @@ class TogglzGateTest {
 	void flag_off_leaves_the_source_filtered_feed_WITHOUT_a_summary_too() {
 		useRealFeatureManager();
 
-		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10))
+		assertThat(catalog.recentBySources(List.of("spring-blog", "aws-news"), 10, null)
+						.items())
 				// Chốt chống test rỗng: danh sách rỗng cũng làm `allSatisfy` xanh.
 				.isNotEmpty()
 				.allSatisfy(dto -> assertThat(dto.summary()).isNull());
