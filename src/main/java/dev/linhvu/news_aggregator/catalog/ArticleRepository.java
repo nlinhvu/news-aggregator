@@ -27,6 +27,8 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 
 import dev.linhvu.news_aggregator.platform.TracePropagation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -35,6 +37,18 @@ import org.springframework.stereotype.Repository;
 @Repository
 @Lazy
 class ArticleRepository {
+
+	private static final Logger log = LoggerFactory.getLogger(ArticleRepository.class);
+
+	/**
+	 * Đọc THÊM bao nhiêu item thì hết bình thường.
+	 *
+	 * `dev` 2026-08-21: cụm lớn nhất trong MỘT nguồn là 7 bài, tức đọc thêm ≤ 6
+	 * mỗi nguồn mỗi trang — ADR-0022 §7 ghi đúng con số đó. Ngưỡng 10 chừa biên
+	 * để một cụm nhỉnh lên vài bài không đánh thức ai: một cảnh báo nổ vì chuyện
+	 * thường là một cảnh báo không ai đọc nữa.
+	 */
+	private static final int MAX_NORMAL_OVER_READ = 10;
 
 	/**
 	 * Thứ tự của một trang: mới nhất trước, `articleId` giảm dần khi trùng giây.
@@ -254,14 +268,46 @@ class ArticleRepository {
 						.partitionValue(sourceId)
 						.sortValue(cursor.publishedAt())
 						.build());
-		return takeThroughCluster(bySourceIndex.query(QueryEnhancedRequest.builder()
-						.queryConditional(condition)
-						.scanIndexForward(false)
-						.limit(limit)
-						.build())
-				.stream()
-				.flatMap(page -> page.items().stream())
-				.filter(a -> afterCursor(a, cursor)), limit);
+		List<Article> window = takeThroughCluster(
+				bySourceIndex.query(QueryEnhancedRequest.builder()
+								.queryConditional(condition)
+								.scanIndexForward(false)
+								.limit(limit)
+								.build())
+						.stream()
+						.flatMap(page -> page.items().stream())
+						.filter(a -> afterCursor(a, cursor)),
+				limit);
+		warnDuplicateCluster(sourceId, window, limit);
+		return window;
+	}
+
+	/**
+	 * Tín hiệu DUY NHẤT nhìn thấy được của rủi ro còn lại ở ADR-0022 §7, và nó là
+	 * rủi ro CHI PHÍ chứ không phải rủi ro đúng/sai: {@link #takeThroughCluster}
+	 * đã xoá hẳn chế độ sót bài, đổi lại mỗi trang phải đọc thêm phần đuôi cụm.
+	 *
+	 * Cái giá ấy bị chặn trên bởi cỡ cụm, nên nó chỉ thành vấn đề khi một nguồn
+	 * đổ CẢ lượt ingest vào cùng một giây — feed chỉ ghi NGÀY. Khi đó mỗi trang
+	 * đọc cả nguồn và chi phí lại bám theo độ sâu, đúng thứ ADR-0022 driver #2
+	 * đặt ra để tránh.
+	 *
+	 * Đo SỐ ITEM ĐỌC THÊM chứ không đo cỡ cụm: một cụm to nằm gọn trong cửa sổ
+	 * không tốn thêm gì, và cảnh báo về nó chỉ là nhiễu.
+	 *
+	 * `WARN` chứ không `ERROR`: request này KHÔNG hỏng — kết quả vẫn đủ bài và
+	 * đúng thứ tự. Nó nổ nghĩa là giả định của ADR đã vỡ và tới lúc mở lại §8 của
+	 * ADR đó.
+	 */
+	private static void warnDuplicateCluster(String sourceId, List<Article> window,
+			int limit) {
+		int overRead = window.size() - limit;
+		if (overRead <= MAX_NORMAL_OVER_READ) {
+			return;
+		}
+		log.warn("cụm trùng publishedAt kéo cửa sổ đọc thêm {} item — chi phí mỗi "
+				+ "trang đang bám theo cỡ cụm; sourceId={} publishedAt={} limit={}",
+				overRead, sourceId, window.getLast().getPublishedAt(), limit);
 	}
 
 	/**

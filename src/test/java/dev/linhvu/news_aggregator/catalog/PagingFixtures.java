@@ -40,7 +40,37 @@ final class PagingFixtures {
 	static final String SOURCE_A = "paging-a";
 	static final String SOURCE_B = "paging-b";
 
+	/**
+	 * Một nguồn có MỘT bài lẻ ở đầu rồi cả lượt ingest rơi vào ĐÚNG một giây —
+	 * hình dạng mà một feed chỉ ghi NGÀY tạo ra.
+	 *
+	 * Nó tồn tại để đo CHI PHÍ nới cửa sổ đọc (ADR-0022 §7), thứ mà cụm 3 bài của
+	 * {@link #all()} quá nhỏ để chạm tới: cụm 13 bài cho phép đặt `limit` ở cả
+	 * hai bên ngưỡng cảnh báo mà không phải sửa fixture chung.
+	 *
+	 * Bài lẻ ở đầu KHÔNG phải trang trí: nó làm phần tử ĐẦU cửa sổ mang
+	 * `publishedAt` khác phần đuôi, nên một cảnh báo ghi nhầm dấu thời gian của
+	 * đầu cửa sổ thay vì của cụm sẽ lộ ra.
+	 */
+	static final String FLAT_SOURCE = "paging-flat";
+
+	static final int FLAT_CLUSTER_SIZE = 13;
+
+	static final int FLAT_SIZE = FLAT_CLUSTER_SIZE + 1;
+
+	/**
+	 * `listBucket` RIÊNG, và đây là ràng buộc chứ không phải sở thích: `findRecent`
+	 * query đúng partition `Article.LIST_BUCKET`, nên dùng chung bucket sẽ đẩy 14
+	 * bài này vào mọi assertion "cuộn hết ra đúng 45 bài" của cả class. Bucket
+	 * riêng làm chúng vô hình với đường một-query mà vẫn nằm trong `gsi-by-source`
+	 * — đường duy nhất test này cần.
+	 */
+	private static final String FLAT_BUCKET = "paging-flat-bucket";
+
 	private static final Instant BASE_INSTANT = Instant.parse("2026-08-20T12:00:00Z");
+
+	private static final String FLAT_CLUSTER_PUBLISHED_AT =
+			BASE_INSTANT.minus(1, ChronoUnit.DAYS).toString();
 
 	private PagingFixtures() {
 	}
@@ -97,6 +127,29 @@ final class PagingFixtures {
 					|| (inCrossCluster ? i % 2 != 0 : i % 2 == 0);
 			a.setSourceId(fromSourceA ? SOURCE_A : SOURCE_B);
 			a.setSourceName(SOURCE_A.equals(a.getSourceId()) ? "Source A" : "Source B");
+			result.add(a);
+		}
+		return List.copyOf(result);
+	}
+
+	/**
+	 * Không nằm trong {@link #all()}: nó không mang tính chất nào của kho 45 bài,
+	 * và trộn vào đó sẽ phá thứ tự chỉ số mà mọi test khác dựa vào.
+	 */
+	static List<Article> flatCluster() {
+		List<Article> result = new ArrayList<>(FLAT_SIZE);
+		for (int i = 0; i < FLAT_SIZE; i++) {
+			// Chỉ số 0 là bài lẻ, mới hơn cả cụm; phần còn lại CÙNG một giây.
+			Article a = new Article();
+			a.setArticleId("f-%03d".formatted(FLAT_SIZE - 1 - i));
+			a.setListBucket(FLAT_BUCKET);
+			a.setPublishedAt(i == 0
+					? BASE_INSTANT.minus(23, ChronoUnit.HOURS).toString()
+					: FLAT_CLUSTER_PUBLISHED_AT);
+			a.setTitle("Flat cluster article #" + i);
+			a.setCanonicalUrl("https://example.test/flat/" + i);
+			a.setSourceId(FLAT_SOURCE);
+			a.setSourceName("Source Flat");
 			result.add(a);
 		}
 		return List.copyOf(result);

@@ -3,9 +3,13 @@ package dev.linhvu.news_aggregator.catalog;
 import java.util.ArrayList;
 import java.util.List;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.linhvu.news_aggregator.FlociTestConfiguration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,9 +41,29 @@ class ArticlePagingRepositoryTest {
 	@Autowired
 	ArticleRepository repository;
 
+	private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
+
 	@BeforeEach
 	void loadFixtures() {
 		PagingFixtures.all().forEach(repository::save);
+	}
+
+	@BeforeEach
+	void captureLog() {
+		logs.start();
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ArticleRepository.class))
+				.addAppender(logs);
+	}
+
+	@AfterEach
+	void releaseLog() {
+		((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ArticleRepository.class))
+				.detachAppender(logs);
+		logs.stop();
+	}
+
+	private List<String> logEvents() {
+		return logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
 	}
 
 	@Test
@@ -246,6 +270,79 @@ class ArticlePagingRepositoryTest {
 		assertThat(repository.queryOneSource(PagingFixtures.SOURCE_A, clusterStart, null))
 				.extracting(Article::getArticleId)
 				.containsExactlyInAnyOrderElementsOf(fromA.subList(0, clusterStart));
+	}
+
+	/**
+	 * Cảnh báo CHI PHÍ, không phải cảnh báo đúng/sai. Task 7B đã xoá hẳn chế độ
+	 * sót bài bằng cách nới cửa sổ đọc tới hết cụm; thứ còn lại đáng canh là cái
+	 * GIÁ của lần nới đó. Một nguồn mà cả lượt ingest rơi vào cùng một giây (feed
+	 * chỉ ghi NGÀY) làm mỗi trang đọc cả nguồn, tức chi phí lại bám theo độ sâu —
+	 * đúng thứ ADR-0022 driver #2 đặt ra để tránh.
+	 *
+	 * Ngưỡng vì thế đo SỐ ITEM ĐỌC THÊM, không đo cỡ cụm: một cụm to nằm gọn
+	 * trong cửa sổ không tốn thêm gì. `dev` 2026-08-21 đọc thêm ≤ 6 mỗi nguồn mỗi
+	 * trang (ADR-0022 §7), nên fixture ở đây phải là một nguồn PHẲNG — cụm 3 bài
+	 * của kho 45 không bao giờ chạm tới ngưỡng.
+	 *
+	 * Bắt log bằng `ListAppender` của Logback chứ không bằng đọc stdout: cái sau
+	 * phụ thuộc `logging.structured.format` và sẽ vỡ khi ai đó đổi format.
+	 */
+	@Test
+	void warns_when_a_duplicate_cluster_drags_the_read_window_far_past_limit() {
+		PagingFixtures.flatCluster().forEach(repository::save);
+		int limit = 2;
+
+		// Vế cơ chế: cả nguồn bị kéo vào cửa sổ vì cụm chiếm gần hết nguồn. Thiếu
+		// nó thì con số dưới đây chỉ là một chuỗi ký tự, không ai biết từ đâu ra.
+		List<Article> window =
+				repository.queryOneSource(PagingFixtures.FLAT_SOURCE, limit, null);
+		assertThat(window)
+				.as("nới tới hết cụm ⇒ một trang %d bài đọc cả nguồn".formatted(limit))
+				.hasSize(PagingFixtures.FLAT_SIZE);
+
+		// Đọc FIELD THẬT: nếu bài lẻ ở đầu nguồn biến mất khỏi fixture thì hai đầu
+		// cửa sổ trùng `publishedAt`, và vế `publishedAt=` dưới đây hoá vô nghĩa
+		// mà không dòng nào đỏ.
+		assertThat(window.getFirst().getPublishedAt())
+				.as("đầu cửa sổ phải NGOÀI cụm")
+				.isNotEqualTo(window.getLast().getPublishedAt());
+
+		assertThat(logEvents())
+				.as("đọc thừa %d item cho một trang %d bài phải để lại dấu vết"
+						.formatted(PagingFixtures.FLAT_SIZE - limit, limit))
+				.anySatisfy(m -> assertThat(m)
+						.contains("cụm trùng publishedAt")
+						.contains("thêm %d item".formatted(PagingFixtures.FLAT_SIZE - limit))
+						.contains("sourceId=" + PagingFixtures.FLAT_SOURCE)
+						// Dấu thời gian của CỤM, không phải của đầu cửa sổ — cụm mới
+						// là thứ người đọc log phải đi tìm trong feed.
+						.contains("publishedAt=" + window.getLast().getPublishedAt())
+						.contains("limit=" + limit));
+	}
+
+	/**
+	 * ĐÚNG ngưỡng thì im — chỉ VƯỢT mới nổ.
+	 *
+	 * Cùng fixture phẳng, cùng lượng đọc (cả nguồn), chỉ `limit` khác: 2 thì đọc
+	 * thừa 12, 4 thì đọc thừa 10. Cặp này ghim ngưỡng từ hai phía — bỏ điều kiện
+	 * đi hay nới `>` thành `>=` đều làm một trong hai test đỏ.
+	 *
+	 * Một cảnh báo nổ vì chuyện thường là một cảnh báo không ai đọc nữa, nên vế
+	 * im lặng này quan trọng ngang vế nổ.
+	 */
+	@Test
+	void stays_quiet_when_the_over_read_is_within_the_normal_range() {
+		PagingFixtures.flatCluster().forEach(repository::save);
+		int limit = 4;
+
+		assertThat(repository.queryOneSource(PagingFixtures.FLAT_SOURCE, limit, null))
+				.as("vẫn đọc cả nguồn, chỉ là thừa ít hơn đúng hai item")
+				.hasSize(PagingFixtures.FLAT_SIZE);
+
+		assertThat(logEvents())
+				.as("đọc thừa %d item còn trong khoảng bình thường"
+						.formatted(PagingFixtures.FLAT_SIZE - limit))
+				.noneMatch(m -> m.contains("cụm trùng publishedAt"));
 	}
 
 	/**
