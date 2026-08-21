@@ -38,11 +38,17 @@ final class PagingFixtures {
 	 * Danh sách theo thứ tự MỚI → CŨ, tức đúng thứ tự một trang phải trả về.
 	 *
 	 * `articleId` đếm NGƯỢC (`p-999` xuống `p-955`) để `articleId` giảm dần trùng
-	 * với chỉ số tăng dần. Nhờ đó thứ tự mong đợi `(publishedAt desc, articleId
-	 * desc)` bằng đúng thứ tự của list này — kể cả BÊN TRONG cụm trùng, nơi
-	 * `publishedAt` không phân biệt được gì. Đặt id thuận chiều (`p-000`, `p-001`)
-	 * sẽ làm cụm trùng đảo ngược so với phần còn lại và mọi assertion thứ tự
-	 * thành ra khó đọc mà không thêm được gì.
+	 * với chỉ số tăng dần. Nhờ đó thứ tự mong đợi bằng đúng thứ tự của list này —
+	 * kể cả BÊN TRONG cụm trùng, nơi `publishedAt` không phân biệt được gì. Đặt id
+	 * thuận chiều (`p-000`, `p-001`) sẽ làm cụm trùng đảo ngược so với phần còn
+	 * lại và mọi assertion thứ tự thành ra khó đọc mà không thêm được gì.
+	 *
+	 * CẢNH BÁO khi đọc assertion thứ tự dựa trên list này: chiều `articleId` bên
+	 * trong cụm trùng là tính chất của FLOCI, không phải của DynamoDB. DynamoDB
+	 * không bảo đảm thứ tự nào giữa các item cùng sort key — đo trên `dev`
+	 * 2026-08-21, cụm 5 bài và cụm 3 bài đều trả về không theo chiều nào. Phân
+	 * trang đường công khai vẫn đúng vì `ExclusiveStartKey` nối theo VỊ TRÍ chứ
+	 * không so sánh giá trị; nhưng đừng suy từ đây ra rằng prod trả về cùng thứ tự.
 	 */
 	static List<Article> all() {
 		List<Article> result = new ArrayList<>(ARTICLE_COUNT);
